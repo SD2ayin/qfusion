@@ -48,7 +48,13 @@ void CG_WModelsShutdown() {
 	memset( cg_pWeaponModelInfos, 0, sizeof( cg_pWeaponModelInfos  ) );
 }
 
-static const char *wmPartSufix[] = { "", "_expansion", "_barrel", "_flash", "_hand", NULL };
+// added "_belt"
+static const char *wmPartSufix[] = { "", "_expansion", "_barrel", "_flash", "_hand", "_belt", NULL };
+/* finding model is index based ==>            1           2          3        4         5     ...
+*  this means we should get the index for the belt and display it at the belt tag
+*  this reference is probably inside of weaponinfo
+*  we need to change max parts to 5
+*/
 
 /*
 * CG_vWeap_ParseAnimationScript
@@ -75,8 +81,10 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 	counter = 1; // reserve 0 for 'no animation'
 
 	// set some defaults
+	weaponinfo->beltSpeed = 0;
 	weaponinfo->barrelSpeed = 0;
 	weaponinfo->flashFade = true;
+	weaponinfo->accumulateSpeed = false;
 
 	if( !cg_debugWeaponModels->integer ) {
 		debug = false;
@@ -128,9 +136,50 @@ static bool CG_vWeap_ParseAnimationScript( weaponinfo_t *weaponinfo, const char 
 				// speed
 				weaponinfo->barrelSpeed = atof( COM_ParseExt( &ptr, false ) );
 
-				if( debug ) {
-					Com_Printf( "%s time:%" PRIi64 ", speed:%.2f%s\n", S_COLOR_BLUE, weaponinfo->barrelTime, weaponinfo->barrelSpeed, S_COLOR_WHITE );
+				// accumulate speed setting
+				token = COM_ParseExt( &ptr, false );
+				if( !Q_stricmp( token, "yes" ) ) {
+					weaponinfo->accumulateSpeed = true;
+
+					// critical angle
+					weaponinfo->criticalAngle = atof( COM_ParseExt( &ptr, false ) );
+					// barrel friction
+					weaponinfo->barrelFriction = atof( COM_ParseExt( &ptr, false ) );
+					// friction
+					weaponinfo->friction = atof( COM_ParseExt( &ptr, false ) );
+					// restoring force
+					weaponinfo->restoringForce = atof( COM_ParseExt( &ptr, false ) );
 				}
+
+				if( debug ) {
+					Com_Printf( "%s time:%" PRIi64 ", speed:%f, accumulateSpeed:%s, criticalAngle:%f, barrelFriction:%f, friction:%f, restoringForce:%f%s\n", S_COLOR_BLUE, weaponinfo->barrelTime, weaponinfo->barrelSpeed, weaponinfo->accumulateSpeed ? "YES" : "NO", weaponinfo->criticalAngle, weaponinfo->barrelFriction, weaponinfo->friction, weaponinfo->restoringForce, S_COLOR_WHITE );
+				}
+			}  else if( !Q_stricmp( token, "belt" ) ) {
+				if( debug ) {
+					Com_Printf( "%sScript: belt:%s", S_COLOR_BLUE, S_COLOR_WHITE );
+				}
+
+				// time
+				i = atoi( COM_ParseExt( &ptr, false ) );
+				//weaponinfo->beltPeriod = (float)( i > 0 ? (float)M_PI / (float)( 2 * i ) : 0 ); // pi / ( 2 * r )
+				weaponinfo->beltPeriod = (float)( i > 0 ? ( (float)M_PI / (float)( 2 * i ) ) : 0 );
+
+				// speed
+				weaponinfo->beltSpeed = atof( COM_ParseExt( &ptr, false ) );
+
+				// damping
+				weaponinfo->beltDamping = atof( COM_ParseExt( &ptr, false ) );
+
+				// cycles
+				i = atoi( COM_ParseExt( &ptr, false ) );
+				//weaponinfo->beltTime = 3.1416f * ( 0.2f + i ) / weaponinfo->beltPeriod;
+				weaponinfo->beltTime = (float)M_PI * ( 0.5f + (float)i ) / weaponinfo->beltPeriod;
+
+				if( debug ) {
+					//Com_Printf( "%s time:%" PRIi64 ", speed:%.2f%s\n", S_COLOR_BLUE, weaponinfo->beltTime, weaponinfo->beltSpeed,  S_COLOR_WHITE ); aaaa
+					Com_Printf( "%s time:%f, speed:%f, damping:%f, cycles:%f%s\n", S_COLOR_BLUE, weaponinfo->beltPeriod, weaponinfo->beltSpeed, weaponinfo->beltDamping, weaponinfo->beltTime, S_COLOR_WHITE );
+				}
+
 			} else if( !Q_stricmp( token, "flash" ) ) {
 				if( debug ) {
 					Com_Printf( "%sScript: flash:%s", S_COLOR_BLUE, S_COLOR_WHITE );
@@ -559,10 +608,10 @@ struct weaponinfo_s *CG_GetWeaponInfo( int weapon ) {
 *
 * Add weapon model(s) positioned at the tag
 */
-void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, DrawSceneRequest *drawSceneRequest ) {
+void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int *oldWeaponidState, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, int64_t belt_time, int64_t *oldTime, float *velocity, float *position, bool runKinematics, DrawSceneRequest *drawSceneRequest ) {
 	entity_t weapon;
 	weaponinfo_t *weaponInfo;
-	float intensity;
+
 
 	//don't try without base model
 	if( !ent->model ) {
@@ -578,6 +627,13 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 	if( !weaponInfo ) {
 		return;
 	}
+
+	float timeDelta; // for numerical integration in case of accumulate speed setting
+
+	timeDelta = (float)( cg.time - *oldTime ) / 1000.0f; // the problem is that cg.time and oldTime are int millisecond values, therefore if a frame takes 1.5ms the difference
+														 // will be 1 and the animation happens at 1.33x the desired speed. This maximum error will occur around 667 fps
+														 // to fix our supplied time variables should be floats.
+	*oldTime = cg.time;
 
 	//if( ent->renderfx & RF_WEAPONMODEL )
 	//	effects &= ~EF_RACEGHOST;
@@ -640,7 +696,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 	}
 
 	// barrel
-	if( weaponInfo->model[BARREL] ) {
+	if( weaponInfo->model[BARREL] ) { 
 		if( CG_GrabTag( tag, &weapon, "tag_barrel" ) ) {
 			orientation_t barrel_recoiled;
 			vec3_t rotangles = { 0, 0, 0 };
@@ -648,15 +704,58 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 			entity_t barrel;
 			memset( &barrel, 0, sizeof( barrel ) );
 			Vector4Set( barrel.shaderRGBA, 255, 255, 255, ent->shaderRGBA[3] );
-			barrel.model = weaponInfo->model[BARREL];
+			barrel.model = weaponInfo->model[BARREL]; 
 			barrel.scale = ent->scale;
 			barrel.renderfx = ent->renderfx;
 			barrel.frame = 0;
 			barrel.oldframe = 0;
 
 			// rotation
-			if( barrel_time > cg.time ) {
-				intensity =  (float)( barrel_time - cg.time ) / (float)weaponInfo->barrelTime;
+			if( weaponInfo->accumulateSpeed ) {
+				const float positionError = fmod( *position, weaponInfo->criticalAngle );
+
+				if( fabs( *velocity ) > 0.01 || 0.01 < positionError && positionError < weaponInfo->criticalAngle - 0.01 || barrel_time > cg.time ) {
+					float accel;
+
+					if( *oldWeaponidState != weaponid ) {
+						*velocity = *position = 0; // this could and should be done where weapon switching logic happens
+						Com_Printf( "%s old:%i new%i %s\n", S_COLOR_GREEN, *oldWeaponidState, weaponid, S_COLOR_WHITE );
+					}
+
+
+					if( runKinematics ) { // this makes the player's weapon in his view not do the calculations and only copy the result from the general model
+
+						// setting acceleration
+						if( barrel_time > cg.time ) {
+							accel = weaponInfo->barrelSpeed - weaponInfo->barrelFriction * *velocity * *velocity;
+							// Com_Printf( "%s ACCEL %s\n", S_COLOR_GREEN, S_COLOR_WHITE );
+						} else {
+							accel = -weaponInfo->friction * *velocity;
+
+							if( positionError < weaponInfo->criticalAngle / 2 ) {
+								accel -= weaponInfo->restoringForce;
+								Com_Printf( "%s DECEL %s\n", S_COLOR_RED, S_COLOR_WHITE );
+							} else {
+								accel += weaponInfo->restoringForce;
+								Com_Printf( "%s ACCEL %s\n", S_COLOR_GREEN, S_COLOR_WHITE );
+							}
+							// Com_Printf( "%s DECEL %s\n", S_COLOR_RED, S_COLOR_WHITE );
+						}
+
+						// numerical integration
+						*velocity += accel * timeDelta;
+						*position += *velocity * timeDelta;
+						*position = AngleNormalize360( *position * 360.0f ) / 360.0f; 
+						Com_Printf( "%s velocity:%f position:%f positionError:%f%s\n", S_COLOR_BLUE, *velocity, *position, positionError, S_COLOR_WHITE );
+					}
+
+					rotangles[2] = anglemod( *position * 360.0f );
+				}
+
+			}
+
+			else if( barrel_time > cg.time ) {
+				const float intensity = (float)( barrel_time - cg.time ) / ( (float)weaponInfo->barrelTime );
 				rotangles[2] = anglemod( 360.0f * weaponInfo->barrelSpeed * intensity * intensity );
 
 				// Check for tag_recoil
@@ -670,6 +769,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 			// barrel requires special tagging
 			CG_PlaceRotatedModelOnTag( &barrel, &weapon, tag );
 
+
 			CG_AddColoredOutLineEffect( &barrel, effects, 0, 0, 0, ent->shaderRGBA[3] );
 
 			if( !( effects & EF_RACEGHOST ) ) {
@@ -679,6 +779,45 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 			CG_AddShellEffects( &barrel, effects, drawSceneRequest );
 		}
 	}
+
+	// belt
+	if( weaponInfo->model[BELT] ) {
+		if( CG_GrabTag( tag, &weapon, "tag_belt" ) ) {
+			vec3_t rotangles = { 0, 0, 0 };
+
+			entity_t belt;
+			memset( &belt, 0, sizeof( belt ) );
+			Vector4Set( belt.shaderRGBA, 255, 255, 255, ent->shaderRGBA[3] );
+			belt.model = weaponInfo->model[BELT];
+			belt.scale = ent->scale;
+			belt.renderfx = ent->renderfx;
+			belt.frame = 0;
+			belt.oldframe = 0;
+
+			// rotation
+			if( belt_time > cg.time ) { 
+				const float passedTime = (float)( cg.time - belt_time + weaponInfo->beltTime ); // this should be supplied as fire_time
+				//Com_Printf( "%s time:%f%s\n", S_COLOR_BLUE, passedTime, S_COLOR_WHITE );
+				const float intensity = (float)( std::exp( -weaponInfo->beltDamping * passedTime ) * cos( weaponInfo->beltPeriod * passedTime )); 
+				rotangles[2] = anglemod( 360.0f * weaponInfo->beltSpeed * intensity ); 
+			}
+
+			AnglesToAxis( rotangles, belt.axis );
+
+			// belt requires special tagging
+			CG_PlaceRotatedModelOnTag( &belt, &weapon, tag );
+
+			CG_AddColoredOutLineEffect( &belt, effects, 0, 0, 0, ent->shaderRGBA[3] );
+
+			if( !( effects & EF_RACEGHOST ) ) {
+				CG_AddEntityToScene( &belt, drawSceneRequest ); // skelmod
+			}
+			CG_AddShellEffects( &belt, effects, drawSceneRequest );
+		}
+	}
+
+	*oldWeaponidState = weaponid; // resetting weaponid to reset velocities and positions in barrel section
+							      // temporarily here because the game does not detect tag_flash on barrel
 
 	if( flash_time < cg.time ) {
 		return;
@@ -692,6 +831,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 	if( weaponInfo->model[FLASH] ) {
 		entity_t flash;
 		uint8_t c;
+		float intensity;
 
 		if( weaponInfo->flashFade ) {
 			intensity = (float)( flash_time - cg.time ) / (float)weaponInfo->flashTime;
@@ -721,4 +861,5 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 		const auto *flashColor = weaponInfo->flashColor;
 		drawSceneRequest->addLight( flash.origin, programRadius, coronaRadius, flashColor[0], flashColor[1], flashColor[2] );
 	}
+
 }

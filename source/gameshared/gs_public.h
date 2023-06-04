@@ -359,6 +359,7 @@ enum {
 	BARREL,
 	FLASH,
 	HAND,
+	BELT,
 
 	WEAPMODEL_PARTS
 };

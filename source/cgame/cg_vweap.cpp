@@ -157,6 +157,7 @@ void CG_ViewWeapon_RefreshAnimation( cg_viewweapon_t *viewweapon ) {
 	// if the pov changed, or weapon changed, force restart
 	if( viewweapon->POVnum != cg.predictedPlayerState.POVnum ||
 		viewweapon->weapon != cg.predictedPlayerState.stats[STAT_WEAPON] ) {
+		Com_Printf( "%s b %s\n", S_COLOR_ORANGE, S_COLOR_WHITE );
 		nolerp = true;
 		viewweapon->eventAnim = 0;
 		viewweapon->eventAnimStartTime = 0;
@@ -380,6 +381,6 @@ void CG_AddViewWeapon( cg_viewweapon_t *viewweapon, DrawSceneRequest *drawSceneR
 	}
 
 	// add attached weapon
-	CG_AddWeaponOnTag( &viewweapon->ent, &tag, viewweapon->weapon, cg.effects | EF_OUTLINE,
-		false, nullptr, flash_time, cg_entPModels[viewweapon->POVnum].barrel_time, drawSceneRequest );
+	CG_AddWeaponOnTag( &viewweapon->ent, &tag, viewweapon->weapon, &cg_entPModels[viewweapon->POVnum].oldWeaponidState, cg.effects | EF_OUTLINE,
+		false, nullptr, flash_time, cg_entPModels[viewweapon->POVnum].barrel_time, cg_entPModels[viewweapon->POVnum].belt_time, &cg_entPModels[viewweapon->POVnum].oldTime, &cg_entPModels[viewweapon->POVnum].velocity, &cg_entPModels[viewweapon->POVnum].position, false, drawSceneRequest );
 }
