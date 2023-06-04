@@ -76,6 +76,17 @@ typedef struct weaponinfo_s {
 	// barrel
 	int64_t barrelTime;
 	float barrelSpeed;
+	bool accumulateSpeed;
+	float criticalAngle;
+	float barrelFriction;
+	float friction;
+	float restoringForce;
+
+	// belt
+	float beltPeriod;
+	float beltSpeed;
+	float beltDamping;
+	float beltTime; //originally an int, might not work as float
 
 	// sfx
 	int num_fire_sounds;
@@ -163,6 +174,13 @@ typedef struct {
 	// weapon. Not sure about keeping it here
 	int64_t flash_time;
 	int64_t barrel_time;
+	int64_t belt_time;
+	//int count; // added for testing
+	int64_t oldTime;
+	float velocity;
+	float position; // angular position
+
+	int oldWeaponidState; // used for checking weaponswitch
 } pmodel_t;
 
 extern pmodel_t cg_entPModels[MAX_EDICTS];      //a pmodel handle for each cg_entity
@@ -202,7 +220,7 @@ void CG_WModelsInit();
 void CG_WModelsShutdown();
 struct weaponinfo_s *CG_CreateWeaponZeroModel( char *cgs_name );
 struct weaponinfo_s *CG_RegisterWeaponModel( char *cgs_name, int weaponTag );
-void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, DrawSceneRequest *drawSceneRequest );
+void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int *oldWeapondidState, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, int64_t belt_time, int64_t *oldTime, float *velocity, float *position, bool runkinematics, DrawSceneRequest *drawSceneRequest );
 struct weaponinfo_s *CG_GetWeaponInfo( int currentweapon );
 
 //=================================================

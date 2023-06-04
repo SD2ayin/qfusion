@@ -184,6 +184,8 @@ static void CG_NewPacketEntityState( entity_state_t *state ) {
 				// This is way far from being the right thing. But will make it less bad for now
 				cg_entPModels[state->number].flash_time = cg.time;
 				cg_entPModels[state->number].barrel_time = cg.time;
+				cg_entPModels[state->number].belt_time = cg.time;
+				cg_entPModels[state->number].oldTime = cg.time;
 			}
 		} else {   // shuffle the last state to previous
 			cent->prev = cent->current;

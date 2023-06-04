@@ -71,7 +71,8 @@ void CG_ResetPModels( void ) {
 	int i;
 
 	for( i = 0; i < MAX_EDICTS; i++ ) {
-		cg_entPModels[i].flash_time = cg_entPModels[i].barrel_time = 0;
+		cg_entPModels[i].flash_time = cg_entPModels[i].barrel_time = cg_entPModels[i].belt_time = cg_entPModels[i].velocity = cg_entPModels[i].position = 0;
+		cg_entPModels[i].oldWeaponidState = -1;   // setting this to a value that can not occur to force velocity and position reset in cg_addweaponontag
 		memset( &cg_entPModels[i].animState, 0, sizeof( gs_pmodel_animationstate_t ) );
 	}
 	memset( &cg.weapon, 0, sizeof( cg.weapon ) );
@@ -1293,8 +1294,8 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 	const bool addCoronaLight = !ISVIEWERENTITY( cent->current.number ) || cg.view.thirdperson;
 
 	// add weapon model
-	CG_AddWeaponOnTag( &cent->ent, &tag_weapon, cent->current.weapon, cent->effects, addCoronaLight,
-		&pmodel->projectionSource, pmodel->flash_time, pmodel->barrel_time, drawSceneRequest );
+	CG_AddWeaponOnTag( &cent->ent, &tag_weapon, cent->current.weapon, &pmodel->oldWeaponidState, cent->effects, addCoronaLight,
+		&pmodel->projectionSource, pmodel->flash_time, pmodel->barrel_time, pmodel->belt_time, &pmodel->oldTime, &pmodel->velocity, &pmodel->position, true, drawSceneRequest );
 }
 
 #define MOVEDIREPSILON  0.3f

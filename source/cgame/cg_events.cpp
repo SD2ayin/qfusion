@@ -421,9 +421,12 @@ static void CG_FireWeaponEvent( int entNum, int weapon, int fireMode ) {
 			cg_entPModels[entNum].flash_time = cg.time + weaponInfo->flashTime;
 		}
 
-		// start barrel rotation or offsetting
+		// start barrel, belt rotation or offsetting
 		if( weaponInfo->barrelTime ) {
 			cg_entPModels[entNum].barrel_time = cg.time + weaponInfo->barrelTime;
+		}
+		if( weaponInfo->beltTime ) {
+			cg_entPModels[entNum].belt_time = cg.time + weaponInfo->beltTime; // beltTime should be converted to an int to stop arithmetic overflow
 		}
 	}
 

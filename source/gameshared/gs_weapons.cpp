@@ -414,6 +414,7 @@ int GS_ThinkPlayerWeapon( player_state_t *playerState, int buttons, int msecs, i
 		playerState->weaponState = WEAPON_STATE_READY;
 		playerState->stats[STAT_PENDING_WEAPON] = playerState->stats[STAT_WEAPON] = WEAP_NONE;
 		playerState->stats[STAT_WEAPON_TIME] = 0;
+		// Com_Printf( "%s a %s\n", S_COLOR_GREEN, S_COLOR_WHITE );
 		return playerState->stats[STAT_WEAPON];
 	}
 
