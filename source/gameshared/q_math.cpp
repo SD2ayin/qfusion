@@ -786,8 +786,8 @@ void Matrix3_Rotate( const mat3_t in, vec_t angle, vec_t x, vec_t y, vec_t z, ma
 }
 
 void Matrix3_ForRotationOfDirs( const float *fromDir, const float *toDir, mat3_t out ) {
-	assert( ( VectorLengthSquared( fromDir ) - 1.0f ) < 0.001f );
-	assert( ( VectorLengthFast( toDir ) - 1.0f ) < 0.001f );
+	assert( std::fabs( VectorLength( fromDir ) - 1.0f ) < 0.001f );
+	assert( std::fabs( VectorLength( toDir ) - 1.0f ) < 0.001f );
 
 	const float dot = DotProduct( fromDir, toDir );
 	if( dot > +0.999f ) [[unlikely]] {
@@ -807,8 +807,12 @@ void Matrix3_ForRotationOfDirs( const float *fromDir, const float *toDir, mat3_t
 	vec3_t axis;
 	CrossProduct( fromDir, toDir, axis );
 
-	const float c = dot;
-	const float s = sqrt( 1.0f - dot * dot );
+	const float c	 = dot;
+	const float s	 = std::sqrt( 1.0f - dot * dot );
+	const float rcpS = 1.0f / s;
+
+	VectorScale( axis, rcpS, axis );
+	assert( std::fabs( VectorLength( axis ) - 1.0f ) < 0.001f );
 
 	Matrix3_RotateBySinCos( axis_identity, s, c, axis[0], axis[1], axis[2], out );
 }
