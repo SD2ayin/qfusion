@@ -182,6 +182,9 @@ struct alignas( 16 ) Particle {
 		Expanding,
 		Shrinking,
 		ExpandingAndShrinking,
+        Thickening,
+        Thinning,
+        ThickeningAndThinning,
 	};
 
 	// Few notes on these value ranges:
@@ -257,9 +260,13 @@ struct alignas( 16 ) Particle {
 	float origin[4];
 	float oldOrigin[4];
 	float velocity[4];
+    float effectiveVelocity[4]; // the velocity together with other variables that affect its movement like noise
 	float accel[4];
 	float rotationAngle;
 	float angularVelocity;
+
+	float refOrigin[4];
+	float refAxis[4];
 
 	int64_t spawnTime;
 	// Gets updated every simulation frame prior to submission for rendering
