@@ -92,6 +92,7 @@ file(GLOB CLIENT_COMMON_SOURCES
 	"../qcommon/msg.cpp"
 	"../qcommon/net.cpp"
 	"../qcommon/net_chan.cpp"
+	"../qcommon/noise.cpp"
 	"../qcommon/outputmessages.cpp"
 	"../qcommon/patch.cpp"
 	"../qcommon/q_trie.cpp"

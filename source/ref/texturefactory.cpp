@@ -25,6 +25,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../qcommon/singletonholder.h"
 #include "../client/imageloading.h"
 
+#ifdef DEBUG_NOISE
+#include "../qcommon/noise.h"
+#endif
+
 using wsw::operator""_asView;
 using wsw::operator""_asHView;
 
@@ -753,6 +757,9 @@ auto TextureFactory::createSolidColorBuiltinTexture( const float *color ) -> Tex
 
 [[nodiscard]]
 auto TextureFactory::createBuiltinNoTextureTexture() -> Texture * {
+#ifdef DEBUG_NOISE
+	constexpr const unsigned side = 256;
+#else
 	constexpr const unsigned side = 8;
 
 	const uint8_t wswPurple[] { 53, 34, 69 };
@@ -763,12 +770,34 @@ auto TextureFactory::createBuiltinNoTextureTexture() -> Texture * {
 		markPurple[i] = (uint8_t)( ( 3 * wswPurple[i] + red[i] ) / 4 );
 		markOrange[i] = (uint8_t)( ( 3 * wswOrange[i] + red[i] ) / 4 );
 	}
+#endif
 
 	ptrdiff_t offset = 0;
 	uint8_t *const __restrict p = loadingBuffer.reserveAndGet( side * side * 3 );
 	for( unsigned pixNum = 0; pixNum < side * side; ++pixNum ) {
 		const unsigned x = pixNum % side;
 		const unsigned y = pixNum / side;
+
+#ifdef DEBUG_NOISE
+		const float noiseX = 25.0f * (float)x / (float)side;
+		const float noiseY = 25.0f * (float)y / (float)side;
+#if 0
+		const float noiseValue = calcSimplexNoise2D( noiseX, noiseY );
+		//const float noiseValue = calcSimplexNoise3D( noiseX, noiseY, 0.0f );
+		//const float noiseValue = calcVoronoiNoiseLinear( noiseX, noiseY, 0.0f );
+		//const float noiseValue = calcVoronoiNoiseSquared( noiseX, noiseY, 0.0f );
+		const auto noiseByte   = (uint8_t)( 255.0f * ( 0.5f + 0.5f * noiseValue ) );
+
+		p[offset + 0] = noiseByte;
+		p[offset + 1] = noiseByte;
+		p[offset + 2] = noiseByte;
+#else
+		const Vec3 curl = calcSimplexNoiseCurl( noiseX, noiseY, 0.0f );
+		p[offset + 0]   = (uint8_t)( 255.0f * ( 0.5f + 0.5f * curl.X() ) );
+		p[offset + 1]   = (uint8_t)( 255.0f * ( 0.5f + 0.5f * curl.Y() ) );
+		p[offset + 2]   = (uint8_t)( 255.0f * ( 0.5f + 0.5f * curl.Z() ) );
+#endif
+#else
 		const unsigned xySum = x + y;
 		const uint8_t *__restrict color;
 		if( !xySum ) {
@@ -783,16 +812,23 @@ auto TextureFactory::createBuiltinNoTextureTexture() -> Texture * {
 		p[offset + 0] = color[0];
 		p[offset + 1] = color[1];
 		p[offset + 2] = color[2];
+#endif
+
 		// Increment after addressing to avoid AGI
 		offset += 3;
 	}
 
 	Builtin2DTextureData data;
 	data.width = data.height = side;
+#ifdef DEBUG_NOISE
+	data.flags = IT_SRGB;
+	data.nearestFilteringOnly = false;
+#else
 	data.flags = IT_SRGB | IT_CUSTOMFILTERING;
-	data.samples = 3;
 	data.nearestFilteringOnly = true;
-	data.bytes = p;
+#endif
+	data.samples = 3;
+	data.bytes   = p;
 	return createBuiltin2DTexture( data );
 }
 
