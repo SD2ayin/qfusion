@@ -1,6 +1,7 @@
 #include "particlesystem.h"
 #include "../qcommon/links.h"
 #include "../client/client.h"
+#include "noise.h"
 #include "cg_local.h"
 
 ParticleSystem::ParticleSystem() {
@@ -119,6 +120,12 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 	flock->numDelayedParticles     = fillResult.numParticles * delayedCountMultiplier;
 	flock->delayedParticlesOffset  = ( initialOffset + 1 ) - fillResult.numParticles * delayedCountMultiplier;
 	flock->drag                    = flockParams.drag;
+	flock->vorticity               = flockParams.vorticity;
+	//VectorAdd( flockParams.origin, flockParams.offset, refOrigin );
+	Vector4Set( flock->refOrigin, flockParams.origin[0], flockParams.origin[1], flockParams.origin[2], 0.0f );
+	Vector4Set( flock->refAxis, flockParams.refAxis[0], flockParams.refAxis[1], flockParams.refAxis[2], 0.0f );
+    flock->turbulence              = flockParams.turbulence;
+    flock->turbulenceScale         = flockParams.turbulenceScale;
 	flock->restitution             = flockParams.restitution;
 	flock->hasRotatingParticles    = flockParams.angularVelocity.min != 0.0f || flockParams.angularVelocity.max != 0.0f;
 	flock->minBounceCount          = flockParams.bounceCount.minInclusive;
@@ -250,6 +257,9 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		Particle *const __restrict p = particles + signedStride * (signed)i;
 
 		Vector4Set( p->oldOrigin, initialOrigin[0], initialOrigin[1], initialOrigin[2], 0.0f );
+		if( params->vorticity > 0.0f ) {
+			Vector4Copy( p->oldOrigin, p->refOrigin );
+		}
 		Vector4Set( p->accel, 0, 0, -params->gravity, 0 );
 
 		const float *__restrict randomDir = dirs[rng->nextBounded( NUMVERTEXNORMALS )];
@@ -416,6 +426,9 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		Particle *const __restrict p = particles + signedStride * (signed)i;
 
 		Vector4Set( p->oldOrigin, initialOrigin[0], initialOrigin[1], initialOrigin[2], 0.0f );
+		if( params->vorticity > 0.0f ) {
+			Vector4Copy( p->oldOrigin, p->refOrigin );
+		}
 		Vector4Set( p->accel, 0, 0, -params->gravity, 0 );
 
 		// https://math.stackexchange.com/a/205589
@@ -426,6 +439,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		const float speed = rng->nextFloat( params->speed.min, params->speed.max );
 		const vec3_t untransformed { speed * r * std::cos( phi ), speed * r * std::sin( phi ), speed * z };
 		Matrix3_TransformVector( transformMatrix, untransformed, p->velocity );
+
 
 		// We try relying on branch prediction facilities
 		// TODO: Add template/if constexpr specializations
@@ -502,6 +516,8 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 	// Limit delta by sane bounds
 	const float deltaSeconds = 1e-3f * (float)wsw::clamp( (int)( currTime - m_lastTime ), 1, 33 );
 	m_lastTime = currTime;
+    unsigned int count;
+    count = 0;
 
 	// We split simulation/rendering loops for a better instructions cache utilization
 	for( FlocksBin &bin: m_bins ) {
@@ -513,6 +529,7 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 				if( flock->numActivatedParticles + flock->numDelayedParticles > 0 ) [[likely]] {
 					if( flock->shapeList ) {
 						simulate( flock, &m_rng, currTime, deltaSeconds );
+                        count += flock->numActivatedParticles;
 					} else {
 						simulateWithoutClipping( flock, currTime, deltaSeconds );
 					}
@@ -522,6 +539,9 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 			}
 		}
 	}
+    if ( count > 1 ) {
+        Com_Printf("amount of particles:%i", count);
+    }
 
 	m_frameFlareParticles.clear();
 	m_frameFlareColorLifespans.clear();
@@ -669,44 +689,52 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 	assert( flock->numActivatedParticles );
 
 	BoundsBuilder boundsBuilder;
+	vec4_t accel = {0.f, 0.f, 0.f, 0.f};
 
-	if( flock->drag > 0.0f ) {
-		for( unsigned i = 0; i < flock->numActivatedParticles; ++i ) {
-			Particle *const __restrict particle = flock->particles + i;
-			if( const float squareSpeed = VectorLengthSquared( particle->velocity ); squareSpeed > 1.0f ) [[likely]] {
-				const float rcpSpeed = Q_RSqrt( squareSpeed );
-				const float speed    = Q_Rcp( rcpSpeed );
-				vec4_t velocityDir;
-				VectorScale( particle->velocity, rcpSpeed, velocityDir );
-				const float forceLike  = flock->drag * speed * speed;
-				const float deltaSpeed = -forceLike * deltaSeconds;
-				VectorMA( particle->velocity, deltaSpeed, velocityDir, particle->velocity );
+	for( unsigned i = 0; i < flock->numActivatedParticles; ++i ) {
+		Particle *const __restrict particle = flock->particles + i;
+		Vector4Copy( particle->accel, accel );
+        Vector4Set( particle->effectiveVelocity, 0.f, 0.f, 0.f, 0.f );
+
+		if( flock->drag > 0.0f ) {
+			if( const float speed = VectorLengthFast( particle->velocity ); speed > 1.0f ) [[likely]] {
+				const float drag = flock->drag * speed;
+				VectorMA( accel, -drag, particle->velocity, accel );
 			}
-			VectorMA( particle->velocity, deltaSeconds, particle->accel, particle->velocity );
-			VectorMA( particle->oldOrigin, deltaSeconds, particle->velocity, particle->origin );
-
-			if( flock->hasRotatingParticles ) {
-				particle->rotationAngle += particle->angularVelocity * deltaSeconds;
-				particle->rotationAngle = AngleNormalize360( particle->rotationAngle );
-			}
-
-			// TODO: Supply this 4-component vector explicitly
-			boundsBuilder.addPoint( particle->origin );
 		}
-	} else {
-		for( unsigned i = 0; i < flock->numActivatedParticles; ++i ) {
-			Particle *const __restrict particle = flock->particles + i;
-			VectorMA( particle->velocity, deltaSeconds, particle->accel, particle->velocity );
-			VectorMA( particle->oldOrigin, deltaSeconds, particle->velocity, particle->origin );
-			// TODO: Supply this 4-component vector explicitly
-			boundsBuilder.addPoint( particle->origin );
+		if( flock->vorticity > 0.0f ) {
+			vec4_t refOffset;
+			VectorSubtract( particle->origin, flock->refOrigin, refOffset );
+			vec4_t vorticityAxis;
+			Vector4Set( vorticityAxis, 0.0f, 0.0f, 1.0f, 0.0f );
+			vec4_t vorticity;
+			CrossProduct( refOffset, flock->refAxis, vorticity );
+			VectorNormalizeFast( vorticity );
+			VectorMA( accel, flock->vorticity, vorticity, accel );
+		}
+        if( flock->turbulence > 0.0f && particle->lifetimeFrac > 0.1f ) {
+            vec4_t scaledOrigin;
+            VectorScale( particle->origin, flock->turbulenceScale, scaledOrigin);
+            vec4_t turbulence;
+            SimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2], turbulence);
+            VectorScale(turbulence, flock->turbulence, turbulence);
+            VectorAdd( particle->effectiveVelocity, turbulence, particle->effectiveVelocity );
+        }
 
-			if( flock->hasRotatingParticles ) {
-				particle->rotationAngle += particle->angularVelocity * deltaSeconds;
-				particle->rotationAngle = AngleNormalize360( particle->rotationAngle );
-			}
+		VectorMA( particle->velocity, deltaSeconds, accel, particle->velocity );
+        VectorAdd( particle->effectiveVelocity, particle->velocity, particle->effectiveVelocity );
+		VectorMA( particle->oldOrigin, deltaSeconds, particle->effectiveVelocity, particle->origin );
+		// TODO: Supply this 4-component vector explicitly
+		boundsBuilder.addPoint( particle->origin );
+
+        Com_Printf("origin: %f %f %f", particle->origin[0], particle->origin[1], particle->origin[2]);
+
+		if( flock->hasRotatingParticles ) {
+			particle->rotationAngle += particle->angularVelocity * deltaSeconds;
+			particle->rotationAngle = AngleNormalize360( particle->rotationAngle );
 		}
 	}
+
 
 	boundsBuilder.storeToWithAddedEpsilon( resultBounds[0], resultBounds[1] );
 }
@@ -821,7 +849,7 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 			}
 
 			// Reflect the velocity
-			const float oldSquareSpeed    = VectorLengthSquared( p->velocity );
+			const float oldSquareSpeed    = VectorLengthSquared( p->effectiveVelocity );
 			const float oldSpeedThreshold = 1.0f;
 			const float newSpeedThreshold = oldSpeedThreshold * Q_Rcp( flock->restitution );
 			if( oldSquareSpeed < wsw::square( newSpeedThreshold ) ) [[unlikely]] {
@@ -831,7 +859,7 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 			}
 
 			const float rcpOldSpeed = Q_RSqrt( oldSquareSpeed );
-			vec3_t oldVelocityDir { p->velocity[0], p->velocity[1], p->velocity[2] };
+			vec3_t oldVelocityDir { p->effectiveVelocity[0], p->effectiveVelocity[1], p->effectiveVelocity[2] };
 			VectorScale( oldVelocityDir, rcpOldSpeed, oldVelocityDir );
 
 			vec3_t reflectedVelocityDir;
@@ -844,10 +872,21 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 			const float newSpeed = flock->restitution * ( oldSquareSpeed * rcpOldSpeed );
 			// Save the reflected velocity
 			VectorScale( reflectedVelocityDir, newSpeed, p->velocity );
+            Com_Printf("velocity: %f %f %f", p->velocity[0], p->velocity[1], p->velocity[2]);
 
 			// Save the trace endpos with a slight offset as an origin for the next step.
 			// This is not really correct but is OK.
 			VectorAdd( trace.endpos, reflectedVelocityDir, p->oldOrigin );
+
+
+
+            float debugBeamScale = Cvar_Value("debug_impact");
+            if (debugBeamScale > 0.0f) {
+                vec3_t to;
+                VectorMA(p->oldOrigin, debugBeamScale, p->velocity, to);
+                vec3_t color = {0.0f, 1.0f, 0.0f};
+                cg.effectsSystem.spawnGameDebugBeam(p->oldOrigin, to, color, 0);
+            }
 
 			p->lifetimeFrac = computeParticleLifetimeFrac( currTime, *p, flock->appearanceRules );
 			timeoutOfParticlesLeft = wsw::max( particleTimeoutAt, timeoutOfParticlesLeft );

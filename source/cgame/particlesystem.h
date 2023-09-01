@@ -19,6 +19,17 @@ template <typename> class SingletonHolder;
 #undef max
 #endif
 
+enum {
+	CUSTOM_REF_AXIS,
+	NORMAL_REF_AXIS
+};
+
+enum {
+	VORTICITY_INCREASING,
+	VORTICITY_CONST,
+	VORTICITY_DECREASING
+};
+
 // Few notes on these value ranges:
 // They are ad-hoc structs for now, as we don't need more complicated stuff at this stage.
 // Distributions are obviously assumed to be uniform.
@@ -35,6 +46,10 @@ struct EllipsoidalFlockParams {
 	float stretchScale { 1.0f };
 	float gravity { 600 };
 	float drag { 0.0f };
+	float vorticity { 0.0f };
+	float refAxis[3] { 0.0f, 0.0f, 1.0f };
+    float turbulence { 0.0f };
+    float turbulenceScale {1.0f};
 	float restitution { 0.75f };
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
@@ -54,6 +69,10 @@ struct ConicalFlockParams {
 	float shiftDir[3] { 0.0f, 0.0f, 1.0f };
 	float gravity { 600 };
 	float drag { 0.0f };
+	float vorticity { 0.0f };
+	float refAxis[3]{ 0.0f, 0.0f, 1.0f };
+    float turbulence { 0.0f };
+    float turbulenceScale {1.0f};
 	float restitution { 0.75f };
 	float angle { 45.0f };
 	float innerAngle { 0.0f };
@@ -92,6 +111,11 @@ struct alignas( 16 ) ParticleFlock {
 	Particle::AppearanceRules appearanceRules;
 	// Caution: No drag simulation is currently performed for non-clipped flocks
 	float drag { 0.0f };
+	float vorticity { 0.0f };
+	float refOrigin[4]; // the origin to reference for effects such as vorticity
+	float refAxis[4]; // the axis to reference for effects such as vorticity
+    float turbulence { 0.0f };
+    float turbulenceScale {1.0f};
 	float restitution { 0.75f };
 	Particle *particles;
 	int64_t timeoutAt;
