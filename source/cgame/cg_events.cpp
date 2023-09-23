@@ -140,11 +140,13 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					.offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
 					.stretchDir   = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
 					.stretchScale = 0.5f,
-					.gravity      = 2.0f * GRAVITY,
+					.gravity      = 0.7f * GRAVITY,
+					.vorticity    = 1000.0f,
+					.refAxis      = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
 					.speed        = { .min = 150, .max = 200 },
 					.shiftSpeed   = { .min = 100, .max = 125 },
 					.percentage   = { .min = 1.0f, .max = 1.0f },
-					.timeout      = { .min = 150, .max = 300 },
+					.timeout      = { .min = 250, .max = 500 },
 				};
 				Particle::AppearanceRules appearanceRules {
 					.materials      = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
@@ -426,7 +428,12 @@ static void CG_FireWeaponEvent( int entNum, int weapon, int fireMode ) {
 			cg_entPModels[entNum].barrel_time = cg.time + weaponInfo->barrelTime;
 		}
 		if( weaponInfo->beltTime ) {
+			cg_entPModels[entNum].fire_time = cg.time;
 			cg_entPModels[entNum].belt_time = cg.time + weaponInfo->beltTime; // beltTime should be converted to an int to stop arithmetic overflow
+		}
+		if( weaponInfo->emitAtFire ) {
+			cg_entPModels[entNum].emitter_amount = weaponInfo->emitAmount;
+			cg_entPModels[entNum].emitter_time = 0;
 		}
 	}
 
@@ -559,7 +566,7 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 	}
 }
 
-static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int owner, int count,
+static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int owner, int count, vec2_t offset,
 									  int hspread, int vspread, int range ) {
 	assert( seed );
 	assert( count > 0 && count < 64 );
@@ -580,12 +587,12 @@ static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int o
 
 	for( int i = 0; i < count; i++ ) {
 		// TODO: Is this correct?
-		const float phi = 2.4f * (float)i; //magic value creating Fibonacci numbers
+		const float phi = 1.3f * (float)i; // magic value creating Fibonacci numbers
 		const float sqrtPhi = std::sqrt( phi );
 
 		// TODO: Is this correct?
-		const float r = std::cos( (float)*seed + phi ) * (float)hspread * sqrtPhi;
-		const float u = std::sin( (float)*seed + phi ) * (float)vspread * sqrtPhi;
+		const float r = std::cos( (float)*seed + phi ) * (float)hspread * sqrtPhi + offset[0];
+		const float u = std::sin( (float)*seed + phi ) * (float)vspread * sqrtPhi + offset[1];
 
 		trace_t trace;
 		const trace_t *waterTrace = GS_TraceBullet( &trace, start, dir, r, u, range, owner, 0 );
@@ -597,8 +604,8 @@ static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int o
 				VectorCopy( trace.plane.normal, underwaterImpactNormals[numUnderwaterImpacts] );
 			}
 			if( !VectorCompare( waterTrace->endpos, start ) ) {
-				liquidImpacts[numLiquidImpacts] = LiquidImpact {
-					.origin   = { waterTrace->endpos[0], waterTrace->endpos[1], waterTrace->endpos[2] },
+				liquidImpacts[numLiquidImpacts] = LiquidImpact{
+					.origin = { waterTrace->endpos[0], waterTrace->endpos[1], waterTrace->endpos[2] },
 					.burstDir = { waterTrace->plane.normal[0], waterTrace->plane.normal[1], waterTrace->plane.normal[2] },
 					.contents = waterTrace->contents,
 				};
@@ -619,11 +626,11 @@ static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int o
 			numTracerTargets++;
 		} else {
 			if( canShowBulletImpactForDirAndTrace( dir, trace ) ) {
-				solidImpacts[numSolidImpacts] = SolidImpact {
-					.origin      = { trace.endpos[0], trace.endpos[1], trace.endpos[2] },
-					.normal      = { trace.plane.normal[0], trace.plane.normal[1], trace.plane.normal[2] },
+				solidImpacts[numSolidImpacts] = SolidImpact{
+					.origin = { trace.endpos[0], trace.endpos[1], trace.endpos[2] },
+					.normal = { trace.plane.normal[0], trace.plane.normal[1], trace.plane.normal[2] },
 					.incidentDir = { dir[0], dir[1], dir[2] },
-					.surfFlags   = getSurfFlagsForImpact( trace, dir ),
+					.surfFlags = getSurfFlagsForImpact( trace, dir ),
 				};
 				solidImpactTracerIndices[numSolidImpacts] = i;
 				numSolidImpacts++;
@@ -670,8 +677,22 @@ static void CG_Event_FireRiotgun( vec3_t origin, vec3_t dirVec, int weapon, int 
 	gs_weapon_definition_t *weapondef = GS_GetWeaponDef( weapon );
 	firedef_t *firedef = ( firemode ) ? &weapondef->firedef : &weapondef->firedef_weak;
 
-	CG_Fire_SunflowerPattern( origin, dir, &seed, owner, firedef->projectile_count,
-							  firedef->spread, firedef->v_spread, firedef->timeout );
+	Com_Printf( "spreads: %i %i", firedef->spread, firedef->v_spread );
+
+	const int isOdd = ( firedef->usage_count % 2 != 0 ) ? 1 : 0;
+	const int offsetDist = 400;
+	for( int i = 0; i < firedef->usage_count; i++ ) {
+		vec2_t offset;
+		
+		if( firedef->usage_count == 1 ) {
+			offset[0] = 0;
+			offset[1] = 0;
+		} else {
+			offset[0] = offsetDist * std::cos( 2 * M_PI / firedef->usage_count * i + isOdd * M_PI / 2 );
+			offset[1] = offsetDist * std::sin( 2 * M_PI / firedef->usage_count * i + isOdd * M_PI / 2 );
+		}
+		CG_Fire_SunflowerPattern( origin, dir, &seed, owner, firedef->projectile_count / firedef->usage_count, offset, firedef->spread, firedef->v_spread, firedef->timeout );
+	}
 }
 
 

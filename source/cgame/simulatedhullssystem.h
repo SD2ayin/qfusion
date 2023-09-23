@@ -19,6 +19,7 @@ public:
 		NoFade, FadeOutContour, FadeOutCenterLinear, FadeOutCenterQuadratic, FadeOutCenterCubic
 	};
 	enum class ZFade : uint8_t { NoFade, FadeOutBottom };
+    enum class NoiseFade : uint8_t { NoFade, FadeByNoise };
 
 	// TODO: Fade/light props should logically belong to these rules
 
@@ -82,7 +83,13 @@ public:
 		float speed;
 		float finalOffset;
 		float speedSpikeChance;
-		float minSpeedSpike, maxSpeedSpike;
+        float minSpeedSpike, maxSpeedSpike;
+        float noiseStrength {0.0f};
+        float noiseScale {1.0f};
+        //enum noiseType : uint8_t {
+            //voronoiSquared,
+            //simplex,
+        //};
 		float biasAlongChosenDir;
 		float baseInitialColor[4];
 		float bulgeInitialColor[4];
@@ -356,7 +363,7 @@ private:
 		bool applyVertexDynLight { false };
 		ViewDotFade vertexViewDotFade { ViewDotFade::NoFade };
 
-		void simulate( int64_t currTime, float timeDeltaSeconds, wsw::RandomGenerator *__restrict rng );
+		void simulate( int64_t currTime, float timeDeltaSeconds, float lifeTimeFrac, wsw::RandomGenerator *__restrict rng );
 	};
 
 	template <unsigned SubdivLevel, unsigned NumLayers>

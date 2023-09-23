@@ -55,6 +55,13 @@ public:
 	void spawnGrenadeExplosionEffect( const float *origin, const float *impactNormal, int mode );
 	void spawnShockwaveExplosionEffect( const float *origin, const float *impactNormal, int mode );
 	void spawnPlasmaExplosionEffect( const float *origin, const float *impactNormal, int mode );
+
+	void SpawnPlasmaMuzzleEffect( const float *origin, const float *normal, const float *velocity );
+	void SpawnRocketMuzzleEffect( const float *origin, const float *normal, const float *velocity );
+	void SpawnElectroMuzzleEffect( const float *origin, const float *normal, const float *velocity );
+	void SpawnLaserMuzzleEffect( const float *origin, const float *normal, const float *velocity );
+	void spawnEmitterEffect( const float *origin, const float *normal, const float *velocity, const unsigned int effectNum );
+
 	void spawnGenericExplosionEffect( const float *origin, int mode, float radius );
 
 	void spawnGrenadeBounceEffect( int entNum, int mode );

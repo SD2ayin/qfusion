@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "cg_local.h"
 #include "../qcommon/qcommon.h"
+#include "../ref/local.h"
 
 pmodel_t cg_entPModels[MAX_EDICTS];
 pmodelinfo_t *cg_PModelInfos;
@@ -71,7 +72,8 @@ void CG_ResetPModels( void ) {
 	int i;
 
 	for( i = 0; i < MAX_EDICTS; i++ ) {
-		cg_entPModels[i].flash_time = cg_entPModels[i].barrel_time = cg_entPModels[i].belt_time = cg_entPModels[i].velocity = cg_entPModels[i].position = 0;
+		cg_entPModels[i].flash_time = cg_entPModels[i].barrel_time = cg_entPModels[i].belt_time = cg_entPModels[i].emitter_time = cg_entPModels[i].fire_time = cg_entPModels[i].velocity = cg_entPModels[i].position = 0;
+		cg_entPModels[i].emitter_amount = 0;
 		cg_entPModels[i].oldWeaponidState = -1;   // setting this to a value that can not occur to force velocity and position reset in cg_addweaponontag
 		memset( &cg_entPModels[i].animState, 0, sizeof( gs_pmodel_animationstate_t ) );
 	}
@@ -514,6 +516,32 @@ bool CG_GrabTag( orientation_t *tag, entity_t *ent, const char *tagname ) {
 }
 
 /*
+void getTagVelocity( entity_t *ent, const char *tagname, vec3_t velocity ) {
+	int i;
+	maliastag_t *tag, *oldtag;
+	const model_s *mod = ent->model;
+	const maliasmodel_t *aliasmodel = (maliasmodel_t *)mod->extradata;
+	const int framenum = ent->frame;
+	const int oldframenum = ent->oldframe;
+	const float lerpfrac = ent->backlerp;
+
+	// find the appropriate tag
+	for( i = 0; i < aliasmodel->numtags; i++ ) {
+		if( !Q_stricmp( aliasmodel->tags[i].name, tagname ) ) {
+			break;
+		}
+	}
+
+	tag = aliasmodel->tags + framenum * aliasmodel->numtags + i;
+	oldtag = aliasmodel->tags + oldframenum * aliasmodel->numtags + i;
+
+	VectorSubtract( tag->origin, oldtag->origin, velocity );
+	VectorScale( velocity, lerpfrac, velocity );
+	Com_Printf( "%s tag origin:%f %f %f%s\n", S_COLOR_ORANGE, tag->origin[0], tag->origin[1], tag->origin[2], S_COLOR_WHITE );
+}
+*/
+
+/*
 * CG_PlaceRotatedModelOnTag
 */
 void CG_PlaceRotatedModelOnTag( entity_t *ent, entity_t *dest, orientation_t *tag ) {
@@ -521,7 +549,7 @@ void CG_PlaceRotatedModelOnTag( entity_t *ent, entity_t *dest, orientation_t *ta
 	mat3_t tmpAxis;
 
 	VectorCopy( dest->origin, ent->origin );
-	VectorCopy( dest->lightingOrigin, ent->lightingOrigin );
+	VectorCopy( dest->lightingOrigin, ent->lightingOrigin ); //
 
 	for( i = 0; i < 3; i++ )
 		VectorMA( ent->origin, tag->origin[i] * ent->scale, &dest->axis[i * 3], ent->origin );
@@ -530,6 +558,21 @@ void CG_PlaceRotatedModelOnTag( entity_t *ent, entity_t *dest, orientation_t *ta
 	Matrix3_Multiply( ent->axis, tag->axis, tmpAxis );
 	Matrix3_Multiply( tmpAxis, dest->axis, ent->axis );
 }
+
+/*
+* CG_GetTagCoordsAndAxis
+
+vec3_t CG_GetTagCoords( entity_t *ent, entity_t *dest, orientation_t tag )
+{
+	vec3_t tagCoords;
+	VectorCopy( dest->origin, tagCoords );
+
+	for( int i = 0; i < 3; i++ ) {
+		VectorMA( tagCoords, tag.origin[i] * ent->scale, &dest->axis[i * 3], tagCoords );
+	}
+	return tagCoords;
+}
+*/
 
 /*
 * CG_PlaceModelOnTag
@@ -1295,7 +1338,7 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 
 	// add weapon model
 	CG_AddWeaponOnTag( &cent->ent, &tag_weapon, cent->current.weapon, &pmodel->oldWeaponidState, cent->effects, addCoronaLight,
-		&pmodel->projectionSource, pmodel->flash_time, pmodel->barrel_time, pmodel->belt_time, &pmodel->oldTime, &pmodel->velocity, &pmodel->position, true, drawSceneRequest );
+		&pmodel->projectionSource, pmodel->flash_time, pmodel->barrel_time, pmodel->belt_time, pmodel->fire_time, &pmodel->emitter_time, &pmodel->emitter_amount, pmodel->oldTagPosition, &pmodel->oldTime, &pmodel->velocity, &pmodel->position, drawSceneRequest );
 }
 
 #define MOVEDIREPSILON  0.3f

@@ -21,6 +21,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "effectssystemfacade.h"
 
+#include <map>
+
 #include "cg_local.h"
 #include "../qcommon/qcommon.h"
 #include "../client/snd_public.h"
@@ -492,9 +494,17 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 		EllipsoidalFlockParams flockParams {
 			.origin     = { origin[0], origin[1], origin[2] },
 			.offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
-			.gravity    = 250.0f,
+			//.gravity    = -75.0f,
+            //.drag       = 0.2f,
+			//.vorticity  = 5000.0f,
+			.refAxis    = { impactNormal[0], impactNormal[1], impactNormal[2] },
+            .turbulence = 300.0f,
+            .turbulenceScale = 0.007f,
+            .bounceCount = { .minInclusive = 10, .maxInclusive = 10 },
+            .speed = { .min = 1, .max = 3 },
 			.percentage = { .min = 0.5f, .max = 0.8f },
-			.timeout    = { .min = 125, .max = 150 },
+            .timeout    = { .min = 3000, .max = 3600 },
+			//.timeout    = { .min = 150, .max = 180 },
 		};
 		Particle::AppearanceRules appearanceRules {
 			.materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
@@ -506,13 +516,257 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 			},
 			.geometryRules = Particle::SpriteRules {
 				.radius        = { .mean = 1.5f, .spread = 0.5f },
-				.sizeBehaviour = Particle::ExpandingAndShrinking
+				.sizeBehaviour = Particle::SizeNotChanging
 			},
 		};
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 	}
 
 	m_transientEffectsSystem.spawnPlasmaImpactEffect( origin, impactNormal );
+}
+
+void EffectsSystemFacade::SpawnPlasmaMuzzleEffect( const float *origin, const float *normal, const float *velocity )
+{
+	const vec3_t soundOrigin{ origin[0] + normal[0], origin[1] + normal[1], origin[2] + normal[2] };
+	sfx_s *sfx = cgs.media.sfxPlasmaStrongHit;
+	startSound( sfx, soundOrigin, ATTN_IDLE );
+
+	const float velocityMagnitude = VectorLengthFast( velocity );
+	const float rcpVelocityMagnitude = Q_Rcp( velocityMagnitude );
+	vec3_t velocityDir;
+	VectorScale( velocity, rcpVelocityMagnitude, velocityDir );
+
+	if( cg_particles->integer ) {
+		ConicalFlockParams flockParams{
+			.origin = { origin[0], origin[1], origin[2] },
+			.offset = { 0, 0, 0 },
+			.dir = { -normal[0], -normal[1], normal[2] }, // i do not know why we need to negate XY, but they produce correct results
+			.shiftDir = { velocityDir[0], velocityDir[1], velocityDir[2] },
+			.gravity = 0.0f,
+			.drag = 0.01f,
+			.vorticity = 0.0f, // 600
+			.refAxis = { normal[0], normal[1], normal[2] },
+			.angle = 33.0f,
+			.innerAngle = 33.0f,
+			.speed = { .min = 300, .max = 400 },
+			.shiftSpeed = { .min = velocityMagnitude, .max = velocityMagnitude },
+			.percentage = { .min = 0.5f, .max = 0.8f },
+			.timeout = { .min = 400, .max = 500 },
+		};
+		Particle::AppearanceRules appearanceRules{
+			.materials = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
+			.colors = kPlasmaParticlesColors,
+			.flareProps =
+				Particle::FlareProps{
+					.lightProps = kPlasmaParticlesFlareProps,
+					.alphaScale = 0.08f,
+					.particleFrameAffinityModulo = 2,
+				},
+			.geometryRules = Particle::SpriteRules{ .radius = { .mean = 1.5f, .spread = 0.5f }, .sizeBehaviour = Particle::Shrinking },
+		};
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+	}
+}
+
+static const RgbaLifespan kMuzzleSmokeColors[1]{
+	{
+	.initial = { 0.5f, 0.5f, 0.5f, 0.9f },
+	.fadedIn = { 0.5f, 0.5f, 0.5f, 0.5f },
+	.fadedOut = { 0.5f, 0.5f, 0.5f, 0.0f },
+	.startFadingOutAtLifetimeFrac = 0.67f
+	}
+};
+
+void EffectsSystemFacade::SpawnRocketMuzzleEffect( const float *origin, const float *normal, const float *velocity )
+{
+
+	vec3_t smokeVelocity;
+	VectorMA( velocity, 20.0f, normal, smokeVelocity ); 
+	const float velocityMagnitude = VectorLengthFast( smokeVelocity );
+	const float rcpVelocityMagnitude = Q_Rcp( velocityMagnitude );
+	vec3_t velocityDir;
+	VectorScale( smokeVelocity, rcpVelocityMagnitude, velocityDir );
+
+	if( cg_particles->integer ) {
+		EllipsoidalFlockParams flockParams{
+			.origin = { origin[0], origin[1], origin[2] },
+			.offset = { 0, 0, 0 },
+			.shiftDir = { velocityDir[0], velocityDir[1], velocityDir[2] },
+			.gravity = -200.0f,
+			.drag = 0.01f,
+			.refAxis = { normal[0], normal[1], normal[2] },
+			.speed = { .min = 5, .max = 10 },
+			.shiftSpeed = { .min = velocityMagnitude, .max = velocityMagnitude },
+			.percentage = { .min = 0.1f, .max = 0.3f },
+			.timeout = { .min = 445, .max = 580 },
+		};
+		Particle::AppearanceRules appearanceRules{
+			.materials = cgs.media.ShaderMuzzleSmoke.getAddressOfHandle(),
+			.colors = kMuzzleSmokeColors,
+			.geometryRules = Particle::SpriteRules{ .radius = { .mean = 5.2f, .spread = 2.0f }, .sizeBehaviour = Particle::Shrinking },
+		};
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+	}
+}
+
+static const RgbaLifespan kElectroMuzzleColors[1]{
+	{
+	.initial = { 1.0f, 1.0f, 1.0f, 1.0f },
+	.fadedIn = { 0.62f, 0.62f, 1.0f, 1.0f },
+    .fadedOut = { 0.05f, 0.05f, 1.0f, 1.0f },
+	.finishFadingInAtLifetimeFrac = 0.05f,
+	.startFadingOutAtLifetimeFrac = 0.90f,
+	}
+};
+
+static const LightLifespan kElectroParticlesFlareProps[1]{ {
+	.colorLifespan =
+		{
+			.initial = { 0.0f, 0.0f, 1.0f },
+			.fadedIn = { 0.3f, 0.5f, 1.0f },
+			.fadedOut = { 0.7f, 0.7f, 1.0f },
+		},
+	.radiusLifespan = { .fadedIn = 7.0f },
+} };
+
+void EffectsSystemFacade::SpawnElectroMuzzleEffect( const float *origin, const float *normal, const float *velocity )
+{
+
+	const float velocityMagnitude = VectorLengthFast( velocity );
+	const float rcpVelocityMagnitude = Q_Rcp( velocityMagnitude );
+	vec3_t velocityDir;
+	VectorScale( velocity, rcpVelocityMagnitude, velocityDir );
+
+	if( cg_particles->integer ) {
+		EllipsoidalFlockParams flockParams{
+			.origin = { origin[0], origin[1], origin[2] },
+			.offset = { 0, 0, 0 },
+			//.shiftDir = { velocityDir[0], velocityDir[1], velocityDir[2] },
+			.gravity = -200.0f,
+			.drag = 0.018f,
+			.vorticity = 2000.0f,
+			.refAxis = { normal[0], normal[1], normal[2] },
+			.speed = { .min = 130, .max = 180 },
+			//.shiftSpeed = { .min = velocityMagnitude, .max = velocityMagnitude },
+			.percentage = { .min = 0.1f, .max = 0.2f },
+			.timeout = { .min = 35, .max = 70 },
+		};
+		Particle::AppearanceRules appearanceRules{
+			.materials = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
+			.colors = kElectroMuzzleColors,
+			.flareProps =
+				Particle::FlareProps{
+				.lightProps = kElectroParticlesFlareProps,
+				.alphaScale = 0.08f,
+				.particleFrameAffinityModulo = 2,
+			},
+			.geometryRules = Particle::SparkRules{
+				.length = { .mean = 3.2f, .spread = 2.0f },
+				.width = { .mean = 0.4f, .spread = 0.25f },
+				.sizeBehaviour = Particle::Shrinking,
+			}
+		};
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+
+		EllipsoidalFlockParams flockParams2{
+			.origin = { origin[0], origin[1], origin[2] },
+			.offset = { 0, 0, 0 },
+			.shiftDir = { velocityDir[0], velocityDir[1], velocityDir[2] },
+			.gravity = 0.0f,
+			.drag = 0.01f,
+			.refAxis = { normal[0], normal[1], normal[2] },
+			.speed = { .min = 20, .max = 40 },
+			.shiftSpeed = { .min = velocityMagnitude, .max = velocityMagnitude },
+			.percentage = { .min = 0.04f, .max = 0.08f },
+			.timeout = { .min = 300, .max = 400 },
+		};
+		Particle::AppearanceRules appearanceRules2{
+			.materials = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
+			.colors = kElectroMuzzleColors,
+			.flareProps =
+				Particle::FlareProps{
+					.lightProps = kElectroParticlesFlareProps,
+					.alphaScale = 0.08f,
+					.particleFrameAffinityModulo = 2,
+				},
+			.geometryRules = Particle::SpriteRules{ .radius = { .mean = 0.8f, .spread = 0.4f }, .sizeBehaviour = Particle::Shrinking },
+		};
+		cg.particleSystem.addMediumParticleFlock( appearanceRules2, flockParams2 );
+	}
+}
+
+static const RgbaLifespan kLaserMuzzleColors[1]{ {
+	.initial = { 0.95f, 0.84f, 0.0f, 0.0f },
+	.fadedIn = { 0.96f, 0.9f, 0.42f, 1.0f },
+	.fadedOut = { 0.99f, 0.96f, 0.73f, 0.0f },
+} };
+
+static const LightLifespan kLaserMuzzleFlareProps[1]{ {
+	.colorLifespan =
+		{
+			.initial = { 0.95f, 0.84f, 0.0f},
+			.fadedIn = { 0.96f, 0.9f, 0.42f},
+			.fadedOut = { 0.99f, 0.96f, 0.73f},
+		},
+	.radiusLifespan = { .fadedIn = 10.0f },
+} };
+
+void EffectsSystemFacade::SpawnLaserMuzzleEffect( const float *origin, const float *normal, const float *velocity )
+{
+
+	const float velocityMagnitude = VectorLengthFast( velocity );
+	const float rcpVelocityMagnitude = Q_Rcp( velocityMagnitude );
+	vec3_t velocityDir;
+	VectorScale( velocity, rcpVelocityMagnitude, velocityDir );
+
+	if( cg_particles->integer ) {
+		ConicalFlockParams flockParams{
+			.origin = { origin[0], origin[1], origin[2] },
+			.offset = { 0, 0, 0 },
+			.dir = { -normal[0], -normal[1], normal[2] }, // i do not know why we need to negate XY, but they produce correct results
+			.shiftDir = { velocityDir[0], velocityDir[1], velocityDir[2] },
+			.gravity = 0.0f,
+			.drag = 0.01f,
+			.vorticity = 0.0f, // 600
+			.refAxis = { normal[0], normal[1], normal[2] },
+			.angle = 33.0f,
+			.innerAngle = 33.0f,
+			.speed = { .min = 300, .max = 400 },
+			.shiftSpeed = { .min = velocityMagnitude, .max = velocityMagnitude },
+			.percentage = { .min = 0.5f, .max = 0.8f },
+			.timeout = { .min = 400, .max = 500 },
+		};
+		Particle::AppearanceRules appearanceRules{
+			.materials = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
+			.colors = kLaserMuzzleColors,
+			.flareProps =
+				Particle::FlareProps{
+					.lightProps = kLaserMuzzleFlareProps,
+					.alphaScale = 0.08f,
+					.particleFrameAffinityModulo = 2,
+				},
+			.geometryRules = Particle::SpriteRules{ .radius = { .mean = 1.5f, .spread = 0.5f }, .sizeBehaviour = Particle::Shrinking },
+		};
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+	}
+}
+
+void EffectsSystemFacade::spawnEmitterEffect( const float *origin, const float *normal, const float *velocity, const unsigned int effectNum )
+{
+	switch( effectNum ) {
+		case 1:
+			EffectsSystemFacade::SpawnPlasmaMuzzleEffect( origin, normal, velocity );
+			break;
+		case 2:
+			EffectsSystemFacade::SpawnRocketMuzzleEffect( origin, normal, velocity );
+			break;
+		case 3:
+			EffectsSystemFacade::SpawnElectroMuzzleEffect( origin, normal, velocity );
+			break;
+		case 4:
+			EffectsSystemFacade::SpawnLaserMuzzleEffect( origin, normal, velocity );
+			break;
+	}
 }
 
 void EffectsSystemFacade::simulateFrameAndSubmit( int64_t currTime, DrawSceneRequest *request ) {
@@ -599,27 +853,29 @@ void EffectsSystemFacade::spawnElectroboltHitEffect( const float *origin, const 
 			singleColorAddress = &colorsHolder->defaultColors;
 		}
 
-		const ConicalFlockParams flockParams {
+		const EllipsoidalFlockParams flockParams {
 			.origin     = { origin[0], origin[1], origin[2] },
 			.offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
-			.dir        = { coneDir[0], coneDir[1], coneDir[2] },
-			.gravity    = GRAVITY,
-			.angle      = 45.0f,
-			.speed      = { .min = 500.0f, .max = 950.0f },
-			.percentage = { .min = 0.33f, .max = 0.67f },
-			.timeout    = { .min = 100, .max = 300 },
+			.gravity    = -40.f,
+            .drag       = 0.05f,
+            .turbulence = 50.0f,
+            .turbulenceScale = 0.007f,
+            .bounceCount     = { .minInclusive = 2, .maxInclusive = 2 },
+			.speed      = { .min = 700.0f, .max = 1000.0f },
+			.percentage = { .min = 0.9f, .max = 1.0f },
+			.timeout    = { .min = 800, .max = 1000 },
+            .activationDelay = { .min = 1, .max = 800 }
 		};
 
 		const Particle::AppearanceRules appearanceRules {
 			.materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
 			.colors        = { singleColorAddress, 1 },
-			.geometryRules = Particle::SparkRules {
-				.length = { .mean = 12.5f, .spread = 2.5f },
-				.width  = { .mean = 2.0f, .spread = 1.0f },
+			.geometryRules = Particle::SpriteRules {
+				.radius = { .mean = 9.f, .spread = 2.f },
 			}
 		};
 
-		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+		cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
 	}
 
 	const vec3_t soundOrigin { origin[0] + impactNormal[0], origin[1] + impactNormal[1], origin[2] + impactNormal[2] };
@@ -745,7 +1001,6 @@ void EffectsSystemFacade::spawnGunbladeBladeHitEffect( const float *pos, const f
 				};
 				Particle::AppearanceRules appearanceRules {
 					.materials     = cgs.media.shaderBladeImpactParticle.getAddressOfHandle(),
-					.colors        = kGunbladeHitColors,
 					.geometryRules = Particle::SparkRules {
 						.length = { .mean = 4.0f, .spread = 1.0f },
 						.width  = { .mean = 1.0f, .spread = 0.25f },
@@ -757,7 +1012,7 @@ void EffectsSystemFacade::spawnGunbladeBladeHitEffect( const float *pos, const f
 	}
 }
 
-static const RgbaLifespan kGunbladeBlastColors[3] {
+/*static const RgbaLifespan kGunbladeBlastColors[3] {
 	{
 		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
 		.fadedIn  = { 1.0f, 0.8f, 0.5f, 0.7f },
@@ -773,16 +1028,34 @@ static const RgbaLifespan kGunbladeBlastColors[3] {
 		.fadedIn  = { 1.0f, 0.7f, 0.4f, 0.7f },
 		.fadedOut = { 0.9f, 0.3f, 0.1f, 0.0f }
 	},
+};*/
+
+static const RgbaLifespan kGunbladeBlastColors[3] {
+        {
+                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .fadedIn  = { 1.0f, 0.75f, 0.32f, 1.0f },
+                .fadedOut = { 0.4f, 0.3f, 0.12f, 1.0f }
+        },
+        {
+                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .fadedIn  = { 1.0f, 0.62f, 0.23f, 1.0f },
+                .fadedOut = { 0.4f, 0.31f, 0.1f, 1.0f }
+        },
+        {
+                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+                .fadedIn  = { 1.0f, 0.86f, 0.32f, 1.0f },
+                .fadedOut = { 0.4f, 0.36f, 0.06f, 1.0f }
+        },
 };
 
 static const LightLifespan kGunbladeBlastFlareProps[1] {
 	{
 		.colorLifespan = {
-			.initial  = { 1.0f, 0.8f, 0.5f },
-			.fadedIn  = { 1.0f, 0.8f, 0.4f },
-			.fadedOut = { 1.0f, 0.7f, 0.4f },
+			.initial  = { 1.0f, 0.8f, 0.12f },
+			.fadedIn  = { 1.0f, 0.8f, 0.1f },
+			.fadedOut = { 1.0f, 0.7f, 0.1f },
 		},
-		.radiusLifespan = { .fadedIn = 10.0f },
+		.radiusLifespan = { .fadedIn = 25.0f },
 	}
 };
 
@@ -793,9 +1066,14 @@ void EffectsSystemFacade::spawnGunbladeBlastHitEffect( const float *origin, cons
 		EllipsoidalFlockParams flockParams {
 			.origin     = { origin[0], origin[1], origin[2] },
 			.offset     = { dir[0], dir[1], dir[2] },
-			.gravity    = -50.0f,
-			.speed      = { .min = 50, .max = 100 },
+			.gravity    = -90.0f,
+            .drag       = 0.01f,
+            .turbulence = 75.0f,
+            .turbulenceScale = 0.005f,
+            .bounceCount = { .minInclusive = 1, .maxInclusive = 2 },
+			.speed      = { .min = 75, .max = 325 },
 			.percentage = { .min = 1.0f, .max = 1.0f },
+            .timeout    = { .min = 700, .max = 1000 },
 		};
 		Particle::AppearanceRules appearanceRules {
 			.materials     = cgs.media.shaderBlastImpactParticle.getAddressOfHandle(),
@@ -805,7 +1083,11 @@ void EffectsSystemFacade::spawnGunbladeBlastHitEffect( const float *origin, cons
 				.alphaScale                  = 0.09f,
 				.particleFrameAffinityModulo = 4,
 			},
-			.geometryRules = Particle::SpriteRules { .radius = { .mean = 1.50f, .spread = 0.25f } },
+			.geometryRules = Particle::SparkRules { //.length = { .mean = 4.f, .spread = 1.5f },
+                                                    .length = { .mean = 8.f, .spread = 3.7f },
+                                                    .width  = { .mean = 8.f, .spread = 3.7f },
+                                                    .sizeBehaviour = Particle::Thinning
+                },
 		};
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 	}
@@ -910,7 +1192,7 @@ void EffectsSystemFacade::spawnBulletGenericImpactRosette( unsigned delay, const
 		.outerConeAngle     = 10.0f + 50.0f * maxPercentage,
 		.spawnRingRadius    = 0.0f,
 		.length             = { .mean = 20.0f, .spread = 5.0f, },
-		.width              = { .mean = 1.75f, .spread = 0.25f },
+		.width              = { .mean = 2.75f, .spread = 0.25f },
 		.timeout            = { .min = 50, .max = 75 },
 		.count              = { .min = (unsigned)( 7 * minPercentage ), .max = (unsigned)( 12 * maxPercentage ) },
 		.startColorLifespan = kBulletRosetteSpikeColorLifespan,
@@ -1153,9 +1435,9 @@ void EffectsSystemFacade::spawnBulletMetalDebrisParticles( unsigned delay, const
 
 static const RgbaLifespan kGreyDustColors[1] {
 	{
-		.initial  = { 0.5f, 0.5f, 0.5f, 0.1f },
-		.fadedIn  = { 0.5f, 0.5f, 0.5f, 0.1f },
-		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.0f },
+		.initial  = { 0.5f, 0.5f, 0.5f, 0.9f },
+		.fadedIn  = { 0.5f, 0.5f, 0.5f, 0.9f },
+		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.8f },
 		.startFadingOutAtLifetimeFrac = 0.67f
 	}
 };
@@ -1173,24 +1455,23 @@ void EffectsSystemFacade::spawnStoneDustParticles( unsigned delay, const FlockOr
 		.colors              = kGreyDustColors,
 		.numMaterials        = std::size( g_stoneDustMaterialsStorage ),
 		.geometryRules       = Particle::SpriteRules {
-			.radius = { .mean = 25.0f, .spread = 7.5f }, .sizeBehaviour = Particle::Expanding
+			.radius = { .mean = 12.0f, .spread = 7.5f }, .sizeBehaviour = Particle::Shrinking
 		},
 		.applyVertexDynLight = true
 	};
 
 	ConicalFlockParams flockParams {
-		.gravity         = 50.0f,
+		.gravity         = 0.0f,
 		.drag            = 0.03f,
 		.restitution     = 1.0f,
-		.angle           = 30.0f,
-		.speed           = { .min = 100.0f, .max = 500.0f },
-		.angularVelocity = { .min = -180.0f, .max = +180.0f },
-		.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
+		.angle           = 0.0f,
+		.speed           = { .min = 2.0f, .max = 4.0f },
+		.angularVelocity = { .min = 0.0f, .max = 0.0f },
+		.percentage      = { .min = 0.1f * dustPercentageScale, .max = 0.1f * dustPercentageScale },
 		.timeout         = { .min = 750, .max = 1000 },
 	};
 
 	orientation.copyToFlockParams( &flockParams );
-	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
 	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
 }
 
@@ -1491,9 +1772,9 @@ void EffectsSystemFacade::spawnSandImpactParticles( unsigned delay, const FlockO
 
 static const RgbaLifespan kGlassDebrisColors[1] {
 	{
-		.initial  = { 1.0f, 1.0f, 1.0f, 0.0f },
-		.fadedIn  = { 0.7f, 1.0f, 1.0f, 0.5f },
-		.fadedOut = { 0.7f, 1.0f, 1.0f, 0.0f },
+		.initial  = { 1.0f, 1.0f, 1.0f, 0.1f },
+		.fadedIn  = { 0.7f, 1.0f, 1.0f, 0.8f },
+		.fadedOut = { 0.7f, 1.0f, 1.0f, 0.1f },
 		.finishFadingInAtLifetimeFrac = 0.25f,
 		.startFadingOutAtLifetimeFrac = 0.50f,
 	}
@@ -1505,8 +1786,9 @@ void EffectsSystemFacade::spawnGlassImpactParticles( unsigned delay, const Flock
 		.materials     = cgs.media.shaderGlassDebrisParticle.getAddressOfHandle(),
 		.colors        = kGlassDebrisColors,
 		.geometryRules = Particle::SparkRules {
-			.length           = { .mean = 2.5f, .spread = 1.0f },
-			.width            = { .mean = 2.5f, .spread = 1.0f },
+			// mean size old 4 spread 1
+			.length           = { .mean = 8.5f, .spread = 2.0f },
+			.width            = { .mean = 8.5f, .spread = 2.0f },
 			.viewDirPartScale = 0.33f,
 		},
 	};
@@ -1515,9 +1797,11 @@ void EffectsSystemFacade::spawnGlassImpactParticles( unsigned delay, const Flock
 		.gravity         = 1.5f * GRAVITY,
 		.drag            = 0.003f,
 		.angle           = 37.0f,
-		.speed           = { .min = 300.0f, .max = 500.0f },
+		// speed old min 300 max 500
+		.speed           = { .min = 250.0f, .max = 400.0f },
 		.angularVelocity = { .min = 3 * 360.0f, .max = 7 * 360.0f },
-		.percentage      = { .min = 1.0f * percentageScale, .max = 1.0f * percentageScale },
+		// percentage old min 1.0 max 1.0
+		.percentage      = { .min = 0.55f * percentageScale, .max = 0.6f * percentageScale },
 		.timeout         = { .min = 150, .max = 350 },
 	};
 

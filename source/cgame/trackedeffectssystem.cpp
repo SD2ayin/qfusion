@@ -405,38 +405,41 @@ void TrackedEffectsSystem::updateAttachedCurvedPolyTrail( CurvedPolyTrail *trail
 
 static const RgbaLifespan kRocketSmokeTrailColors[1] {
 	{
-		.initial  = { 1.0f, 0.7f, 0.3f, 1.0f },
-		.fadedIn  = { 0.7f, 0.7f, 0.7f, 0.15f },
-		.fadedOut = { 0.0f, 0.0f, 0.0f, 0.0f },
-		.finishFadingInAtLifetimeFrac = 0.4f,
-		.startFadingOutAtLifetimeFrac = 0.5f,
+		.initial  = { 1.0f, 0.55f, 0.125f, 1.0f },
+		.fadedIn  = { 1.0f, 0.55f, 0.125f, 1.0f },
+		.fadedOut = { 1.0f, 1.0f, 1.0f, 1.0f },
+		.finishFadingInAtLifetimeFrac = 0.2f,
+		.startFadingOutAtLifetimeFrac = 0.4f,
 	}
 };
 
 static const RgbaLifespan kRocketFireTrailColors[1] {
 	{
-		.initial  = { 1.0f, 0.5f, 0.0f, 0.0f },
-		.fadedIn  = { 1.0f, 0.7f, 0.3f, 1.0f },
-		.fadedOut = { 1.0f, 1.0f, 1.0f, 0.0f },
+		.initial  = { 1.0f, 0.55f, 0.0f, 1.0f },
+		.fadedIn  = { 1.0f, 0.4f, 0.0f, 1.0f },
+		.fadedOut = { 1.0f, 0.28f, 0.0f, 1.0f },
 		.finishFadingInAtLifetimeFrac = 0.25f,
 		.startFadingOutAtLifetimeFrac = 0.50f,
 	}
 };
 
 static ConicalFlockParams g_rocketSmokeParticlesFlockParams {
-	.gravity         = 0,
-	.angle           = 45,
-	.innerAngle      = 18,
+	.gravity         = 0.f,
+	.drag			 = 0.4f,
+	.angle           = 5.f,
 	.speed           = { .min = 75, .max = 150 },
-	.timeout         = { .min = 350, .max = 400 },
+	.timeout         = { .min = 250, .max = 300 },
 	.activationDelay = { .min = 8, .max = 8 },
 };
 
 static ConicalFlockParams g_rocketFireParticlesFlockParams {
-	.gravity         = 0,
-	.angle           = 15,
+	.gravity         = 0.f,
+	.drag			 = 0.5f,
+    .turbulence      = 100.0f, // 100
+    .turbulenceScale = .007f,
+	.angle           = 33.f,
 	.speed           = { .min = 75, .max = 150 },
-	.timeout         = { .min = 125, .max = 250 },
+	.timeout         = { .min = 450, .max = 500 },
 	.activationDelay = { .min = 8, .max = 8 },
 };
 
@@ -472,7 +475,7 @@ void TrackedEffectsSystem::touchRocketTrail( int entNum, const float *origin, in
 				.materials     = cgs.media.shaderRocketSmokeTrailParticle.getAddressOfHandle(),
 				.colors        = kRocketSmokeTrailColors,
 				.geometryRules = Particle::SpriteRules {
-					.radius = { .mean = 20.0f, .spread = 1.5f }, .sizeBehaviour = Particle::Expanding
+					.radius = { .mean = 9.f, .spread = 1.f }, .sizeBehaviour = Particle::ExpandingAndShrinking // 12.5 and 1.5
 				},
 			});
 		}
@@ -489,7 +492,7 @@ void TrackedEffectsSystem::touchRocketTrail( int entNum, const float *origin, in
 				.materials     = cgs.media.shaderRocketFireTrailParticle.getAddressOfHandle(),
 				.colors        = kRocketFireTrailColors,
 				.geometryRules = Particle::SpriteRules {
-					.radius = { .mean = 7.0f, .spread = 1.0f }, .sizeBehaviour = Particle::Shrinking,
+					.radius = { .mean = 6.0f, .spread = 1.0f }, .sizeBehaviour = Particle::Shrinking,
 				},
 			});
 		}

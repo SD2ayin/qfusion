@@ -381,6 +381,8 @@ void CG_AddViewWeapon( cg_viewweapon_t *viewweapon, DrawSceneRequest *drawSceneR
 	}
 
 	// add attached weapon
-	CG_AddWeaponOnTag( &viewweapon->ent, &tag, viewweapon->weapon, &cg_entPModels[viewweapon->POVnum].oldWeaponidState, cg.effects | EF_OUTLINE,
-		false, nullptr, flash_time, cg_entPModels[viewweapon->POVnum].barrel_time, cg_entPModels[viewweapon->POVnum].belt_time, &cg_entPModels[viewweapon->POVnum].oldTime, &cg_entPModels[viewweapon->POVnum].velocity, &cg_entPModels[viewweapon->POVnum].position, false, drawSceneRequest );
+	CG_AddWeaponOnTag( &viewweapon->ent, &tag, viewweapon->weapon, &cg_entPModels[viewweapon->POVnum].oldWeaponidState, cg.effects | EF_OUTLINE, false, nullptr, flash_time,
+					   cg_entPModels[viewweapon->POVnum].barrel_time, cg_entPModels[viewweapon->POVnum].belt_time, cg_entPModels[viewweapon->POVnum].fire_time,
+					   &cg_entPModels[viewweapon->POVnum].emitter_time, &cg_entPModels[viewweapon->POVnum].emitter_amount, cg_entPModels[viewweapon->POVnum].oldTagPosition, &cg_entPModels[viewweapon->POVnum].oldTime,
+					   &cg_entPModels[viewweapon->POVnum].velocity, &cg_entPModels[viewweapon->POVnum].position, drawSceneRequest );
 }

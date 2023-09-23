@@ -19,17 +19,6 @@ template <typename> class SingletonHolder;
 #undef max
 #endif
 
-enum {
-	CUSTOM_REF_AXIS,
-	NORMAL_REF_AXIS
-};
-
-enum {
-	VORTICITY_INCREASING,
-	VORTICITY_CONST,
-	VORTICITY_DECREASING
-};
-
 // Few notes on these value ranges:
 // They are ad-hoc structs for now, as we don't need more complicated stuff at this stage.
 // Distributions are obviously assumed to be uniform.
