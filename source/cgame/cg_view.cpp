@@ -1121,8 +1121,8 @@ void CG_RenderView( int frameTime, int realFrameTime, int64_t realTime, int64_t 
 
 	DrawSceneRequest *drawSceneRequest = CreateDrawSceneRequest( cg.view.refdef );
 
+	CG_AddViewWeapon( &cg.weapon, drawSceneRequest ); // the order of addviewweapon and addentities was swapped, it should have no averse affects, it's this way so that for clients emitters are triggered from view POV
 	CG_AddEntities( drawSceneRequest );
-	CG_AddViewWeapon( &cg.weapon, drawSceneRequest );
 	CG_AddLocalEntities( drawSceneRequest );
 
 	cg.effectsSystem.simulateFrameAndSubmit( cg.time, drawSceneRequest );

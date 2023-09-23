@@ -246,6 +246,8 @@ public:
 	CachedMaterial shaderSandImpactDustSoft { this, wsw::StringView( "gfx/effects/sand_impact_dust_soft" ) };
 	CachedMaterial shaderSandImpactDustHard { this, wsw::StringView( "gfx/effects/sand_impact_dust_hard" ) };
 
+	CachedMaterial ShaderMuzzleSmoke{ this, wsw::StringView( "gfx/effects/muzzle_smoke" ) };
+
 	CachedMaterial shaderStoneDustSoft { this, wsw::StringView( "gfx/effects/stone_dust_soft" ) };
 	CachedMaterial shaderStoneDustHard { this, wsw::StringView( "gfx/effects/stone_dust_hard" ) };
 
@@ -304,6 +306,8 @@ public:
 	CachedMaterial shaderLaserGunBeam { this, wsw::StringView( "gfx/misc/laserbeam" ) };
 
 	CachedMaterial shaderLaser { this, wsw::StringView( "gfx/misc/laser" ) };
+
+    CachedMaterial shaderSmokeHull { this, wsw::StringView( "gfx/misc/smokehull" ) };
 
 	CachedMaterial shaderFlagFlare { this, wsw::StringView( PATH_FLAG_FLARE_SHADER ) };
 

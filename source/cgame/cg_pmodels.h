@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 //=============================================================================
 
+
 extern cvar_t *cg_weaponFlashes;
 extern cvar_t *cg_gunx;
 extern cvar_t *cg_guny;
@@ -86,7 +87,14 @@ typedef struct weaponinfo_s {
 	float beltPeriod;
 	float beltSpeed;
 	float beltDamping;
-	float beltTime; //originally an int, might not work as float
+	float beltTime; // should be converted to an int
+
+	// emitters
+	//int effect;
+	bool emitAtFire;
+	int64_t emitPeriod;
+	int emitAmount;
+	unsigned int emitEffect;
 
 	// sfx
 	int num_fire_sounds;
@@ -175,7 +183,10 @@ typedef struct {
 	int64_t flash_time;
 	int64_t barrel_time;
 	int64_t belt_time;
-	//int count; // added for testing
+	int64_t fire_time;
+	int64_t emitter_time;
+	int64_t emitter_amount;
+	float oldTagPosition[3];
 	int64_t oldTime;
 	float velocity;
 	float position; // angular position
@@ -220,7 +231,7 @@ void CG_WModelsInit();
 void CG_WModelsShutdown();
 struct weaponinfo_s *CG_CreateWeaponZeroModel( char *cgs_name );
 struct weaponinfo_s *CG_RegisterWeaponModel( char *cgs_name, int weaponTag );
-void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int *oldWeapondidState, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, int64_t belt_time, int64_t *oldTime, float *velocity, float *position, bool runkinematics, DrawSceneRequest *drawSceneRequest );
+void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int *oldWeapondidState, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, int64_t belt_time, int64_t fire_time, int64_t *emitter_time, int64_t *emitter_amount, float *oldTagPosition, int64_t *oldTime, float *velocity, float *position, DrawSceneRequest *drawSceneRequest );
 struct weaponinfo_s *CG_GetWeaponInfo( int currentweapon );
 
 //=================================================

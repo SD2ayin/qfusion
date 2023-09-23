@@ -116,6 +116,8 @@ cvar_t *cg_particles;
 cvar_t *cg_showhelp;
 cvar_t *cg_showClamp;
 
+cvar_t *debug_impact;
+
 cvar_t *cg_damage_indicator;
 cvar_t *cg_damage_indicator_time;
 cvar_t *cg_pickup_flash;
@@ -647,6 +649,8 @@ static void CG_RegisterVariables( void ) {
 	cg_showhelp =       Cvar_Get( "cg_showhelp", "1", CVAR_ARCHIVE );
 	cg_predictLaserBeam =   Cvar_Get( "cg_predictLaserBeam", "1", CVAR_ARCHIVE );
 	cg_showSelfShadow = Cvar_Get( "cg_showSelfShadow", "0", CVAR_ARCHIVE );
+
+    debug_impact = Cvar_Get("debug_impact", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
 
 	cg_cartoonEffects =     Cvar_Get( "cg_cartoonEffects", "7", CVAR_ARCHIVE );
 	cg_cartoonHitEffect =   Cvar_Get( "cg_cartoonHitEffect", "1", CVAR_ARCHIVE );

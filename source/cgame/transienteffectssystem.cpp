@@ -87,71 +87,25 @@ static const byte_vec4_t kLightFireDecayPalette[] {
 };
 
 struct FireHullLayerParamsHolder {
-	SimulatedHullsSystem::ColorChangeTimelineNode darkColorChangeTimeline[5][3] {
+	SimulatedHullsSystem::ColorChangeTimelineNode darkColorChangeTimeline[1][3] {
 		{
 			{ /* Layer 0 */ },
 			{
-				.activateAtLifetimeFraction = 0.35f, .replacementPalette = kFireCoreReplacementPalette,
+				.activateAtLifetimeFraction = 1.0f, .replacementPalette = kFireCoreReplacementPalette, // activate: 0.35
 				.sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.1f,
 			},
 			{
-				.activateAtLifetimeFraction = 0.6f, .replacementPalette = kFireReplacementPalette,
+				.activateAtLifetimeFraction = 1.0f, .replacementPalette = kFireReplacementPalette, // activate 0.6
 				.sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
 			}
 		},
-		{
-			{ /* Layer 1 */ },
-			{
-				.activateAtLifetimeFraction = 0.35f, .replacementPalette = kFireReplacementPalette,
-				.sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.2f,
-			},
-			{
-				.activateAtLifetimeFraction = 0.6f, .replacementPalette = kFireReplacementPalette,
-				.sumOfDropChanceForThisSegment = 2.5f, .sumOfReplacementChanceForThisSegment = 3.5f,
-			}
-		},
-		{
-			{ /* Layer 2 */ },
-			{
-				.activateAtLifetimeFraction = 0.3f, .replacementPalette = kFireReplacementPalette,
-				.sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.3f,
-			},
-			{
-				.activateAtLifetimeFraction = 0.6f, .replacementPalette = kFireReplacementPalette,
-				.sumOfDropChanceForThisSegment = 2.0f, .sumOfReplacementChanceForThisSegment = 4.0f,
-				.allowIncreasingOpacity = true
-			}
-		},
-		{
-			{ /* Layer 3 */ },
-			{
-				.activateAtLifetimeFraction = 0.3f, .replacementPalette = kFireReplacementPalette,
-				.sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.5f,
-			},
-			{
-				.activateAtLifetimeFraction = 0.55f,
-				.sumOfDropChanceForThisSegment = 2.0f, .sumOfReplacementChanceForThisSegment = 4.5f,
-				.allowIncreasingOpacity = true
-			}
-		},
-		{
-			{ /* Layer 4 */ },
-			{
-				.activateAtLifetimeFraction = 0.1f, .replacementPalette = kFireReplacementPalette,
-				.sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.5f,
-			},
-			{
-				.activateAtLifetimeFraction = 0.5f,
-				.sumOfDropChanceForThisSegment = 2.0f, .sumOfReplacementChanceForThisSegment = 4.5f,
-				.allowIncreasingOpacity = true
-			}
-		}
 	};
 
-	SimulatedHullsSystem::HullLayerParams darkHullLayerParams[5] {
+	/*SimulatedHullsSystem::HullLayerParams darkHullLayerParams[5] {
 		{
 			.speed = 22.5f, .finalOffset = 8.0f,
 			.speedSpikeChance = 0.05f, .minSpeedSpike = 10.0f, .maxSpeedSpike = 15.0f,
+            .noiseStrength = -30.0f, .noiseScale = 10.f,
 			.biasAlongChosenDir = 30.0f,
 			.baseInitialColor = { 1.0f, 0.9f, 0.9f, 1.0f },
 			.bulgeInitialColor = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -181,10 +135,25 @@ struct FireHullLayerParamsHolder {
 			.speed = 60.0f, .finalOffset = 0.0f,
 			.speedSpikeChance = 0.05f, .minSpeedSpike = 7.5f, .maxSpeedSpike = 15.0f,
 			.biasAlongChosenDir = 10.0f,
-			.baseInitialColor = { 1.0f, 0.5f, 0.2f, 0.7f },
-			.bulgeInitialColor = { 1.0f, 0.7f, 0.4f, 0.7f },
+			//.baseInitialColor = { 1.0f, 0.5f, 0.2f, 0.7f },
+			//.bulgeInitialColor = { 1.0f, 0.7f, 0.4f, 0.7f },
+            .baseInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
+            .bulgeInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
 		},
-	};
+	};*/
+
+    SimulatedHullsSystem::HullLayerParams darkHullLayerParams[1] {
+            {
+                    .speed = 70.0f, .finalOffset = 0.0f,
+                    .speedSpikeChance = 0.0f, .minSpeedSpike = 7.5f, .maxSpeedSpike = 15.0f,
+                    .noiseStrength = -50.0f, .noiseScale = 1.f,
+                    .biasAlongChosenDir = 10.0f,
+                    //.baseInitialColor = { 1.0f, 0.5f, 0.2f, 0.7f },
+                    //.bulgeInitialColor = { 1.0f, 0.7f, 0.4f, 0.7f },
+                    .baseInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
+                    .bulgeInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
+            },
+    };
 
 	SimulatedHullsSystem::HullLayerParams lightHullLayerParams[5];
 	SimulatedHullsSystem::ColorChangeTimelineNode lightColorChangeTimeline[5][3];
@@ -358,20 +327,27 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		fireHullLayerParams = kFireHullParams.lightHullLayerParams;
 	} else {
 		fireHullScale       = 1.55f;
-		fireHullTimeout     = 500;
+		fireHullTimeout     = 2700;
 		fireHullLayerParams = kFireHullParams.darkHullLayerParams;
 	}
 
 	if( auto *const hull = hullsSystem->allocFireHull( m_lastTime, fireHullTimeout ) ) {
 		hullsSystem->setupHullVertices( hull, fireOrigin, fireHullScale, fireHullLayerParams );
 		assert( !hull->layers[0].useDrawOnTopHack );
-		hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
-		hull->layers[0].useDrawOnTopHack = true;
-		hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
-		hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+        hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
+        hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
+        hull->layers[2].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
+        hull->layers[3].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
+		hull->layers[0].useDrawOnTopHack = false;
+        hull->layers[1].useDrawOnTopHack = false;
+        hull->layers[2].useDrawOnTopHack = false;
+        hull->layers[3].useDrawOnTopHack = false;
+
+		//hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+		//hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
 
 		// We have to update material references due to invalidation upon restarts
-		g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
+		/*g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
 		g_fireOuterCloudMeshProps.material = cgs.media.shaderFireHullParticle;
 
 		g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAndCloudAppearanceRules {
@@ -387,7 +363,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		};
 
 		hull->layers[0].overrideAppearanceRules                   = &g_fireInnerCloudAppearanceRules;
-		hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;
+		hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;*/
 	}
 
 	if( cg_explosionsWave->integer ) {

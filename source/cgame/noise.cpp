@@ -280,3 +280,54 @@ void SimplexNoiseCurl(float x, float y, float z, vec_t *out) {
         VectorSet( out, 0, 0, 1 );
     }
 }
+
+inline float fract( float x ) {
+    return x - std::floor(x);
+}
+
+// algorithm from https://www.shadertoy.com/view/3d3fWN#
+inline void hash33(vec_t *p3, vec_t *out) {
+    vec3_t p = {fract(p3[0] * 0.1031f), fract(p3[1] * 0.11369f), fract(p3[2] * 0.13787)};
+    float pd = p[0] * (p[1] + 19.19f) + p[1] * (p[0] + 19.19f) + p[2] * (p[2] + 19.19f);
+    vec3_t pdv = {pd, pd, pd};
+    VectorAdd(p, pdv, p);
+    out[0] = fract( (p[0] + p[1]) * p[2]);
+    out[1] = fract( (p[0] + p[2]) * p[1]);
+    out[2] = fract( (p[1] + p[2]) * p[0]);
+}
+
+float VoronoiNoiseSquared(float x, float y, float z) {
+    // integer part
+    float i = std::floor(x);
+    float j = std::floor(y);
+    float k = std::floor(z);
+    vec3_t cell = {i, j, k};
+
+    // fractional part
+    float xf = x - i;
+    float yf = y - j;
+    float zf = z - k;
+    vec3_t rf = {xf, yf, zf};
+
+    float minDist = 1.f;
+
+    for(int l = -1; l <=1; l++) {
+        for (int m = -1; m <= 1; m++) {
+            for (int n = -1; n <= 1; n++) {
+                vec3_t offset = {(float)l, (float)m, (float)n};
+                vec3_t coord;
+                VectorAdd(cell, offset, coord);
+
+                vec3_t point;
+                hash33(coord, point);
+
+                vec3_t dist;
+                VectorAdd(offset, point, dist);
+                VectorSubtract(dist, rf, dist);
+                minDist = std::min(minDist, VectorLengthSquared(dist));
+            }
+        }
+    }
+
+    return minDist;
+}

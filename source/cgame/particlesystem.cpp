@@ -516,8 +516,8 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 	// Limit delta by sane bounds
 	const float deltaSeconds = 1e-3f * (float)wsw::clamp( (int)( currTime - m_lastTime ), 1, 33 );
 	m_lastTime = currTime;
-    unsigned int count;
-    count = 0;
+    //unsigned int count;
+    //count = 0;
 
 	// We split simulation/rendering loops for a better instructions cache utilization
 	for( FlocksBin &bin: m_bins ) {
@@ -529,7 +529,7 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 				if( flock->numActivatedParticles + flock->numDelayedParticles > 0 ) [[likely]] {
 					if( flock->shapeList ) {
 						simulate( flock, &m_rng, currTime, deltaSeconds );
-                        count += flock->numActivatedParticles;
+                        //count += flock->numActivatedParticles;
 					} else {
 						simulateWithoutClipping( flock, currTime, deltaSeconds );
 					}
@@ -539,9 +539,8 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 			}
 		}
 	}
-    if ( count > 1 ) {
-        Com_Printf("amount of particles:%i", count);
-    }
+    //if ( count > 1 ) {
+        //Com_Printf("amount of particles:%i", count);
 
 	m_frameFlareParticles.clear();
 	m_frameFlareColorLifespans.clear();
@@ -727,7 +726,7 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 		// TODO: Supply this 4-component vector explicitly
 		boundsBuilder.addPoint( particle->origin );
 
-        Com_Printf("origin: %f %f %f", particle->origin[0], particle->origin[1], particle->origin[2]);
+        //Com_Printf("origin: %f %f %f", particle->origin[0], particle->origin[1], particle->origin[2]);
 
 		if( flock->hasRotatingParticles ) {
 			particle->rotationAngle += particle->angularVelocity * deltaSeconds;
@@ -872,7 +871,6 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 			const float newSpeed = flock->restitution * ( oldSquareSpeed * rcpOldSpeed );
 			// Save the reflected velocity
 			VectorScale( reflectedVelocityDir, newSpeed, p->velocity );
-            Com_Printf("velocity: %f %f %f", p->velocity[0], p->velocity[1], p->velocity[2]);
 
 			// Save the trace endpos with a slight offset as an origin for the next step.
 			// This is not really correct but is OK.

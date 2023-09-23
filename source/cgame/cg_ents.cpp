@@ -185,6 +185,10 @@ static void CG_NewPacketEntityState( entity_state_t *state ) {
 				cg_entPModels[state->number].flash_time = cg.time;
 				cg_entPModels[state->number].barrel_time = cg.time;
 				cg_entPModels[state->number].belt_time = cg.time;
+				cg_entPModels[state->number].emitter_amount = 0;
+				cg_entPModels[state->number].emitter_time = 0;
+				cg_entPModels[state->number].emitter_time = cg.time;
+				cg_entPModels[state->number].fire_time = cg.time;
 				cg_entPModels[state->number].oldTime = cg.time;
 			}
 		} else {   // shuffle the last state to previous
@@ -580,7 +584,7 @@ static void CG_UpdateGenericEnt( centity_t *cent ) {
 		Vector4Set( cent->outlineColor, 0, 0, 0, 255 );
 	}
 
-	// set frame
+	//set frame
 	cent->ent.frame = cent->current.frame;
 	cent->ent.oldframe = cent->prev.frame;
 
