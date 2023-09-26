@@ -3,6 +3,7 @@
 #include "../client/client.h"
 #include "noise.h"
 #include "cg_local.h"
+#include "../game/ai/vec3.h"
 
 ParticleSystem::ParticleSystem() {
 	// TODO: All of this asks for exception-safety
@@ -714,10 +715,12 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
         if( flock->turbulence > 0.0f && particle->lifetimeFrac > 0.1f ) {
             vec4_t scaledOrigin;
             VectorScale( particle->origin, flock->turbulenceScale, scaledOrigin);
-            vec4_t turbulence;
-            SimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2], turbulence);
-            VectorScale(turbulence, flock->turbulence, turbulence);
-            VectorAdd( particle->effectiveVelocity, turbulence, particle->effectiveVelocity );
+            //vec3_t turbulence;
+            //SimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2], turbulence);
+            Vec3 turbulence = calcSimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2]);
+            vec3_t turbulenceData = {turbulence.Data()[0], turbulence.Data()[1], turbulence.Data()[2]};
+            VectorScale(turbulenceData, flock->turbulence, turbulenceData);
+            VectorAdd( particle->effectiveVelocity, turbulenceData, particle->effectiveVelocity );
         }
 
 		VectorMA( particle->velocity, deltaSeconds, accel, particle->velocity );

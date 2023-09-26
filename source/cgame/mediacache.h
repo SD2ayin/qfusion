@@ -251,6 +251,12 @@ public:
 	CachedMaterial shaderStoneDustSoft { this, wsw::StringView( "gfx/effects/stone_dust_soft" ) };
 	CachedMaterial shaderStoneDustHard { this, wsw::StringView( "gfx/effects/stone_dust_hard" ) };
 
+    CachedMaterial shaderSmokeLeft { this, wsw::StringView( "gfx/effects/realisticSmoke/smokeLeft/smokeLeft0001" ) };
+    CachedMaterial shaderSmokeUp { this, wsw::StringView( "gfx/effects/realisticSmoke/smokeUp/smokeUp0001" ) };
+    CachedMaterial shaderSmokeUpRight { this, wsw::StringView( "gfx/effects/realisticSmoke/smokeRightUp/smokeRightUp0001" ) };
+
+    CachedMaterial shaderPebble { this, wsw::StringView( "gfx/effects/pebble" ) };
+
 	CachedMaterial shaderStuccoDustSoft { this, wsw::StringView( "gfx/effects/stucco_dust_soft" ) };
 	CachedMaterial shaderStuccoDustMedium { this, wsw::StringView( "gfx/effects/stucco_dust_medium" ) };
 	CachedMaterial shaderStuccoDustHard { this, wsw::StringView( "gfx/effects/stucco_dust_hard" ) };
@@ -308,6 +314,7 @@ public:
 	CachedMaterial shaderLaser { this, wsw::StringView( "gfx/misc/laser" ) };
 
     CachedMaterial shaderSmokeHull { this, wsw::StringView( "gfx/misc/smokehull" ) };
+    CachedMaterial shaderFireHull { this, wsw::StringView( "gfx/misc/firehull" ) };
 
 	CachedMaterial shaderFlagFlare { this, wsw::StringView( PATH_FLAG_FLARE_SHADER ) };
 

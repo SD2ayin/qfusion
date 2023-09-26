@@ -48,12 +48,18 @@ TransientEffectsSystem::~TransientEffectsSystem() {
 		(uint8_t)( ( b ) * 255.0f ), \
 		(uint8_t)( ( a ) * 255.0f )  \
 	}
-
+/*
 static const byte_vec4_t kFireCoreReplacementPalette[] {
 	asByteColor( 1.00f, 0.67f, 0.56f, 0.56f ),
 	asByteColor( 1.00f, 0.67f, 0.50f, 0.67f ),
 	asByteColor( 1.00f, 0.56f, 0.42f, 0.50f ),
 	asByteColor( 1.00f, 0.56f, 0.42f, 0.28f ),
+};*/
+static const byte_vec4_t kFireCoreReplacementPalette[] {
+    asByteColor( 0.80f, 0.536f, 0.448f, 0.448f ),
+    asByteColor( 0.80f, 0.536f, 0.40f, 0.536f ),
+    asByteColor( 0.80f, 0.448f, 0.336f, 0.40f ),
+    asByteColor( 0.80f, 0.448f, 0.336f, 0.224f )
 };
 
 static const byte_vec4_t kFireReplacementPalette[] {
@@ -82,26 +88,98 @@ static const byte_vec4_t kLightFireDecayPalette[] {
 	asByteColor( 0.7f, 0.7f, 0.7f, 0.1f ),
 };
 
+static const byte_vec4_t kFadeOutPalette[] {
+        asByteColor( 0.1f, 0.0f, 0.0f, 1.0f ),
+        asByteColor( 0.06f, 0.02f, 0.0f, 1.0f ),
+        asByteColor( 0.f, 0.f, 0.f, 1.0f )
+};
+
 struct FireHullLayerParamsHolder {
-	SimulatedHullsSystem::ColorChangeTimelineNode darkColorChangeTimeline[1][3] {
+    SimulatedHullsSystem::ColorChangeTimelineNode darkColorChangeTimeline[5][4] {
 		{
 			{ /* Layer 0 */ },
 			{
-				.activateAtLifetimeFraction = 1.0f, .replacementPalette = kFireCoreReplacementPalette, // activate: 0.35
+                .activateAtLifetimeFraction = 0.35f, .replacementPalette = kFireCoreReplacementPalette,
 				.sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.1f,
 			},
 			{
-				.activateAtLifetimeFraction = 1.0f, .replacementPalette = kFireReplacementPalette, // activate 0.6
+                .activateAtLifetimeFraction = 0.6f, .replacementPalette = kFireReplacementPalette,
 				.sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
-			}
+			},
+            {
+                .activateAtLifetimeFraction = 0.85f, .replacementPalette = kFadeOutPalette,
+                .sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
+                }
 		},
+        {
+            { /* Layer 1 */ },
+            {
+                    .activateAtLifetimeFraction = 0.35f, .replacementPalette = kFireReplacementPalette,
+                    .sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.2f,
+            },
+            {
+                    .activateAtLifetimeFraction = 0.6f, .replacementPalette = kFireReplacementPalette,
+                    .sumOfDropChanceForThisSegment = 2.5f, .sumOfReplacementChanceForThisSegment = 3.5f,
+            },
+                {
+                        .activateAtLifetimeFraction = 0.85f, .replacementPalette = kFadeOutPalette,
+                        .sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
+                }
+        },
+        {
+            { /* Layer 2 */ },
+            {
+                    .activateAtLifetimeFraction = 0.3f, .replacementPalette = kFireReplacementPalette,
+                    .sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.3f,
+            },
+            {
+                    .activateAtLifetimeFraction = 0.6f, .replacementPalette = kFireReplacementPalette,
+                    .sumOfDropChanceForThisSegment = 2.0f, .sumOfReplacementChanceForThisSegment = 4.0f,
+                    .allowIncreasingOpacity = true
+            },
+                {
+                        .activateAtLifetimeFraction = 0.85f, .replacementPalette = kFadeOutPalette,
+                        .sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
+                }
+        },
+        {
+            { /* Layer 3 */ },
+            {
+                    .activateAtLifetimeFraction = 0.3f, .replacementPalette = kFireReplacementPalette,
+                    .sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.5f,
+            },
+            {
+                    .activateAtLifetimeFraction = 0.55f,
+                    .sumOfDropChanceForThisSegment = 2.0f, .sumOfReplacementChanceForThisSegment = 4.5f,
+                    .allowIncreasingOpacity = true
+            },
+                {
+                        .activateAtLifetimeFraction = 0.85f, .replacementPalette = kFadeOutPalette,
+                        .sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
+                }
+        },
+        {
+            { /* Layer 4 */ },
+            {
+                    .activateAtLifetimeFraction = 0.1f, .replacementPalette = kFireReplacementPalette,
+                    .sumOfDropChanceForThisSegment = 0.0f, .sumOfReplacementChanceForThisSegment = 0.5f,
+            },
+            {
+                    .activateAtLifetimeFraction = 0.5f,
+                    .sumOfDropChanceForThisSegment = 2.0f, .sumOfReplacementChanceForThisSegment = 4.5f,
+                    .allowIncreasingOpacity = true
+            },
+                {
+                        .activateAtLifetimeFraction = 0.85f, .replacementPalette = kFadeOutPalette,
+                        .sumOfDropChanceForThisSegment = 3.5f, .sumOfReplacementChanceForThisSegment = 0.5f,
+                }
+        }
 	};
 
-	/*SimulatedHullsSystem::HullLayerParams darkHullLayerParams[5] {
+	SimulatedHullsSystem::HullLayerParams darkHullLayerParams[5] {
 		{
 			.speed = 22.5f, .finalOffset = 8.0f,
 			.speedSpikeChance = 0.05f, .minSpeedSpike = 10.0f, .maxSpeedSpike = 15.0f,
-            .noiseStrength = -30.0f, .noiseScale = 10.f,
 			.biasAlongChosenDir = 30.0f,
 			.baseInitialColor = { 1.0f, 0.9f, 0.9f, 1.0f },
 			.bulgeInitialColor = { 1.0f, 1.0f, 1.0f, 1.0f },
@@ -131,25 +209,10 @@ struct FireHullLayerParamsHolder {
 			.speed = 60.0f, .finalOffset = 0.0f,
 			.speedSpikeChance = 0.05f, .minSpeedSpike = 7.5f, .maxSpeedSpike = 15.0f,
 			.biasAlongChosenDir = 10.0f,
-			//.baseInitialColor = { 1.0f, 0.5f, 0.2f, 0.7f },
-			//.bulgeInitialColor = { 1.0f, 0.7f, 0.4f, 0.7f },
-            .baseInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
-            .bulgeInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
+            .baseInitialColor = { 1.0f, 0.5f, 0.2f, 0.7f },
+            .bulgeInitialColor = { 1.0f, 0.7f, 0.4f, 0.7f },
 		},
-	};*/
-
-    SimulatedHullsSystem::HullLayerParams darkHullLayerParams[1] {
-            {
-                    .speed = 70.0f, .finalOffset = 0.0f,
-                    .speedSpikeChance = 0.0f, .minSpeedSpike = 7.5f, .maxSpeedSpike = 15.0f,
-                    .noiseStrength = -50.0f, .noiseScale = 1.f,
-                    .biasAlongChosenDir = 10.0f,
-                    //.baseInitialColor = { 1.0f, 0.5f, 0.2f, 0.7f },
-                    //.bulgeInitialColor = { 1.0f, 0.7f, 0.4f, 0.7f },
-                    .baseInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
-                    .bulgeInitialColor = { 0.1f, 0.1f, 0.1f, 1.0f },
-            },
-    };
+	};
 
 	SimulatedHullsSystem::HullLayerParams lightHullLayerParams[5];
 	SimulatedHullsSystem::ColorChangeTimelineNode lightColorChangeTimeline[5][3];
@@ -323,27 +386,20 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		fireHullLayerParams = kFireHullParams.lightHullLayerParams;
 	} else {
 		fireHullScale       = 1.55f;
-		fireHullTimeout     = 2700;
+		fireHullTimeout     = 500;
 		fireHullLayerParams = kFireHullParams.darkHullLayerParams;
 	}
 
 	if( auto *const hull = hullsSystem->allocFireHull( m_lastTime, fireHullTimeout ) ) {
 		hullsSystem->setupHullVertices( hull, fireOrigin, fireHullScale, fireHullLayerParams );
 		assert( !hull->layers[0].useDrawOnTopHack );
-        hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
-        hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
-        hull->layers[2].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
-        hull->layers[3].overrideHullFade = SimulatedHullsSystem::ViewDotFade::FadeOutCenterLinear;
-		hull->layers[0].useDrawOnTopHack = false;
-        hull->layers[1].useDrawOnTopHack = false;
-        hull->layers[2].useDrawOnTopHack = false;
-        hull->layers[3].useDrawOnTopHack = false;
-
-		//hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
-		//hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+        hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
+        hull->layers[0].useDrawOnTopHack = true;
+        hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+        hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
 
 		// We have to update material references due to invalidation upon restarts
-		/*g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
+		g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
 		g_fireOuterCloudMeshProps.material = cgs.media.shaderFireHullParticle;
 
 		g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAndCloudAppearanceRules {
@@ -359,7 +415,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		};
 
 		hull->layers[0].overrideAppearanceRules                   = &g_fireInnerCloudAppearanceRules;
-		hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;*/
+		hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;
 	}
 
 	if( cg_explosionsWave->integer ) {
@@ -370,6 +426,37 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 	}
 
 	if( smokeOrigin ) {
+        if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 2500 ) ) {
+            hullsSystem->setupHullVertices( hull, smokeOrigin, fireHullScale, fireHullLayerParams );
+            Com_Printf("bbbbb");
+            assert( !hull->layers[0].useDrawOnTopHack );
+            hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
+            hull->layers[0].useDrawOnTopHack = true;
+            hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+            hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+
+            // We have to update material references due to invalidation upon restarts
+            g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
+            g_fireOuterCloudMeshProps.material = cgs.media.shaderFireHullParticle;
+
+            g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAndCloudAppearanceRules {
+                    .cloudRules = SimulatedHullsSystem::CloudAppearanceRules {
+                            .spanOfMeshProps = { &g_fireInnerCloudMeshProps, 1 },
+                    }
+            };
+
+            g_fireOuterCloudAppearanceRules = SimulatedHullsSystem::SolidAndCloudAppearanceRules {
+                    .cloudRules = SimulatedHullsSystem::CloudAppearanceRules {
+                            .spanOfMeshProps = { &g_fireOuterCloudMeshProps, 1 },
+                    }
+            };
+
+            hull->layers[0].overrideAppearanceRules                   = &g_fireInnerCloudAppearanceRules;
+            hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;
+        }
+        Com_Printf("aaaaa");
+    }
+        /*
 		g_smokeOuterLayerCloudMeshProps[0].material = cgs.media.shaderSmokeHullHardParticle;
 		g_smokeOuterLayerCloudMeshProps[1].material = cgs.media.shaderSmokeHullSoftParticle;
 
@@ -415,7 +502,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		for( const SmokeHullParams &hullSpawnParams: spawnSmokeHullParams ) {
 			spawnSmokeHull( m_lastTime, smokeOrigin, hullSpawnParams );
 		}
-	}
+	}*/
 
 	if( cg_explosionsClusters->integer ) {
 		std::span<const SimulatedHullsSystem::HullLayerParams> clusterHullLayerParams;
@@ -462,7 +549,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		}
 	}
 }
-
+/*
 void TransientEffectsSystem::spawnSmokeHull( int64_t currTime, const float *origin, const SmokeHullParams &params ) {
 	if( auto *const hull = cg.simulatedHullsSystem.allocSmokeHull( currTime, 2000 ) ) {
 		hull->archimedesTopAccel      = params.archimedesAccel.top;
@@ -486,7 +573,7 @@ void TransientEffectsSystem::spawnSmokeHull( int64_t currTime, const float *orig
 		cg.simulatedHullsSystem.setupHullVertices( hull, origin, initialSmokeColor,
 												   params.speed.mean, params.speed.spread, params.appearanceRules );
 	}
-}
+}*/
 
 void TransientEffectsSystem::spawnCartoonHitEffect( const float *origin, const float *dir, int damage ) {
 	if( cg_cartoonHitEffect->integer ) {

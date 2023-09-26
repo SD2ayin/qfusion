@@ -497,13 +497,14 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 			//.gravity    = -75.0f,
             //.drag       = 0.2f,
 			//.vorticity  = 5000.0f,
+            .gravity    = 0.0f,
 			.refAxis    = { impactNormal[0], impactNormal[1], impactNormal[2] },
             .turbulence = 300.0f,
-            .turbulenceScale = 0.007f,
+            .turbulenceScale = 0.006f,
             .bounceCount = { .minInclusive = 10, .maxInclusive = 10 },
             .speed = { .min = 1, .max = 3 },
 			.percentage = { .min = 0.5f, .max = 0.8f },
-            .timeout    = { .min = 3000, .max = 3600 },
+            .timeout    = { .min = 4000, .max = 4800 },
 			//.timeout    = { .min = 150, .max = 180 },
 		};
 		Particle::AppearanceRules appearanceRules {
@@ -1435,44 +1436,78 @@ void EffectsSystemFacade::spawnBulletMetalDebrisParticles( unsigned delay, const
 
 static const RgbaLifespan kGreyDustColors[1] {
 	{
-		.initial  = { 0.5f, 0.5f, 0.5f, 0.9f },
-		.fadedIn  = { 0.5f, 0.5f, 0.5f, 0.9f },
-		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.8f },
+		.initial  = { 0.2f, 0.2f, 0.2f, 0.9f },
+		.fadedIn  = { 0.2f, 0.2f, 0.2f, 0.4f },
+		.fadedOut = { 0.2f, 0.2f, 0.2f, 0.0f },
 		.startFadingOutAtLifetimeFrac = 0.67f
-	}
+	    }
 };
 
-static shader_s *g_stoneDustMaterialsStorage[2];
+static const RgbaLifespan kPebbleColors[1] {
+        {
+        .initial  = { 0.13f, 0.094f, 0.063f, 1.0f },
+        .fadedIn  = { 0.13f, 0.094f, 0.063f, 1.0f },
+        .fadedOut = { 0.13f, 0.094f, 0.063f, 1.0f },
+        }
+};
+
+static shader_s *g_stoneDustMaterialsStorage[3];
 
 void EffectsSystemFacade::spawnStoneDustParticles( unsigned delay, const FlockOrientation &orientation,
 												   float upShiftScale, unsigned materialParam,
 												   float dustPercentageScale ) {
-	g_stoneDustMaterialsStorage[0] = cgs.media.shaderStoneDustHard;
-	g_stoneDustMaterialsStorage[1] = cgs.media.shaderStoneDustSoft;
+	g_stoneDustMaterialsStorage[0] = cgs.media.shaderSmokeLeft;
+    g_stoneDustMaterialsStorage[1] = cgs.media.shaderSmokeUp;
+    g_stoneDustMaterialsStorage[2] = cgs.media.shaderSmokeUpRight;
 
 	const Particle::AppearanceRules appearanceRules {
 		.materials           = g_stoneDustMaterialsStorage,
 		.colors              = kGreyDustColors,
 		.numMaterials        = std::size( g_stoneDustMaterialsStorage ),
 		.geometryRules       = Particle::SpriteRules {
-			.radius = { .mean = 12.0f, .spread = 7.5f }, .sizeBehaviour = Particle::Shrinking
+			.radius = { .mean = 19.0f, .spread = 5.0f }, .sizeBehaviour = Particle::SizeNotChanging
 		},
 		.applyVertexDynLight = true
 	};
 
 	ConicalFlockParams flockParams {
-		.gravity         = 0.0f,
+		.gravity         = -125.f,
 		.drag            = 0.03f,
 		.restitution     = 1.0f,
 		.angle           = 0.0f,
-		.speed           = { .min = 2.0f, .max = 4.0f },
+		.speed           = { .min = 90.0f, .max = 120.0f },
+        .shiftSpeed      = { .min = 10.f, .max = 15.f},
 		.angularVelocity = { .min = 0.0f, .max = 0.0f },
-		.percentage      = { .min = 0.1f * dustPercentageScale, .max = 0.1f * dustPercentageScale },
-		.timeout         = { .min = 750, .max = 1000 },
+		.percentage      = { .min = 0.4f * dustPercentageScale, .max = 0.48f * dustPercentageScale },
+		.timeout         = { .min = 400, .max = 620 },
 	};
 
 	orientation.copyToFlockParams( &flockParams );
 	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
+
+    const Particle::AppearanceRules appearanceRules2 {
+            .materials           = cgs.media.shaderPebble.getAddressOfHandle(),
+            .colors              = kPebbleColors,
+            .geometryRules       = Particle::SpriteRules {
+                    .radius = { .mean = 2.7f, .spread = 0.8f }, .sizeBehaviour = Particle::SizeNotChanging
+            },
+            .applyVertexDynLight = true
+    };
+
+    ConicalFlockParams flockParams2 {
+            .gravity         = GRAVITY,
+            .drag            = 0.03f,
+            .restitution     = 1.0f,
+            .angle           = 0.0f,
+            .bounceCount     = { .minInclusive = 1, .maxInclusive = 2 },
+            .speed           = { .min = 300.0f, .max = 380.0f },
+            .angularVelocity = { .min = -360.0f, .max = 360.0f },
+            .percentage      = { .min = 0.7f * dustPercentageScale, .max = 0.87f * dustPercentageScale },
+            .timeout         = { .min = 700, .max = 800 },
+    };
+
+    orientation.copyToFlockParams( &flockParams2 );
+    spawnOrPostponeImpactParticleEffect( delay, flockParams2, appearanceRules2 );
 }
 
 static shader_s *g_stuccoDustMaterialsStorage[3];

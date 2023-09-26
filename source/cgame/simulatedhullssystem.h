@@ -19,7 +19,6 @@ public:
 		NoFade, FadeOutContour, FadeOutCenterLinear, FadeOutCenterQuadratic, FadeOutCenterCubic
 	};
 	enum class ZFade : uint8_t { NoFade, FadeOutBottom };
-    enum class NoiseFade : uint8_t { NoFade, FadeByNoise };
 
 	// TODO: Fade/light props should logically belong to these rules
 
@@ -83,13 +82,7 @@ public:
 		float speed;
 		float finalOffset;
 		float speedSpikeChance;
-        float minSpeedSpike, maxSpeedSpike;
-        float noiseStrength {0.0f};
-        float noiseScale {1.0f};
-        //enum noiseType : uint8_t {
-            //voronoiSquared,
-            //simplex,
-        //};
+		float minSpeedSpike, maxSpeedSpike;
 		float biasAlongChosenDir;
 		float baseInitialColor[4];
 		float bulgeInitialColor[4];
@@ -363,7 +356,7 @@ private:
 		bool applyVertexDynLight { false };
 		ViewDotFade vertexViewDotFade { ViewDotFade::NoFade };
 
-		void simulate( int64_t currTime, float timeDeltaSeconds, float lifeTimeFrac, wsw::RandomGenerator *__restrict rng );
+		void simulate( int64_t currTime, float timeDeltaSeconds, wsw::RandomGenerator *__restrict rng );
 	};
 
 	template <unsigned SubdivLevel, unsigned NumLayers>
@@ -407,16 +400,115 @@ private:
 		}
 	};
 
+    /////////////////
+    // new code
+    struct BaseKeyframedHull {
+        // Externally managed, should point to the unit mesh data
+        const vec4_t *vertexMoveDirections;
+        // Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
+        float *limitsAtDirections;
+        int64_t spawnTime { 0 };
+
+        struct Layer {
+            vec4_t mins, maxs;
+            vec4_t *vertexPositions;
+            // Contains pairs (speed, distance from origin along the direction)
+            vec2_t *vertexSpeedsAndDistances;
+            byte_vec4_t *vertexColors;
+            SharedMeshData *sharedMeshData;
+            HullSolidDynamicMesh *submittedSolidMesh;
+            HullCloudDynamicMesh *submittedCloudMeshes[1];
+
+            // Subtracted from limitsAtDirections for this layer, must be non-negative.
+            // This offset is supposed to prevent hulls from ending at the same distance in the end position.
+            float finalOffset { 0 };
+
+            std::span<const ColorChangeTimelineNode> colorChangeTimeline;
+            ColorChangeState colorChangeState;
+
+            const AppearanceRules *overrideAppearanceRules;
+            std::optional<ViewDotFade> overrideHullFade;
+            std::optional<float> overrideMinFadedOutAlpha;
+            bool useDrawOnTopHack { false };
+        };
+
+        AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
+
+        Layer *layers { nullptr };
+        const DynamicMesh **submittedSolidMeshesBuffer;
+        const DynamicMesh **submittedCloudMeshesBuffer;
+
+        vec4_t mins, maxs;
+        vec3_t origin;
+
+        unsigned numLayers { 0 };
+        unsigned lifetime { 0 };
+
+        float minFadedOutAlpha { 0.0f };
+
+        uint8_t subdivLevel { 0 };
+        bool applyVertexDynLight { false };
+        ViewDotFade vertexViewDotFade { ViewDotFade::NoFade };
+
+        void simulate( int64_t currTime, float timeDeltaSeconds, wsw::RandomGenerator *__restrict rng );
+    };
+
+    template <unsigned SubdivLevel, unsigned NumLayers>
+    struct KeyframedHull : public BaseKeyframedHull {
+        static constexpr auto kNumVertices = kNumVerticesForSubdivLevel[SubdivLevel];
+
+        KeyframedHull<SubdivLevel, NumLayers> *prev { nullptr }, *next { nullptr };
+
+        Layer storageOfLayers[NumLayers];
+        float storageOfLimits[kNumVertices];
+        vec4_t storageOfPositions[kNumVertices * NumLayers];
+        vec2_t storageOfSpeedsAndDistances[kNumVertices * NumLayers];
+        byte_vec4_t storageOfColors[kNumVertices * NumLayers];
+        SharedMeshData storageOfSharedMeshData[NumLayers];
+        // TODO: Allocate dynamically on demand?
+        // TODO: Optimize the memory layout
+        HullSolidDynamicMesh storageOfSolidMeshes[NumLayers];
+        HullCloudDynamicMesh storageOfCloudMeshes[NumLayers];
+        const DynamicMesh *storageOfSolidMeshPointers[NumLayers];
+        const DynamicMesh *storageOfCloudMeshPointers[NumLayers];
+
+        KeyframedHull() {
+            this->numLayers                  = NumLayers;
+            this->subdivLevel                = SubdivLevel;
+            this->layers                     = &storageOfLayers[0];
+            this->limitsAtDirections         = &storageOfLimits[0];
+            this->submittedSolidMeshesBuffer = storageOfSolidMeshPointers;
+            this->submittedCloudMeshesBuffer = storageOfCloudMeshPointers;
+            for( unsigned i = 0; i < NumLayers; ++i ) {
+                Layer *const layer              = &layers[i];
+                layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
+                layer->vertexSpeedsAndDistances = &storageOfSpeedsAndDistances[i * kNumVertices];
+                layer->vertexColors             = &storageOfColors[i * kNumVertices];
+                layer->sharedMeshData           = &storageOfSharedMeshData[i];
+                layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
+
+                // There is a single mesh per layer
+                assert( std::size( layer->submittedCloudMeshes ) == 1 );
+                layer->submittedCloudMeshes[0] = &storageOfCloudMeshes[i];
+            }
+        }
+    };
+    // end new code
+    //////////////
+
+
 	using FireHull        = ConcentricSimulatedHull<3, 5>;
 	using FireClusterHull = ConcentricSimulatedHull<1, 2>;
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
-	using SmokeHull       = RegularSimulatedHull<3, true>;
+	//using SmokeHull       = RegularSimulatedHull<3, true>;
+    using toonSmokeHull   = KeyframedHull<3, 3>;
 	using WaveHull        = RegularSimulatedHull<2>;
 
 	void unlinkAndFreeFireHull( FireHull *hull );
 	void unlinkAndFreeFireClusterHull( FireClusterHull *hull );
 	void unlinkAndFreeBlastHull( BlastHull *hull );
-	void unlinkAndFreeSmokeHull( SmokeHull *hull );
+	//void unlinkAndFreeSmokeHull( SmokeHull *hull );
+    void unlinkAndFreeToonSmokeHull( toonSmokeHull *hull);
 	void unlinkAndFreeWaveHull( WaveHull *hull );
 
 	template <typename Hull, bool HasShapeLists>
@@ -431,8 +523,10 @@ private:
 	auto allocFireClusterHull( int64_t currTime, unsigned lifetime ) -> FireClusterHull *;
 	[[nodiscard]]
 	auto allocBlastHull( int64_t currTime, unsigned lifetime ) -> BlastHull *;
-	[[nodiscard]]
-	auto allocSmokeHull( int64_t currTime, unsigned lifetime ) -> SmokeHull *;
+    [[nodiscard]]
+    auto allocToonSmokeHull( int64_t currTime, unsigned lifetime ) -> toonSmokeHull *;
+	//[[nodiscard]]
+	//auto allocSmokeHull( int64_t currTime, unsigned lifetime ) -> SmokeHull *;
 	[[nodiscard]]
 	auto allocWaveHull( int64_t currTime, unsigned lifetime ) -> WaveHull *;
 
@@ -443,6 +537,10 @@ private:
 	void setupHullVertices( BaseConcentricSimulatedHull *hull, const float *origin,
 							float scale, std::span<const HullLayerParams> paramsOfLayers,
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+
+    void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
+                            float scale, std::span<const HullLayerParams> paramsOfLayers,
+                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	[[maybe_unused]]
 	static bool processColorChange( int64_t currTime, int64_t spawnTime, unsigned effectDuration,
@@ -459,22 +557,25 @@ private:
 	FireHull *m_fireHullsHead { nullptr };
 	FireClusterHull *m_fireClusterHullsHead { nullptr };
 	BlastHull *m_blastHullsHead { nullptr };
-	SmokeHull *m_smokeHullsHead { nullptr };
+	//SmokeHull *m_smokeHullsHead { nullptr };
+    toonSmokeHull *m_toonSmokeHullsHead { nullptr };
 	WaveHull *m_waveHullsHead { nullptr };
 
 	static constexpr unsigned kMaxFireHulls  = 32;
 	static constexpr unsigned kMaxFireClusterHulls = kMaxFireHulls * 2;
 	static constexpr unsigned kMaxBlastHulls = 32;
-	static constexpr unsigned kMaxSmokeHulls = kMaxFireHulls * 2;
+	//static constexpr unsigned kMaxSmokeHulls = kMaxFireHulls * 2;
+    static constexpr unsigned kMaxToonSmokeHulls = kMaxFireHulls;
 	static constexpr unsigned kMaxWaveHulls  = kMaxFireHulls;
-
-	wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists;
+	//wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists;
+    wsw::StaticVector<CMShapeList *, kMaxWaveHulls> m_freeShapeLists;
 	CMShapeList *m_tmpShapeList { nullptr };
 
 	wsw::HeapBasedFreelistAllocator m_fireHullsAllocator { sizeof( FireHull ), kMaxFireHulls };
 	wsw::HeapBasedFreelistAllocator m_fireClusterHullsAllocator { sizeof( FireClusterHull ), kMaxFireHulls };
 	wsw::HeapBasedFreelistAllocator m_blastHullsAllocator { sizeof( BlastHull ), kMaxBlastHulls };
-	wsw::HeapBasedFreelistAllocator m_smokeHullsAllocator { sizeof( SmokeHull ), kMaxSmokeHulls };
+	//wsw::HeapBasedFreelistAllocator m_smokeHullsAllocator { sizeof( SmokeHull ), kMaxSmokeHulls };
+    wsw::HeapBasedFreelistAllocator m_toonSmokeHullsAllocator { sizeof( toonSmokeHull ), kMaxToonSmokeHulls };
 	wsw::HeapBasedFreelistAllocator m_waveHullsAllocator { sizeof( WaveHull ), kMaxWaveHulls };
 
 	// Can't specify byte_vec4_t as the template parameter
