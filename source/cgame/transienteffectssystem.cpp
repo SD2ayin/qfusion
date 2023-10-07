@@ -271,6 +271,10 @@ struct FireHullLayerParamsHolder {
 
 static const FireHullLayerParamsHolder kFireHullParams;
 
+static BasicHullsHolder basicHullsHolder;
+const auto [verticesSpan, indicesSpan, neighboursSpan] = basicHullsHolder.getIcosphereForLevel( 3 );
+SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet {.lifeTimeFraction = 0.0f, .offsets =};
+
 static const byte_vec4_t kSmokeSoftLayerFadeInPalette[] {
 	asByteColor( 0.65f, 0.65f, 0.65f, 0.25f ),
 	asByteColor( 0.70f, 0.70f, 0.70f, 0.25f ),
@@ -431,7 +435,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 
 	if( smokeOrigin ) {
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 2500 ) ) {
-            hullsSystem->setupHullVertices( hull, smokeOrigin, fireHullScale, fireHullLayerParams );
+            hullsSystem->setupHullVertices( hull, smokeOrigin, fireHullScale, fireHullLayerParams, toonSmokeKeyframeSet );
             Com_Printf("bbbbb");
             assert( !hull->layers[0].useDrawOnTopHack );
             hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;

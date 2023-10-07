@@ -650,7 +650,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 }
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                                              float scale, std::span<const HullLayerParams> layerParams,
+                                              float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe> offsetKeyframeSet,
                                               const AppearanceRules &appearanceRules ) {
     assert( layerParams.size() == hull->numLayers );
 
@@ -776,6 +776,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     VectorCopy( origin, hull->origin );
     hull->vertexMoveDirections = vertices;
+
+    hull->offsetKeyframeSet = offsetKeyframeSet.data();
 
     hull->appearanceRules = appearanceRules;
 }
