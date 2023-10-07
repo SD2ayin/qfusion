@@ -1351,10 +1351,10 @@ static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Pa
 	assert( sizeBehaviour != Particle::SizeNotChanging );
 
 	float result;
-	if( sizeBehaviour == Particle::Expanding ) {
+	if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
 		// Grow faster than the linear growth
 		result = Q_Sqrt( lifetimeFrac );
-	} else if( sizeBehaviour == Particle::Shrinking ) {
+	} else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
 		// Shrink faster than the linear growth
 		result = ( 1.0f - lifetimeFrac );
 		result *= result;
@@ -1538,7 +1538,9 @@ static void submitSparkParticlesToBackend( const FrontendToBackendShared *fsh,
 
 		if( sparkRules->sizeBehaviour != Particle::SizeNotChanging ) {
 			const float sizeFrac = calcSizeFracForLifetimeFrac( particle->lifetimeFrac, sparkRules->sizeBehaviour );
-			length *= sizeFrac;
+            if ( sparkRules->sizeBehaviour != Particle::Thickening && sparkRules->sizeBehaviour != Particle::Thinning && sparkRules->sizeBehaviour != Particle::ThickeningAndThinning ) {
+                length *= sizeFrac;
+            }
 			width  *= sizeFrac;
 		}
 
@@ -1548,14 +1550,14 @@ static void submitSparkParticlesToBackend( const FrontendToBackendShared *fsh,
 
 		vec3_t particleDir;
 		float fromFrac, toFrac;
-		if( float squareSpeed = VectorLengthSquared( particle->velocity ); squareSpeed > 1.0f ) [[likely]] {
+		if( float squareSpeed = VectorLengthSquared( particle->effectiveVelocity ); squareSpeed > 1.0f ) [[likely]] {
 			const float rcpSpeed = Q_RSqrt( squareSpeed );
 			if( particle->rotationAngle == 0.0f ) [[likely]] {
-				VectorScale( particle->velocity, rcpSpeed, particleDir );
+				VectorScale( particle->effectiveVelocity, rcpSpeed, particleDir );
 				fromFrac = 0.0f, toFrac = 1.0f;
 			} else {
 				vec3_t tmpParticleDir;
-				VectorScale( particle->velocity, rcpSpeed, tmpParticleDir );
+				VectorScale( particle->effectiveVelocity, rcpSpeed, tmpParticleDir );
 
 				mat3_t rotationMatrix;
 				const float *rotationAxis = kPredefinedDirs[particle->rotationAxisIndex];
