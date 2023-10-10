@@ -23,7 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../cgame/cg_local.h"
 #include "../client/client.h"
 #include "../qcommon/links.h"
+#include "../cgame/simulatedhullssystem.h"
+#include "../cgame/noise.h"
 
+#include <unordered_map>
 #include <cstdlib>
 #include <cstring>
 
@@ -271,6 +274,71 @@ struct FireHullLayerParamsHolder {
 
 static const FireHullLayerParamsHolder kFireHullParams;
 
+struct ToonSmokeOffsetKeyframeHolder {
+    static const int numVerts = 642;
+    static const int numKeyframes = 20;
+    const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(3);
+    const vec4_t *vertices = verticesSpan.data();
+    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
+    ToonSmokeOffsetKeyframeHolder() noexcept {
+        for (int i = 0; i < numKeyframes; i++) {
+            auto *vertexOffsets = new float[numVerts];
+            // normalize the number of the keyframes so we get a range from 0-1 for easy mathematical manipulation
+            const float x = (float)(i) / (float)(numKeyframes);
+            const float expansion = -(x-1.f)*(x-1.f) + 1.f;
+            for (int vert = 0; vert < numVerts; vert++ ) {
+                const float noise = VoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
+                //const float noise = (float)(vert) / (float)(numVerts);
+                vertexOffsets[vert] = 60.0f * expansion * ( 1.0f - 0.7f * noise );
+            }
+
+            toonSmokeKeyframeSet[i].offsets = vertexOffsets;
+            toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
+        }
+    }
+};
+
+static const byte_vec4_t kToonSmokePalette[] {
+        asByteColor( 0.1f, 0.1f, 0.1f, 1.0f ),
+        asByteColor( 0.1f, 0.1f, 0.1f, 1.0f ),
+};
+/*
+static const SimulatedHullsSystem::ColorChangeTimelineNode kToonSmokeColorChangeTimeline[2] {
+        {
+                .activateAtLifetimeFraction = 0.1f, .replacementPalette = kToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.1f,
+                .allowIncreasingOpacity = true,
+        },
+        {
+                .activateAtLifetimeFraction = 0.90f, .replacementPalette = kToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.8f,
+                .allowIncreasingOpacity = true,
+        }
+};
+
+
+static const SimulatedHullsSystem::HullLayerParams kToonSmokeLayerParams[2] {
+        {
+            .speed = 0.0f, .finalOffset = 0.0f,
+            .speedSpikeChance = 0.10f, .minSpeedSpike = 5.0f, .maxSpeedSpike = 20.0f,
+            .biasAlongChosenDir = 15.0f,
+            .baseInitialColor = {0.9f, 1.0f, 0.6f, 1.0f},
+            .bulgeInitialColor = {0.9f, 1.0f, 1.0f, 1.0f},
+            .colorChangeTimeline = kToonSmokeColorChangeTimeline
+        },
+        {
+            .speed = 0.0f, .finalOffset = 0.0f,
+            .speedSpikeChance = 0.10f, .minSpeedSpike = 5.0f, .maxSpeedSpike = 20.0f,
+            .biasAlongChosenDir = 15.0f,
+            .baseInitialColor = {0.9f, 1.0f, 0.6f, 1.0f},
+            .bulgeInitialColor = {0.9f, 1.0f, 1.0f, 1.0f},
+            .colorChangeTimeline = kToonSmokeColorChangeTimeline
+        }
+};
+*/
+
+static const ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes;
+
 static const byte_vec4_t kSmokeSoftLayerFadeInPalette[] {
 	asByteColor( 0.65f, 0.65f, 0.65f, 0.25f ),
 	asByteColor( 0.70f, 0.70f, 0.70f, 0.25f ),
@@ -386,11 +454,13 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 	std::span<const SimulatedHullsSystem::HullLayerParams> fireHullLayerParams;
 	if( cg_explosionsSmoke->integer ) {
 		fireHullScale       = 1.40f;
-		fireHullTimeout     = 550;
+		//fireHullTimeout     = 550;
+        fireHullTimeout     = 10;
 		fireHullLayerParams = kFireHullParams.lightHullLayerParams;
 	} else {
 		fireHullScale       = 1.55f;
-		fireHullTimeout     = 500;
+		//fireHullTimeout     = 500;
+        fireHullTimeout     = 10;
 		fireHullLayerParams = kFireHullParams.darkHullLayerParams;
 	}
 
@@ -430,10 +500,17 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 	}
 
 	if( smokeOrigin ) {
+        for (int i = 0; i < 20; i++) {
+            Com_Printf("offset:%f lifefrac:%f", &toonSmokeKeyframes.toonSmokeKeyframeSet[i].offsets[10],
+                       toonSmokeKeyframes.toonSmokeKeyframeSet[i].lifeTimeFraction);
+        };
+        std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
+        toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 2500 ) ) {
-            hullsSystem->setupHullVertices( hull, smokeOrigin, fireHullScale, fireHullLayerParams );
+            hullsSystem->setupHullVertices( hull, smokeOrigin, fireHullScale, fireHullLayerParams, toonSmokeKeyframeSet );
             Com_Printf("bbbbb");
-            assert( !hull->layers[0].useDrawOnTopHack );
+            //hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
+            /*
             hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
             hull->layers[0].useDrawOnTopHack = true;
             hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
@@ -456,7 +533,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
             };
 
             hull->layers[0].overrideAppearanceRules                   = &g_fireInnerCloudAppearanceRules;
-            hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;
+            hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;*/
         }
         Com_Printf("aaaaa");
     }

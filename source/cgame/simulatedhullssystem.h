@@ -14,6 +14,7 @@ class SimulatedHullsSystem {
 	friend class TransientEffectsSystem;
 	friend class MeshTesselationHelper;
 public:
+    static std::span<const vec4_t> getUnitIcosphere( unsigned level );
 	// TODO: Split function and fading direction?
 	enum class ViewDotFade : uint8_t {
 		NoFade, FadeOutContour, FadeOutCenterLinear, FadeOutCenterQuadratic, FadeOutCenterCubic
@@ -62,6 +63,11 @@ public:
 		SolidAppearanceRules solidRules;
 		CloudAppearanceRules cloudRules;
 	};
+
+    struct offsetKeyframe {
+        float lifeTimeFraction {0.0f};
+        float *offsets;
+    };
 
 	using AppearanceRules = std::variant<SolidAppearanceRules, CloudAppearanceRules, SolidAndCloudAppearanceRules>;
 
@@ -405,6 +411,8 @@ private:
     struct BaseKeyframedHull {
         // Externally managed, should point to the unit mesh data
         const vec4_t *vertexMoveDirections;
+        // Externally managed, the keyframe data of the hull
+        const offsetKeyframe *offsetKeyframeSet;
         // Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
         float *limitsAtDirections;
         int64_t spawnTime { 0 };
@@ -540,7 +548,7 @@ private:
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
     void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                            float scale, std::span<const HullLayerParams> paramsOfLayers,
+                            float scale, std::span<const HullLayerParams> paramsOfLayers, std::span<const offsetKeyframe> offsetKeyframeSet,
                             const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	[[maybe_unused]]
@@ -554,6 +562,11 @@ private:
 	static auto computeCurrTimelineNodeIndex( unsigned startFromIndex, int64_t currTime,
 											  int64_t spawnTime, unsigned effectDuration,
 											  std::span<const ColorChangeTimelineNode> timeline ) -> unsigned;
+
+    [[nodiscard]]
+    static auto computeCurrKeyframeIndex(  unsigned startFromIndex, int64_t currTime,
+                                           int64_t spawnTime, unsigned effectDuration,
+                                           const offsetKeyframe *offsetKeyframeSet ) -> unsigned;
 
 	FireHull *m_fireHullsHead { nullptr };
 	FireClusterHull *m_fireClusterHullsHead { nullptr };

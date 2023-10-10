@@ -463,6 +463,11 @@ auto SimulatedHullsSystem::allocHull( Hull **head, wsw::FreelistAllocator *alloc
 	return hull;
 }
 
+std::span<const vec4_t> SimulatedHullsSystem::getUnitIcosphere(unsigned level) {
+    const auto [verticesSpan, indicesSpan, neighbourSpan] = ::basicHullsHolder.getIcosphereForLevel(level);
+    return verticesSpan;
+}
+
 void SimulatedHullsSystem::setupHullVertices( BaseRegularSimulatedHull *hull, const float *origin,
 											  const float *color, float speed, float speedSpead,
 											  const AppearanceRules &appearanceRules,
@@ -650,13 +655,14 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 }
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                                              float scale, std::span<const HullLayerParams> layerParams,
+                                              float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe> offsetKeyframeSet,
                                               const AppearanceRules &appearanceRules ) {
     assert( layerParams.size() == hull->numLayers );
 
     const float originX = origin[0], originY = origin[1], originZ = origin[2];
     const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
     const vec4_t *__restrict vertices = verticesSpan.data();
+    const offsetKeyframe *keyframeSet = offsetKeyframeSet.data();
 
     // Calculate move limits in each direction
 
@@ -776,6 +782,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     VectorCopy( origin, hull->origin );
     hull->vertexMoveDirections = vertices;
+    hull->offsetKeyframeSet = keyframeSet;
+    Com_Printf("keyframe offset:%f ", keyframeSet[4].offsets[10]);
 
     hull->appearanceRules = appearanceRules;
 }
@@ -1522,6 +1530,11 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
     const float speedMultiplier = 1.0f - 1.5f * timeDeltaSeconds;
 
+    unsigned int keyframe = computeCurrKeyframeIndex(0, currTime, spawnTime, lifetime, offsetKeyframeSet);
+    float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
+    float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
+    //Com_Printf("keyframeNum:%i, lifetimeFrac:%f, fracFromCurr:%f \n", keyframe, lifeTimeFrac, fracFromCurrKeyframe);
+
     // Sanity check
     assert( numLayers >= 1 && numLayers < 8 );
     for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
@@ -1533,24 +1546,21 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
         const float finalOffset = layer->finalOffset;
         for( unsigned i = 0; i < numVertices; ++i ) {
-            float speed = speedsAndDistances[i][0];
-            float distanceSoFar = speedsAndDistances[i][1];
-
-            speed *= speedMultiplier;
-            distanceSoFar += speed * timeDeltaSeconds;
+            float offset = (1 - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].offsets[i] + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].offsets[i];
+            //float offset = offsetKeyframeSet[1].offsets[i];
+            //Com_Printf("keyframeOffset:%f ", offsetKeyframeSet[4].offsets[i]);
 
             // Limit growth by the precomputed obstacle distance
             const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
-            distanceSoFar = wsw::min( distanceSoFar, limit );
+            offset = wsw::min( offset - finalOffset, limit );
 
-            VectorMA( growthOrigin, distanceSoFar, vertexMoveDirections[i], positions[i] );
+            VectorMA( growthOrigin, offset, vertexMoveDirections[i], positions[i] );
 
             // TODO: Allow supplying 4-component in-memory vectors directly
             layerBoundsBuilder.addPoint( positions[i] );
 
             // Write back to memory
-            speedsAndDistances[i][0] = speed;
-            speedsAndDistances[i][1] = distanceSoFar;
+            speedsAndDistances[i][1] = offset;
         }
 
         // TODO: Allow storing 4-component float vectors to memory directly
@@ -1573,6 +1583,29 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
         processColorChange( currTime, spawnTime, lifetime, layer->colorChangeTimeline,
                             { layer->vertexColors, numVertices }, &layer->colorChangeState, rng );
     }
+}
+
+auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex, int64_t currTime, int64_t spawnTime,
+                                                    unsigned int effectDuration,
+                                                    const offsetKeyframe *offsetKeyframeSet) -> unsigned int {
+
+    const auto currLifetimeFraction = (float)( currTime - spawnTime ) * Q_Rcp( (float)effectDuration );
+    unsigned setSize = 20;
+
+    // Assume that startFromIndex is "good" even if the conditions in the loop won't be held for it
+    unsigned currIndex = startFromIndex, lastGoodIndex = startFromIndex;
+    for(;; ) {
+        if( currIndex == setSize ) {
+            break;
+        }
+        if( offsetKeyframeSet[currIndex].lifeTimeFraction > currLifetimeFraction ) {
+            break;
+        }
+        lastGoodIndex = currIndex;
+        currIndex++;
+    }
+
+    return lastGoodIndex;
 }
 
 auto SimulatedHullsSystem::computeCurrTimelineNodeIndex( unsigned startFromIndex, int64_t currTime,
