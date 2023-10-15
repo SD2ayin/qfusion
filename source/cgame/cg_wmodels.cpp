@@ -915,9 +915,9 @@ void CG_AddWeaponOnTag( entity_t *ent,
 					VectorSubtract( tagCoords, oldTagPosition, tagVelocity );
 					const float RcpTimeDelta = Q_Rcp( timeDelta );
 					VectorScale( tagVelocity, RcpTimeDelta, tagVelocity );
-					Com_Printf( "tagCoords: %f %f %f ", tagCoords[0], tagCoords[1], tagCoords[2] );
-					Com_Printf( "oldPos: %f %f %f ", oldTagPosition[0], oldTagPosition[1], oldTagPosition[2] );
-					Com_Printf( "velocity: %f %f %f\n", tagVelocity[0], tagVelocity[1], tagVelocity[2] );
+					//Com_Printf( "tagCoords: %f %f %f ", tagCoords[0], tagCoords[1], tagCoords[2] );
+					//Com_Printf( "oldPos: %f %f %f ", oldTagPosition[0], oldTagPosition[1], oldTagPosition[2] );
+					//Com_Printf( "velocity: %f %f %f\n", tagVelocity[0], tagVelocity[1], tagVelocity[2] );
 
 					mat3_t matrixAxis;
 					vec3_t axis;

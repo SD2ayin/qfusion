@@ -277,6 +277,7 @@ static const FireHullLayerParamsHolder kFireHullParams;
 struct ToonSmokeOffsetKeyframeHolder {
     static const int numVerts = 642;
     static const int numKeyframes = 20;
+    float maxOffset;
     const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(3);
     const vec4_t *vertices = verticesSpan.data();
     SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
@@ -289,124 +290,71 @@ struct ToonSmokeOffsetKeyframeHolder {
             for (int vert = 0; vert < numVerts; vert++ ) {
                 const float noise = VoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
                 //const float noise = (float)(vert) / (float)(numVerts);
-                vertexOffsets[vert] = 60.0f * expansion * ( 1.0f - 0.7f * noise );
+                const float offset = expansion * ( 1.0f - 0.7f * noise );
+                vertexOffsets[vert] = offset;
             }
 
             toonSmokeKeyframeSet[i].offsets = vertexOffsets;
             toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
         }
+        maxOffset = 1.0f;
     }
 };
 
-static const byte_vec4_t kToonSmokePalette[] {
-        asByteColor( 0.1f, 0.1f, 0.1f, 1.0f ),
+static const ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes;
+
+
+static const byte_vec4_t kBlackToonSmokePalette[] {
         asByteColor( 0.1f, 0.1f, 0.1f, 1.0f ),
 };
-/*
-static const SimulatedHullsSystem::ColorChangeTimelineNode kToonSmokeColorChangeTimeline[2] {
+
+static const byte_vec4_t kTransparentToonSmokePalette[] {
+        asByteColor( 0.95f, 0.95f, 0.95f, 0.4f ),
+};
+
+static const SimulatedHullsSystem::ColorChangeTimelineNode kBlackToonSmokeColorChangeTimeline[2] {
         {
-                .activateAtLifetimeFraction = 0.1f, .replacementPalette = kToonSmokePalette,
+                .activateAtLifetimeFraction = 0.1f, .replacementPalette = kBlackToonSmokePalette,
                 .sumOfReplacementChanceForThisSegment = 0.1f,
-                .allowIncreasingOpacity = true,
+                .allowIncreasingOpacity = false,
         },
         {
-                .activateAtLifetimeFraction = 0.90f, .replacementPalette = kToonSmokePalette,
+                .activateAtLifetimeFraction = 0.90f, .replacementPalette = kBlackToonSmokePalette,
                 .sumOfReplacementChanceForThisSegment = 0.8f,
-                .allowIncreasingOpacity = true,
+                .allowIncreasingOpacity = false,
         }
 };
 
+static const SimulatedHullsSystem::ColorChangeTimelineNode kTransparentToonSmokeColorChangeTimeline[2] {
+        {
+                .activateAtLifetimeFraction = 0.1f, .replacementPalette = kTransparentToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.1f,
+                .allowIncreasingOpacity = false,
+        },
+        {
+                .activateAtLifetimeFraction = 0.90f, .replacementPalette = kTransparentToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.8f,
+                .allowIncreasingOpacity = false,
+        }
+};
 
 static const SimulatedHullsSystem::HullLayerParams kToonSmokeLayerParams[2] {
         {
             .speed = 0.0f, .finalOffset = 0.0f,
             .speedSpikeChance = 0.10f, .minSpeedSpike = 5.0f, .maxSpeedSpike = 20.0f,
             .biasAlongChosenDir = 15.0f,
-            .baseInitialColor = {0.9f, 1.0f, 0.6f, 1.0f},
-            .bulgeInitialColor = {0.9f, 1.0f, 1.0f, 1.0f},
-            .colorChangeTimeline = kToonSmokeColorChangeTimeline
+            .baseInitialColor = {0.95f, 0.95f, 0.95f, 0.4f},
+            .bulgeInitialColor = {0.95f, 0.95f, 0.95f, 0.4f},
+            .colorChangeTimeline = kTransparentToonSmokeColorChangeTimeline
         },
         {
-            .speed = 0.0f, .finalOffset = 0.0f,
+            .speed = 0.0f, .finalOffset = 5.0f,
             .speedSpikeChance = 0.10f, .minSpeedSpike = 5.0f, .maxSpeedSpike = 20.0f,
             .biasAlongChosenDir = 15.0f,
-            .baseInitialColor = {0.9f, 1.0f, 0.6f, 1.0f},
-            .bulgeInitialColor = {0.9f, 1.0f, 1.0f, 1.0f},
-            .colorChangeTimeline = kToonSmokeColorChangeTimeline
+            .baseInitialColor = {0.1f, 0.1f, 0.1f, 1.0f},
+            .bulgeInitialColor = {0.1f, 0.1f, 0.1f, 1.0f},
+            .colorChangeTimeline = kBlackToonSmokeColorChangeTimeline
         }
-};
-*/
-
-static const ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes;
-
-static const byte_vec4_t kSmokeSoftLayerFadeInPalette[] {
-	asByteColor( 0.65f, 0.65f, 0.65f, 0.25f ),
-	asByteColor( 0.70f, 0.70f, 0.70f, 0.25f ),
-	asByteColor( 0.75f, 0.75f, 0.75f, 0.25f ),
-	asByteColor( 0.55f, 0.55f, 0.55f, 0.25f ),
-	asByteColor( 0.60f, 0.60f, 0.60f, 0.25f ),
-};
-
-static const byte_vec4_t kSmokeHardLayerFadeInPalette[] {
-	asByteColor( 0.65f, 0.65f, 0.65f, 0.50f ),
-	asByteColor( 0.70f, 0.70f, 0.70f, 0.50f ),
-	asByteColor( 0.75f, 0.75f, 0.75f, 0.50f ),
-	asByteColor( 0.55f, 0.55f, 0.55f, 0.50f ),
-	asByteColor( 0.60f, 0.60f, 0.60f, 0.50f ),
-};
-
-static const SimulatedHullsSystem::ColorChangeTimelineNode kSmokeHullSoftLayerColorChangeTimeline[4] {
-	{
-	},
-	{
-		.activateAtLifetimeFraction = 0.20f, .replacementPalette = kSmokeSoftLayerFadeInPalette,
-		.sumOfReplacementChanceForThisSegment = 3.5f,
-		.allowIncreasingOpacity = true,
-	},
-	{
-		.activateAtLifetimeFraction = 0.35f,
-	},
-	{
-		.activateAtLifetimeFraction = 0.85f,
-		.sumOfDropChanceForThisSegment = 3.0f
-	}
-};
-
-static const SimulatedHullsSystem::ColorChangeTimelineNode kSmokeHullHardLayerColorChangeTimeline[4] {
-	{
-	},
-	{
-		.activateAtLifetimeFraction = 0.20f, .replacementPalette = kSmokeHardLayerFadeInPalette,
-		.sumOfReplacementChanceForThisSegment = 3.5f,
-		.allowIncreasingOpacity = true,
-	},
-	{
-		.activateAtLifetimeFraction = 0.35f,
-	},
-	{
-		.activateAtLifetimeFraction = 0.85f,
-		.sumOfDropChanceForThisSegment = 3.0f
-	}
-};
-
-static const uint8_t kSmokeHullNoColorChangeVertexColor[4] { 127, 127, 127, 0 };
-static const uint16_t kSmokeHullNoColorChangeIndices[] { 28, 100, 101, 103, 104, 106, 157, 158 };
-
-static SimulatedHullsSystem::CloudMeshProps g_smokeOuterLayerCloudMeshProps[2] {
-	{
-		.alphaScaleLifespan              = { .initial = 0.0f, .fadedIn = 1.25f, .fadedOut = 1.0f },
-		.radiusLifespan                  = { .initial = 0.0f, .fadedIn = 16.0f, .fadedOut = 0.0f },
-		.tessLevelShiftForMinVertexIndex = -3,
-		.tessLevelShiftForMaxVertexIndex = -2,
-		.applyRotation                   = true,
-	},
-	{
-		.alphaScaleLifespan              = { .initial = 0.0f, .fadedIn = 1.0f, .fadedOut = 1.0f },
-		.radiusLifespan                  = { .initial = 0.0f, .fadedIn = 24.0f, .fadedOut = 0.0f },
-		.tessLevelShiftForMinVertexIndex = -1,
-		.tessLevelShiftForMaxVertexIndex = -1,
-		.shiftFromDefaultLevelToHide     = -2,
-	},
 };
 
 // Caution: Specifying the full range of vertices would not allow the cloud to be rendered due to reaching the limit
@@ -506,13 +454,15 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         };
         std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
         toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
+        const float toonSmokeScale = 100.0f;
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 2500 ) ) {
-            hullsSystem->setupHullVertices( hull, smokeOrigin, fireHullScale, fireHullLayerParams, toonSmokeKeyframeSet );
+            hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale, kToonSmokeLayerParams, toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
             Com_Printf("bbbbb");
+            hull->layers[0].useDrawOnTopHack = true;
             //hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
             /*
             hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
-            hull->layers[0].useDrawOnTopHack = true;
+
             hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
             hull->layers[1].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
 

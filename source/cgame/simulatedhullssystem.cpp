@@ -656,7 +656,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
                                               float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe> offsetKeyframeSet,
-                                              const AppearanceRules &appearanceRules ) {
+                                              const float maxOffset, const AppearanceRules &appearanceRules ) {
     assert( layerParams.size() == hull->numLayers );
 
     const float originX = origin[0], originY = origin[1], originZ = origin[2];
@@ -666,22 +666,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     // Calculate move limits in each direction
 
-    float maxVertexSpeed = layerParams[0].speed + layerParams[0].maxSpeedSpike + layerParams[0].biasAlongChosenDir ;
-    for( unsigned i = 1; i < layerParams.size(); ++i ) {
-        const auto &params = layerParams[i];
-        maxVertexSpeed = wsw::max( maxVertexSpeed, params.speed + params.maxSpeedSpike + params.biasAlongChosenDir );
-    }
-
-    // To prevent noticeable z-fighting in case if hulls of different layers start matching (e.g due to bias)
-    constexpr float maxSmallRandomOffset = 1.5f;
-
-    maxVertexSpeed += maxSmallRandomOffset;
-    // Scale by the fine-tuning scale multiplier
-    maxVertexSpeed *= 1.5f * scale;
-
-    wsw::RandomGenerator *const __restrict rng = &m_rng;
-
-    const float radius = 0.5f * maxVertexSpeed * ( 1e-3f * (float)hull->lifetime );
+    const float radius = maxOffset * scale;
     const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
     const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
 
@@ -706,19 +691,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         }
     }
 
-    auto *const __restrict spikeSpeedBoost = (float *)alloca( sizeof( float ) * verticesSpan.size() );
-
-    const float *const __restrict globalBiasDir = verticesSpan[rng->nextBounded( verticesSpan.size() ) ];
-    assert( std::fabs( VectorLengthFast( globalBiasDir ) - 1.0f ) < 0.001f );
-
-    // Compute a hull-global bias for every vertex once
-    auto *const __restrict globalVertexDotBias = (float *)alloca( sizeof( float ) * verticesSpan.size() );
-    for( unsigned i = 0; i < verticesSpan.size(); ++i ) {
-        const float *__restrict vertex = verticesSpan[i];
-        // We have decided that permitting a negative bias yields better results.
-        globalVertexDotBias[i] = DotProduct( vertex, globalBiasDir );
-    }
-
     // Setup layers data
     assert( hull->numLayers >= 1 && hull->numLayers < 8 );
     for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
@@ -726,63 +698,29 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         const HullLayerParams *__restrict params    = &layerParams[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
         byte_vec4_t *const __restrict colors        = layer->vertexColors;
-        vec2_t *const __restrict speedsAndDistances = layer->vertexSpeedsAndDistances;
-        const float *const __restrict layerBiasDir  = verticesSpan[rng->nextBounded( verticesSpan.size() )];
-
-        assert( params->speed >= 0.0f && params->minSpeedSpike >= 0.0f && params->biasAlongChosenDir >= 0.0f );
-        assert( params->minSpeedSpike < params->maxSpeedSpike );
-        assert( std::fabs( VectorLengthFast( layerBiasDir ) - 1.0f ) < 0.001f );
-
-        layer->finalOffset         = params->finalOffset;
-        layer->colorChangeTimeline = params->colorChangeTimeline;
-
-        std::fill( spikeSpeedBoost, spikeSpeedBoost + verticesSpan.size(), 0.0f );
+        float *const __restrict offsets             = layer->vertexOffsets;
 
         const float *const __restrict baseColor  = params->baseInitialColor;
-        const float *const __restrict bulgeColor = params->bulgeInitialColor;
-
         for( size_t i = 0; i < verticesSpan.size(); ++i ) {
             // Position XYZ is computed prior to submission in stateless fashion
             positions[i][3] = 1.0f;
 
-            const float *vertexDir   = vertices[i];
-            const float layerDotBias = DotProduct( vertexDir, layerBiasDir );
-            const float layerSqrBias = std::copysign( layerDotBias * layerDotBias, layerDotBias );
-            const float vertexBias   = wsw::max( layerSqrBias, globalVertexDotBias[i] );
+            offsets[i] = 0.0f;
 
-            speedsAndDistances[i][0] = params->speed + vertexBias * params->biasAlongChosenDir;
-
-            if( rng->tryWithChance( params->speedSpikeChance ) ) [[unlikely]] {
-                const float boost = rng->nextFloat( params->minSpeedSpike, params->maxSpeedSpike );
-                spikeSpeedBoost[i] += boost;
-                const auto &indicesOfNeighbours = neighboursSpan[i];
-                for( const unsigned neighbourIndex: indicesOfNeighbours ) {
-                    spikeSpeedBoost[neighbourIndex] += rng->nextFloat( 0.50f, 0.75f ) * boost;
-                }
-            } else {
-                speedsAndDistances[i][0] += rng->nextFloat( 0.0f, maxSmallRandomOffset );
-            }
-
-            speedsAndDistances[i][1] = 0.0f;
-
-            const float colorLerpFrac  = vertexBias * vertexBias;
-            const float complementFrac = 1.0f - colorLerpFrac;
-            colors[i][0] = (uint8_t)( 255.0f * ( baseColor[0] * colorLerpFrac + bulgeColor[0] * complementFrac ) );
-            colors[i][1] = (uint8_t)( 255.0f * ( baseColor[1] * colorLerpFrac + bulgeColor[1] * complementFrac ) );
-            colors[i][2] = (uint8_t)( 255.0f * ( baseColor[2] * colorLerpFrac + bulgeColor[2] * complementFrac ) );
-            colors[i][3] = (uint8_t)( 255.0f * ( baseColor[3] * colorLerpFrac + bulgeColor[3] * complementFrac ) );
+            colors[i][0] = (uint8_t)( 255.0f * baseColor[0]  );
+            colors[i][1] = (uint8_t)( 255.0f * baseColor[1]  );
+            colors[i][2] = (uint8_t)( 255.0f * baseColor[2]  );
+            colors[i][3] = (uint8_t)( 255.0f * baseColor[3]  );
         }
 
-        for( size_t i = 0; i < verticesSpan.size(); ++i ) {
-            speedsAndDistances[i][0] += wsw::min( spikeSpeedBoost[i], maxVertexSpeed );
-            // Scale by the fine-tuning scale multiplier
-            speedsAndDistances[i][0] *= scale;
-        }
+        layer->finalOffset         = params->finalOffset;
+        layer->colorChangeTimeline = params->colorChangeTimeline;
     }
 
     VectorCopy( origin, hull->origin );
     hull->vertexMoveDirections = vertices;
     hull->offsetKeyframeSet = keyframeSet;
+    hull->scale             = scale;
     Com_Printf("keyframe offset:%f ", keyframeSet[4].offsets[10]);
 
     hull->appearanceRules = appearanceRules;
@@ -1117,7 +1055,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
                 Vector4Copy( layer->mins, mesh->cullMins );
                 Vector4Copy( layer->maxs, mesh->cullMaxs );
 
-                mesh->material            = cgs.media.shaderFireHull;
+                //mesh->material            = cgs.media.shaderSmokeHull;
+                mesh->material            = nullptr;
                 mesh->applyVertexDynLight = hull->applyVertexDynLight;
                 mesh->m_shared            = sharedMeshData;
 
@@ -1528,8 +1467,6 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     const float *__restrict growthOrigin = this->origin;
     const unsigned numVertices = basicHullsHolder.getIcosphereForLevel( subdivLevel ).vertices.size();
 
-    const float speedMultiplier = 1.0f - 1.5f * timeDeltaSeconds;
-
     unsigned int keyframe = computeCurrKeyframeIndex(0, currTime, spawnTime, lifetime, offsetKeyframeSet);
     float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
     float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
@@ -1540,13 +1477,14 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
         BoundsBuilder layerBoundsBuilder;
 
-        BaseKeyframedHull::Layer *layer   = &layers[layerNum];
+        BaseKeyframedHull::Layer *layer             = &layers[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
-        vec2_t *const __restrict speedsAndDistances = layer->vertexSpeedsAndDistances;
+        float *const __restrict offsets             = layer->vertexOffsets;
 
         const float finalOffset = layer->finalOffset;
         for( unsigned i = 0; i < numVertices; ++i ) {
             float offset = (1 - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].offsets[i] + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].offsets[i];
+            offset *= scale;
             //float offset = offsetKeyframeSet[1].offsets[i];
             //Com_Printf("keyframeOffset:%f ", offsetKeyframeSet[4].offsets[i]);
 
@@ -1560,7 +1498,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
             layerBoundsBuilder.addPoint( positions[i] );
 
             // Write back to memory
-            speedsAndDistances[i][1] = offset;
+            offsets[i] = offset;
         }
 
         // TODO: Allow storing 4-component float vectors to memory directly
@@ -1580,8 +1518,25 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
     for( unsigned i = 0; i < numLayers; ++i ) {
         Layer *const layer = &layers[i];
+        for( unsigned j = 0; j < numVertices; ++j ) {
+            const float scale = 0.018f;
+            const float noise = calcSimplexNoise3D(layer->vertexPositions[j][0] * scale, layer->vertexPositions[j][1] * scale, layer->vertexPositions[j][2] * scale + i * 20);
+            byte_vec4_t gray        = {25, 25, 25, 255};
+            byte_vec4_t transparent = {0, 0, 0, 0};
+            layer->vertexColors[j][0] = gray[0];
+            layer->vertexColors[j][1] = gray[1];
+            layer->vertexColors[j][2] = gray[2];
+            const float value = 1 + noise - 2 * lifeTimeFrac;
+            if ( value > 0) {
+                layer->vertexColors[j][3] = gray[3] * wsw::clamp(10.f*value, 0.f, 1.f);
+            }
+            else {
+                layer->vertexColors[j][3] = transparent[3];
+            }
+        }
+        /*
         processColorChange( currTime, spawnTime, lifetime, layer->colorChangeTimeline,
-                            { layer->vertexColors, numVertices }, &layer->colorChangeState, rng );
+                            { layer->vertexColors, numVertices }, &layer->colorChangeState, rng );*/
     }
 }
 

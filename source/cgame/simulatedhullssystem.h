@@ -409,6 +409,7 @@ private:
     /////////////////
     // new code
     struct BaseKeyframedHull {
+        float scale;
         // Externally managed, should point to the unit mesh data
         const vec4_t *vertexMoveDirections;
         // Externally managed, the keyframe data of the hull
@@ -421,7 +422,7 @@ private:
             vec4_t mins, maxs;
             vec4_t *vertexPositions;
             // Contains pairs (speed, distance from origin along the direction)
-            vec2_t *vertexSpeedsAndDistances;
+            float *vertexOffsets;
             byte_vec4_t *vertexColors;
             SharedMeshData *sharedMeshData;
             HullSolidDynamicMesh *submittedSolidMesh;
@@ -470,7 +471,7 @@ private:
         Layer storageOfLayers[NumLayers];
         float storageOfLimits[kNumVertices];
         vec4_t storageOfPositions[kNumVertices * NumLayers];
-        vec2_t storageOfSpeedsAndDistances[kNumVertices * NumLayers];
+        float storageOfOffsets[kNumVertices * NumLayers];
         byte_vec4_t storageOfColors[kNumVertices * NumLayers];
         SharedMeshData storageOfSharedMeshData[NumLayers];
         // TODO: Allocate dynamically on demand?
@@ -490,7 +491,7 @@ private:
             for( unsigned i = 0; i < NumLayers; ++i ) {
                 Layer *const layer              = &layers[i];
                 layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
-                layer->vertexSpeedsAndDistances = &storageOfSpeedsAndDistances[i * kNumVertices];
+                layer->vertexOffsets            = &storageOfOffsets[i * kNumVertices];
                 layer->vertexColors             = &storageOfColors[i * kNumVertices];
                 layer->sharedMeshData           = &storageOfSharedMeshData[i];
                 layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
@@ -509,7 +510,7 @@ private:
 	using FireClusterHull = ConcentricSimulatedHull<1, 2>;
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
 	//using SmokeHull       = RegularSimulatedHull<3, true>;
-    using toonSmokeHull   = KeyframedHull<3, 3>;
+    using toonSmokeHull   = KeyframedHull<3, 2>;
 	using WaveHull        = RegularSimulatedHull<2>;
 
 	void unlinkAndFreeFireHull( FireHull *hull );
@@ -549,7 +550,7 @@ private:
 
     void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
                             float scale, std::span<const HullLayerParams> paramsOfLayers, std::span<const offsetKeyframe> offsetKeyframeSet,
-                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+                            const float maxOffset, const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	[[maybe_unused]]
 	static bool processColorChange( int64_t currTime, int64_t spawnTime, unsigned effectDuration,
