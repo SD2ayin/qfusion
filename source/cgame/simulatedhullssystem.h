@@ -127,6 +127,9 @@ private:
 		bool lerpNextLevelColors { false };
 
 		bool hasSibling { false };
+
+        bool keyframedHull {false};
+        float lifetimeFrac {0.0f};
 	};
 
 	class HullDynamicMesh : public DynamicMesh {
@@ -414,6 +417,8 @@ private:
         const vec4_t *vertexMoveDirections;
         // Externally managed, the keyframe data of the hull
         const offsetKeyframe *offsetKeyframeSet;
+
+        unsigned lastKeyframeNum;
         // Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
         float *limitsAtDirections;
         int64_t spawnTime { 0 };
@@ -431,9 +436,6 @@ private:
             // Subtracted from limitsAtDirections for this layer, must be non-negative.
             // This offset is supposed to prevent hulls from ending at the same distance in the end position.
             float finalOffset { 0 };
-
-            std::span<const ColorChangeTimelineNode> colorChangeTimeline;
-            ColorChangeState colorChangeState;
 
             const AppearanceRules *overrideAppearanceRules;
             std::optional<ViewDotFade> overrideHullFade;
@@ -459,7 +461,7 @@ private:
         bool applyVertexDynLight { false };
         ViewDotFade vertexViewDotFade { ViewDotFade::NoFade };
 
-        void simulate( int64_t currTime, float timeDeltaSeconds, wsw::RandomGenerator *__restrict rng );
+        void simulate( int64_t currTime, float timeDeltaSeconds);
     };
 
     template <unsigned SubdivLevel, unsigned NumLayers>
@@ -482,6 +484,7 @@ private:
         const DynamicMesh *storageOfCloudMeshPointers[NumLayers];
 
         KeyframedHull() {
+            this->lastKeyframeNum            = 0;
             this->numLayers                  = NumLayers;
             this->subdivLevel                = SubdivLevel;
             this->layers                     = &storageOfLayers[0];
@@ -510,7 +513,7 @@ private:
 	using FireClusterHull = ConcentricSimulatedHull<1, 2>;
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
 	//using SmokeHull       = RegularSimulatedHull<3, true>;
-    using toonSmokeHull   = KeyframedHull<3, 2>;
+    using toonSmokeHull   = KeyframedHull<4, 1>;
 	using WaveHull        = RegularSimulatedHull<2>;
 
 	void unlinkAndFreeFireHull( FireHull *hull );

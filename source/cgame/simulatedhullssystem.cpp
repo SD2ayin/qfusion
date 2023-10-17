@@ -714,14 +714,12 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         }
 
         layer->finalOffset         = params->finalOffset;
-        layer->colorChangeTimeline = params->colorChangeTimeline;
     }
 
     VectorCopy( origin, hull->origin );
     hull->vertexMoveDirections = vertices;
     hull->offsetKeyframeSet = keyframeSet;
     hull->scale             = scale;
-    Com_Printf("keyframe offset:%f ", keyframeSet[4].offsets[10]);
 
     hull->appearanceRules = appearanceRules;
 }
@@ -775,7 +773,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	}*/
     for( toonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
         if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
-            hull->simulate( currTime, timeDeltaSeconds, &m_rng );
+            hull->simulate( currTime, timeDeltaSeconds);
             activeKeyframedHulls.push_back( hull );
         } else {
             unlinkAndFreeToonSmokeHull( hull );
@@ -1041,7 +1039,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             sharedMeshData->viewDotFade          = layer->overrideHullFade.value_or( hull->vertexViewDotFade );
             sharedMeshData->zFade                = ZFade::NoFade;
             sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
-            sharedMeshData->tesselateClosestLod  = true;
+            sharedMeshData->tesselateClosestLod  = false;
             sharedMeshData->lerpNextLevelColors  = true;
 
             sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
@@ -1049,14 +1047,17 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
             sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
 
+            sharedMeshData->keyframedHull = true;
+            sharedMeshData->lifetimeFrac  = (float)( currTime - hull->spawnTime) * Q_Rcp( (float)hull->lifetime);
+
             if( solidAppearanceRules ) [[likely]] {
                 HullSolidDynamicMesh *__restrict mesh = layer->submittedSolidMesh;
 
                 Vector4Copy( layer->mins, mesh->cullMins );
                 Vector4Copy( layer->maxs, mesh->cullMaxs );
 
-                //mesh->material            = cgs.media.shaderSmokeHull;
-                mesh->material            = nullptr;
+                mesh->material            = cgs.media.shaderSmokeHull;
+                //mesh->material            = nullptr;
                 mesh->applyVertexDynLight = hull->applyVertexDynLight;
                 mesh->m_shared            = sharedMeshData;
 
@@ -1458,8 +1459,7 @@ void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTi
 	}
 }
 
-void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds,
-                                                                  wsw::RandomGenerator *__restrict rng ) {
+void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds) {
     // Just move all vertices along directions clipping by limits
 
     BoundsBuilder hullBoundsBuilder;
@@ -1467,10 +1467,11 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     const float *__restrict growthOrigin = this->origin;
     const unsigned numVertices = basicHullsHolder.getIcosphereForLevel( subdivLevel ).vertices.size();
 
-    unsigned int keyframe = computeCurrKeyframeIndex(0, currTime, spawnTime, lifetime, offsetKeyframeSet);
+    lastKeyframeNum = computeCurrKeyframeIndex(lastKeyframeNum, currTime, spawnTime, lifetime, offsetKeyframeSet);
+    const unsigned keyframe = lastKeyframeNum;
+
     float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
     float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
-    //Com_Printf("keyframeNum:%i, lifetimeFrac:%f, fracFromCurr:%f \n", keyframe, lifeTimeFrac, fracFromCurrKeyframe);
 
     // Sanity check
     assert( numLayers >= 1 && numLayers < 8 );
@@ -1485,8 +1486,6 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
         for( unsigned i = 0; i < numVertices; ++i ) {
             float offset = (1 - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].offsets[i] + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].offsets[i];
             offset *= scale;
-            //float offset = offsetKeyframeSet[1].offsets[i];
-            //Com_Printf("keyframeOffset:%f ", offsetKeyframeSet[4].offsets[i]);
 
             // Limit growth by the precomputed obstacle distance
             const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
@@ -1545,6 +1544,7 @@ auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex,
                                                     const offsetKeyframe *offsetKeyframeSet) -> unsigned int {
 
     const auto currLifetimeFraction = (float)( currTime - spawnTime ) * Q_Rcp( (float)effectDuration );
+    // TODO: compute actual amount of elements in the set
     unsigned setSize = 20;
 
     // Assume that startFromIndex is "good" even if the conditions in the loop won't be held for it
@@ -1582,7 +1582,7 @@ auto SimulatedHullsSystem::computeCurrTimelineNodeIndex( unsigned startFromIndex
 		if( currIndex == timeline.size() ) {
 			break;
 		}
-		if( timeline[currIndex].activateAtLifetimeFraction > currLifetimeFraction ) {
+		if( timeline[currIndex + 1].activateAtLifetimeFraction > currLifetimeFraction ) {
 			break;
 		}
 		lastGoodIndex = currIndex;
@@ -2056,6 +2056,7 @@ static void calcNormalsAndApplyAlphaFade( byte_vec4_t *const __restrict resultCo
 	// Convert to the byte range
 	assert( minFadedOutAlpha >= 0.0f && minFadedOutAlpha <= 1.0f );
 	minFadedOutAlpha *= 255.0f;
+    Com_Printf("calcNormalsAndApplyAlphaFade");
 
 	unsigned vertexNum = 0;
 	do {
@@ -2116,6 +2117,7 @@ static void applyAlphaFade( byte_vec4_t *const __restrict resultColors,
 	// Convert to the byte range
 	assert( minFadedOutAlpha >= 0.0f && minFadedOutAlpha <= 1.0f );
 	minFadedOutAlpha *= 255.0f;
+    Com_Printf("applyAlphaFade");
 
 	unsigned vertexNum = 0;
 	do {
@@ -2485,8 +2487,70 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 	assert( colorsBufferSize && colorsBufferSize < ( 1 << 12 ) );
 	auto *const overrideColorsBuffer = (byte_vec4_t *)alloca( sizeof( byte_vec4_t ) * colorsBufferSize );
 
-	const byte_vec4_t *overrideColors = getOverrideColorsCheckingSiblingCache( overrideColorsBuffer, viewOrigin,
-																			   viewAxis, lights, affectingLightIndices );
+    const byte_vec4_t *overrideColors;
+    if(!m_shared->keyframedHull) {
+        overrideColors = getOverrideColorsCheckingSiblingCache(overrideColorsBuffer, viewOrigin,
+                                                                                  viewAxis, lights,
+                                                                                  affectingLightIndices);
+    } else {
+        Com_Printf("yyy");
+        byte_vec4_t *buffer = overrideColorsBuffer;
+        //const byte_vec4_t *resultColors;
+        //resultColors = buffer;
+        byte_vec4_t *resultColors = buffer;
+        const unsigned dataLevelToUse     = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
+        const IcosphereData &lodDataToUse = ::basicHullsHolder.getIcosphereForLevel( dataLevelToUse );
+        // If tesselation is going to be performed, apply light to the base non-tesselated lod colors
+        const auto numVertices = (unsigned)lodDataToUse.vertices.size();
+        const vec4_t *positions = m_shared->simulatedPositions;
+        const unsigned short (*neighboursOfVertices)[5] = lodDataToUse.vertexNeighbours.data();
+        const unsigned char (*givenColors)[4] = m_shared->simulatedColors;
+        unsigned vertexNum = 0;
+        do {
+            const uint16_t *const neighboursOfVertex = neighboursOfVertices[vertexNum];
+            const float *const __restrict currVertex = positions[vertexNum];
+            vec3_t normal { 0.0f, 0.0f, 0.0f };
+            unsigned neighbourIndex = 0;
+            do {
+                const float *__restrict v2 = positions[neighboursOfVertex[neighbourIndex]];
+                const float *__restrict v3 = positions[neighboursOfVertex[( neighbourIndex + 1 ) % 5]];
+                vec3_t currTo2, currTo3, cross;
+                VectorSubtract( v2, currVertex, currTo2 );
+                VectorSubtract( v3, currVertex, currTo3 );
+                CrossProduct( currTo2, currTo3, cross );
+                if( const float squaredLength = VectorLengthSquared( cross ); squaredLength > 1.0f ) [[likely]] {
+                    const float rcpLength = Q_RSqrt( squaredLength );
+                    VectorMA( normal, rcpLength, cross, normal );
+                }
+            } while( ++neighbourIndex < 5 );
+
+            VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
+            // The sum of partial non-zero directories could be zero, check again
+            const float squaredNormalLength = VectorLengthSquared( normal );
+            if( squaredNormalLength > wsw::square( 1e-3f ) ) [[likely]] {
+                vec3_t viewDir;
+                VectorSubtract( currVertex, viewOrigin, viewDir );
+                const float squareDistanceToVertex = VectorLengthSquared( viewDir );
+                if( squareDistanceToVertex > 1.0f ) [[likely]] {
+                    const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
+                    const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
+                    VectorScale( normal, rcpNormalLength, normal );
+                    VectorScale( viewDir, rcpDistance, viewDir );
+                    const float absDot = std::fabs( DotProduct( viewDir, normal ) );
+                    for( int i = 0; i < 3; i++ ){
+                        //resultColors[vertexNum][i] = 125 - (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.5f, 0.0f, 1.0f));
+                        resultColors[vertexNum][i] = 125 + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
+                    }
+                } else {
+                    resultColors[vertexNum][3] = 255;
+                }
+            } else {
+                resultColors[vertexNum][3] = 255;
+            }
+            resultColors[vertexNum][3] = m_shared->simulatedColors[vertexNum][3];
+        } while( ++vertexNum < numVertices );
+        overrideColors = buffer;
+    }
 
 	unsigned numResultVertices, numResultIndices;
 

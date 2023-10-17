@@ -275,10 +275,10 @@ struct FireHullLayerParamsHolder {
 static const FireHullLayerParamsHolder kFireHullParams;
 
 struct ToonSmokeOffsetKeyframeHolder {
-    static const int numVerts = 642;
+    static const int numVerts = 2562;
     static const int numKeyframes = 20;
     float maxOffset;
-    const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(3);
+    const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(4);
     const vec4_t *vertices = verticesSpan.data();
     SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
     ToonSmokeOffsetKeyframeHolder() noexcept {
@@ -411,7 +411,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         fireHullTimeout     = 10;
 		fireHullLayerParams = kFireHullParams.darkHullLayerParams;
 	}
-
+    /*
 	if( auto *const hull = hullsSystem->allocFireHull( m_lastTime, fireHullTimeout ) ) {
 		hullsSystem->setupHullVertices( hull, fireOrigin, fireHullScale, fireHullLayerParams );
 		assert( !hull->layers[0].useDrawOnTopHack );
@@ -445,20 +445,15 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		if( auto *const hull = hullsSystem->allocWaveHull( m_lastTime, 250 ) ) {
 			hullsSystem->setupHullVertices( hull, fireOrigin, waveColor, 500.0f, 50.0f );
 		}
-	}
+	}*/
 
 	if( smokeOrigin ) {
-        for (int i = 0; i < 20; i++) {
-            Com_Printf("offset:%f lifefrac:%f", &toonSmokeKeyframes.toonSmokeKeyframeSet[i].offsets[10],
-                       toonSmokeKeyframes.toonSmokeKeyframeSet[i].lifeTimeFraction);
-        };
         std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
         toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
         const float toonSmokeScale = 100.0f;
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 2500 ) ) {
             hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale, kToonSmokeLayerParams, toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
-            Com_Printf("bbbbb");
-            hull->layers[0].useDrawOnTopHack = true;
+            //hull->layers[0].useDrawOnTopHack = true;
             //hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
             /*
             hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
@@ -485,7 +480,6 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
             hull->layers[0].overrideAppearanceRules                   = &g_fireInnerCloudAppearanceRules;
             hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;*/
         }
-        Com_Printf("aaaaa");
     }
         /*
 		g_smokeOuterLayerCloudMeshProps[0].material = cgs.media.shaderSmokeHullHardParticle;
