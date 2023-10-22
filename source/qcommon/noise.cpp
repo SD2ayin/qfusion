@@ -60,11 +60,28 @@ static const vec3_t kPrimGrad[] = {
 };
 
 // Supplementary gradient for quick computation of curl noise
+/*
 static const vec3_t kSuppGrad[] = {
-	{ 1, -1, 0 },  { -1, -1, 0}, { 0, 1, -1 },  { -1, 1, 0 },
-	{ -1, 0, -1 }, { 1, 0, 1 },  { 1, 1, -1 },  { 0, -1, 1 },
-	{ 1, -1, 1 },  { 0, 1, 1 },  { 0, -1, -1 }, { -1, 0, 1 },
+    {-0.5994933591195207, -0.4745936706627388, 0.6444909309978389},
+    {-0.11644240343580603, -0.34052071154982044, -0.9329988272702688},
+    {-0.7256676120317825, 0.43567761145017175, -0.5325331311093832},
+    {0.050936135574804094, -0.2506555664495966, 0.9667353811155032},
+    {0.9231785891961238, 0.22007353855954642, -0.31513319418260965},
+    {-0.12193021677031879, 0.2500489760010676, -0.9605251333719282},
+    {0.2250452935055599, 0.5872086450788911, 0.7775221045189707},
+    {0.06488826489211309, -0.17895668995498773, 0.9817148344604177},
+    {-0.47234429766122943, 0.7744335998558006, -0.4208841454382733},
+    {0.6239528900453201, -0.41910841884280986, 0.6595687411173854},
+    {0.45733522317241954, -0.8824932794954091, 0.10977297158804931},
+    {-0.8347833917662095, 0.11251529554566286, -0.5389591794371585}
+};*/
+
+static const vec3_t kSuppGrad[] = {
+        {1, 1, 1}, {1, 1, -1}, {1, -1, 1},{1, -1, -1},
+        {-1, 1, 1}, {-1, 1, -1},{-1, -1, 1}, {-1, -1, -1},
+        {1, 1, 1},{-1, -1, -1}, {1, -1, 1}, {-1, 1, -1}
 };
+
 
 static const uint8_t kIndexTable[] = {
 	151, 160, 137, 91, 90, 15, 131, 13, 201, 95, 96, 53, 194, 233, 7, 225, 140, 36, 103, 30, 69, 142, 8, 99, 37, 240,
@@ -170,8 +187,8 @@ static void addCellContribution( float t, int gradIndex, float x, float y, float
 	const float w2  = t * t;
 	const float w4  = w2 * w2;
 	const float w3  = w2 * t;
-	const float dwA = -8.0f * w3 * dot3( kPrimGrad[gradIndex], x, y, z );
-	const float dwB = -8.0f * w3 * dot3( kSuppGrad[gradIndex], x, y, z );
+	const float dwA = 80.0f * w3 * dot3( kPrimGrad[gradIndex], x, y, z );
+	const float dwB = 80.0f * w3 * dot3( kSuppGrad[gradIndex], x, y, z );
 	const vec3_t r0 = { x, y, z };
 	VectorMA( valA, w4, kPrimGrad[gradIndex], valA );
 	VectorMA( valA, dwA, r0, valA );
@@ -295,11 +312,11 @@ wsw_forceinline auto calcSimplexNoise3DImpl( float givenX, float givenY, float g
 
 	if constexpr( isComputingCurl ) {
 		CrossProduct( valA, valB, tmp );
-		if( const float outSquareLength = VectorLengthSquared( tmp ); outSquareLength > 1e-6 ) [[likely]] {
+		if( const float outSquareLength = VectorLengthSquared( tmp ); outSquareLength > 0 ) [[likely]] {
 			const float outRcpLength = Q_RSqrt( outSquareLength );
 			VectorScale( tmp, outRcpLength, tmp );
 		} else {
-			VectorSet( tmp, 0.0f, 0.0f, 1.0f );
+			VectorSet( tmp, -1.0f, -1.0f, -1.0f );
 		}
 		return Vec3( tmp );
 	} else {
