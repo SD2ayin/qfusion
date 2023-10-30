@@ -500,9 +500,9 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
             .gravity    = 0.0f,
 			.refAxis    = { impactNormal[0], impactNormal[1], impactNormal[2] },
             .turbulence = 300.0f,
-            .turbulenceScale = 0.006f,
+            .turbulenceScale = 0.003f,
             .bounceCount = { .minInclusive = 10, .maxInclusive = 10 },
-            .speed = { .min = 1, .max = 3 },
+            .speed = { .min = 0, .max = 0 },
 			.percentage = { .min = 0.5f, .max = 0.8f },
             .timeout    = { .min = 4000, .max = 4800 },
 			//.timeout    = { .min = 150, .max = 180 },
@@ -2959,7 +2959,7 @@ void EffectsSystemFacade::spawnWorldLaserBeam( const float *from, const float *t
 	});
 }
 
-void EffectsSystemFacade::spawnGameDebugBeam( const float *from, const float *to, const float *color, int ) {
+void EffectsSystemFacade::spawnGameDebugBeam( const float *from, const float *to, const float *color, unsigned timeout ) {
 	// TODO: Utilize the parameter
 	cg.polyEffectsSystem.spawnTransientBeamEffect( from, to, {
 		.material          = cgs.media.shaderLaser,
@@ -2969,6 +2969,6 @@ void EffectsSystemFacade::spawnGameDebugBeam( const float *from, const float *to
 			.fadedOut = { color[0], color[1], color[2] },
 		},
 		.width             = 8.0f,
-		.timeout           = 500u,
+		.timeout           = timeout,
 	});
 }

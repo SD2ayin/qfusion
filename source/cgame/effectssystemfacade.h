@@ -163,7 +163,7 @@ public:
 	void spawnInstagunBeam( const float *from, const float *to, int team );
 
 	void spawnWorldLaserBeam( const float *from, const float *to, float width );
-	void spawnGameDebugBeam( const float *from, const float *to, const float *color, int parm );
+	void spawnGameDebugBeam( const float *from, const float *to, const float *color, unsigned timeout );
 
 	void spawnPlayerTeleInEffect( int entNum, const float *origin, model_s *model ) {
 		m_trackedEffectsSystem.spawnPlayerTeleInEffect( entNum, origin, model );

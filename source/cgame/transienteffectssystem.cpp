@@ -288,7 +288,7 @@ struct ToonSmokeOffsetKeyframeHolder {
             const float x = (float)(i) / (float)(numKeyframes);
             const float expansion = -(x-1.f)*(x-1.f) + 1.f;
             for (int vert = 0; vert < numVerts; vert++ ) {
-                const float noise = VoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
+                const float noise = calcVoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
                 //const float noise = (float)(vert) / (float)(numVerts);
                 const float offset = expansion * ( 1.0f - 0.7f * noise );
                 vertexOffsets[vert] = offset;

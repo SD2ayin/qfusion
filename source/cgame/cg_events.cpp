@@ -19,6 +19,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "cg_local.h"
 #include "../client/snd_public.h"
+#include "../game/ai/vec3.h"
+#include "../cgame/noise.h"
 
 /*
 * CG_Event_WeaponBeam
@@ -134,7 +136,7 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 				} else {
 					singleColorAddress = &holder->defaultColors;
 				}
-
+                /*
 				EllipsoidalFlockParams flockParams {
 					.origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
 					.offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
@@ -147,7 +149,24 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					.shiftSpeed   = { .min = 100, .max = 125 },
 					.percentage   = { .min = 1.0f, .max = 1.0f },
 					.timeout      = { .min = 250, .max = 500 },
-				};
+				};*/
+                //float turbulenceScale = 0.003f;
+                float turbulenceScale = 0.001f;
+                EllipsoidalFlockParams flockParams {
+                        .origin     = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
+                        .offset     = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                        //.gravity    = -75.0f,
+                        //.drag       = 0.2f,
+                        //.vorticity  = 5000.0f,
+                        .gravity    = 0.0f,
+                        .turbulence = 300.0f,
+                        .turbulenceScale = turbulenceScale,
+                        .bounceCount = { .minInclusive = 1, .maxInclusive = 1 },
+                        .speed = { .min = 0, .max = 0 },
+                        .percentage = { .min = 0.5f, .max = 0.8f },
+                        .timeout    = { .min = 4000, .max = 4800 },
+                        //.timeout    = { .min = 150, .max = 180 },
+                };
 				Particle::AppearanceRules appearanceRules {
 					.materials      = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
 					.colors         = { singleColorAddress, singleColorAddress + 1 },
@@ -155,6 +174,18 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 						.radius = { .mean = 1.25f, .spread = 0.25f }, .sizeBehaviour = Particle::Shrinking
 					},
 				};
+
+                float max = 0;
+                for( int i = 0; i < 100; i++){
+                    for( int j = 0; j < 100; j++){
+                        for( int k = 0; k < 100; k++){
+                            const float noise = calcSimplexNoise3D(trace->endpos[0]  * turbulenceScale + (float)i * 0.05f, trace->endpos[1] * turbulenceScale + (float)j * 0.05f, trace->endpos[2] * turbulenceScale + (float)k * 0.05f);
+                            max = wsw::max(noise, max);
+                        }
+                    }
+                }
+                Com_Printf("max:%f", max);
+
 				cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
 			}
 

@@ -886,7 +886,7 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
                 vec3_t to;
                 VectorMA(p->oldOrigin, debugBeamScale, p->velocity, to);
                 vec3_t color = {0.0f, 1.0f, 0.0f};
-                cg.effectsSystem.spawnGameDebugBeam(p->oldOrigin, to, color, 0);
+                cg.effectsSystem.spawnGameDebugBeam(p->oldOrigin, to, color, 500);
             }
 
 			p->lifetimeFrac = computeParticleLifetimeFrac( currTime, *p, flock->appearanceRules );

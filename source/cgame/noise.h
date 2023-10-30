@@ -19,6 +19,9 @@ auto calcSimplexNoise3D( float x, float y, float z ) -> float;
 [[nodiscard]]
 auto calcSimplexNoiseCurl( float x, float y, float z ) -> Vec3;
 
-#endif
+[[nodiscard]]
+auto calcVoronoiNoiseSquared( float x, float y, float z ) -> float;
+[[nodiscard]]
+auto calcVoronoiNoiseLinear( float x, float y, float z ) -> float;
 
-float VoronoiNoiseSquared(float x, float y, float z);
+#endif
