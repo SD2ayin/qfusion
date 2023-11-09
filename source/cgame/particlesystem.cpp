@@ -116,22 +116,22 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 														  maxParticles, std::addressof( appearanceRules ),
 														  &m_rng, currTime, fillStride );
 
-	flock->timeoutAt               = fillResult.resultTimeout;
-	flock->numActivatedParticles   = fillResult.numParticles * activatedCountMultiplier;
-	flock->numDelayedParticles     = fillResult.numParticles * delayedCountMultiplier;
-	flock->delayedParticlesOffset  = ( initialOffset + 1 ) - fillResult.numParticles * delayedCountMultiplier;
-	flock->drag                    = flockParams.drag;
-	flock->vorticity               = flockParams.vorticity;
-	//VectorAdd( flockParams.origin, flockParams.offset, refOrigin );
-	Vector4Set( flock->refOrigin, flockParams.origin[0], flockParams.origin[1], flockParams.origin[2], 0.0f );
-	Vector4Set( flock->refAxis, flockParams.refAxis[0], flockParams.refAxis[1], flockParams.refAxis[2], 0.0f );
-    flock->turbulence              = flockParams.turbulence;
-    flock->turbulenceScale         = flockParams.turbulenceScale;
-	flock->restitution             = flockParams.restitution;
-	flock->hasRotatingParticles    = flockParams.angularVelocity.min != 0.0f || flockParams.angularVelocity.max != 0.0f;
-	flock->minBounceCount          = flockParams.bounceCount.minInclusive;
-	flock->maxBounceCount          = flockParams.bounceCount.maxInclusive;
-	flock->startBounceCounterDelay = flockParams.startBounceCounterDelay;
+	flock->timeoutAt                 = fillResult.resultTimeout;
+	flock->numActivatedParticles     = fillResult.numParticles * activatedCountMultiplier;
+	flock->numDelayedParticles       = fillResult.numParticles * delayedCountMultiplier;
+	flock->delayedParticlesOffset    = ( initialOffset + 1 ) - fillResult.numParticles * delayedCountMultiplier;
+	flock->drag                      = flockParams.drag;
+	flock->vorticity                 = flockParams.vorticity * 20; // so the speed in u/s at 20 units radius from the vorticityOrigin is the value chosen in params
+	//VectorAdd( flockParams.origin, flockParams.offset, vorticityOrigin );
+	Vector4Set(flock->vorticityOrigin, flockParams.origin[0], flockParams.origin[1], flockParams.origin[2], 0.0f );
+	Vector4Set(flock->vorticityAxis, flockParams.vorticityAxis[0], flockParams.vorticityAxis[1], flockParams.vorticityAxis[2], 0.0f );
+    flock->turbulence                = flockParams.turbulence;
+    flock->turbulenceCoordinateScale = Q_Rcp( flockParams.turbulenceScale );
+	flock->restitution               = flockParams.restitution;
+	flock->hasRotatingParticles      = flockParams.angularVelocity.min != 0.0f || flockParams.angularVelocity.max != 0.0f;
+	flock->minBounceCount            = flockParams.bounceCount.minInclusive;
+	flock->maxBounceCount            = flockParams.bounceCount.maxInclusive;
+	flock->startBounceCounterDelay   = flockParams.startBounceCounterDelay;
 
 	if( flock->minBounceCount < flock->maxBounceCount ) {
 		// Assume that probability of dropping the particle for varyingCount + 1 impacts is finalDropProbability
@@ -530,7 +530,6 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 				if( flock->numActivatedParticles + flock->numDelayedParticles > 0 ) [[likely]] {
 					if( flock->shapeList ) {
 						simulate( flock, &m_rng, currTime, deltaSeconds );
-                        //count += flock->numActivatedParticles;
 					} else {
 						simulateWithoutClipping( flock, currTime, deltaSeconds );
 					}
@@ -540,8 +539,6 @@ void ParticleSystem::runFrame( int64_t currTime, DrawSceneRequest *request ) {
 			}
 		}
 	}
-    //if ( count > 1 ) {
-        //Com_Printf("amount of particles:%i", count);
 
 	m_frameFlareParticles.clear();
 	m_frameFlareColorLifespans.clear();
@@ -703,24 +700,28 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 			}
 		}
 		if( flock->vorticity > 0.0f ) {
-			vec4_t refOffset;
-			VectorSubtract( particle->origin, flock->refOrigin, refOffset );
-			vec4_t vorticityAxis;
-			Vector4Set( vorticityAxis, 0.0f, 0.0f, 1.0f, 0.0f );
+			vec4_t offset;
+			VectorSubtract(particle->origin, flock->vorticityOrigin, offset );
 			vec4_t vorticity;
-			CrossProduct( refOffset, flock->refAxis, vorticity );
-			VectorNormalizeFast( vorticity );
-			VectorMA( accel, flock->vorticity, vorticity, accel );
+			CrossProduct(offset, flock->vorticityAxis, vorticity );
+            // we only have to check that the magnitude of the cross product is not 0 to know the magnitude of the offset is not 0
+            // as RxA=RAsin(x)
+			const float vorticityMagnitudeSquared = VectorLengthSquared( vorticity );
+            if( vorticityMagnitudeSquared > 0.f ){
+                VectorScale(vorticity, Q_RSqrt(vorticityMagnitudeSquared), vorticity);
+                const float offsetMagnitudeSquared = VectorLengthSquared( offset );
+                VectorScale(vorticity, Q_RSqrt(offsetMagnitudeSquared), vorticity);
+            }
+			VectorMA( particle->effectiveVelocity, flock->vorticity, vorticity, particle->effectiveVelocity );
 		}
         if( flock->turbulence > 0.0f && particle->lifetimeFrac > 0.1f ) {
-            vec4_t scaledOrigin;
-            VectorScale( particle->origin, flock->turbulenceScale, scaledOrigin);
-            //vec3_t turbulence;
-            //SimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2], turbulence);
+            vec3_t scaledOrigin;
+            VectorScale( particle->origin, flock->turbulenceCoordinateScale, scaledOrigin);
             Vec3 turbulence = calcSimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2]);
             vec3_t turbulenceData = {turbulence.Data()[0], turbulence.Data()[1], turbulence.Data()[2]};
-            VectorScale(turbulenceData, flock->turbulence, turbulenceData);
-            VectorAdd( particle->effectiveVelocity, turbulenceData, particle->effectiveVelocity );
+            //VectorScale(turbulenceData, flock->turbulence, turbulenceData);
+            //VectorAdd( particle->effectiveVelocity, turbulenceData, particle->effectiveVelocity );
+            VectorMA( particle->effectiveVelocity, flock->turbulence, turbulenceData, particle->effectiveVelocity);
         }
 
 		VectorMA( particle->velocity, deltaSeconds, accel, particle->velocity );
@@ -728,8 +729,6 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 		VectorMA( particle->oldOrigin, deltaSeconds, particle->effectiveVelocity, particle->origin );
 		// TODO: Supply this 4-component vector explicitly
 		boundsBuilder.addPoint( particle->origin );
-
-        //Com_Printf("origin: %f %f %f", particle->origin[0], particle->origin[1], particle->origin[2]);
 
 		if( flock->hasRotatingParticles ) {
 			particle->rotationAngle += particle->angularVelocity * deltaSeconds;

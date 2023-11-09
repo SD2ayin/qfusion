@@ -35,8 +35,8 @@ struct EllipsoidalFlockParams {
 	float stretchScale { 1.0f };
 	float gravity { 600 };
 	float drag { 0.0f };
-	float vorticity { 0.0f };
-	float refAxis[3] { 0.0f, 0.0f, 1.0f };
+	float vorticity { 0.0f }; // induced velocity at 20 units radius from particle origin
+	float vorticityAxis[3] {0.0f, 0.0f, 1.0f }; // the axis around which particles rotate
     float turbulence { 0.0f };
     float turbulenceScale {1.0f};
 	float restitution { 0.75f };
@@ -58,8 +58,8 @@ struct ConicalFlockParams {
 	float shiftDir[3] { 0.0f, 0.0f, 1.0f };
 	float gravity { 600 };
 	float drag { 0.0f };
-	float vorticity { 0.0f };
-	float refAxis[3]{ 0.0f, 0.0f, 1.0f };
+	float vorticity { 0.0f }; // induced velocity at 20 units radius from particle origin
+	float vorticityAxis[3] {0.0f, 0.0f, 1.0f }; // the axis around which particles rotate
     float turbulence { 0.0f };
     float turbulenceScale {1.0f};
 	float restitution { 0.75f };
@@ -100,11 +100,11 @@ struct alignas( 16 ) ParticleFlock {
 	Particle::AppearanceRules appearanceRules;
 	// Caution: No drag simulation is currently performed for non-clipped flocks
 	float drag { 0.0f };
-	float vorticity { 0.0f };
-	float refOrigin[4]; // the origin to reference for effects such as vorticity
-	float refAxis[4]; // the axis to reference for effects such as vorticity
+	float vorticity { 0.0f }; // the induced velocity at 20 units radius from the vorticity origin
+	float vorticityOrigin[4]; // the origin of the vorticity effect
+	float vorticityAxis[4]; // the axis around which particles rotate
     float turbulence { 0.0f };
-    float turbulenceScale {1.0f};
+    float turbulenceCoordinateScale {1.0f};
 	float restitution { 0.75f };
 	Particle *particles;
 	int64_t timeoutAt;
