@@ -3,7 +3,6 @@
 #include "../client/client.h"
 #include "noise.h"
 #include "cg_local.h"
-#include "../game/ai/vec3.h"
 
 ParticleSystem::ParticleSystem() {
 	// TODO: All of this asks for exception-safety
@@ -122,7 +121,6 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 	flock->delayedParticlesOffset    = ( initialOffset + 1 ) - fillResult.numParticles * delayedCountMultiplier;
 	flock->drag                      = flockParams.drag;
 	flock->vorticity                 = flockParams.vorticity * 20; // so the speed in u/s at 20 units radius from the vorticityOrigin is the value chosen in params
-	//VectorAdd( flockParams.origin, flockParams.offset, vorticityOrigin );
 	Vector4Set(flock->vorticityOrigin, flockParams.origin[0], flockParams.origin[1], flockParams.origin[2], 0.0f );
 	Vector4Set(flock->vorticityAxis, flockParams.vorticityAxis[0], flockParams.vorticityAxis[1], flockParams.vorticityAxis[2], 0.0f );
     flock->turbulence                = flockParams.turbulence;
@@ -719,8 +717,6 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
             VectorScale( particle->origin, flock->turbulenceCoordinateScale, scaledOrigin);
             Vec3 turbulence = calcSimplexNoiseCurl(scaledOrigin[0], scaledOrigin[1], scaledOrigin[2]);
             vec3_t turbulenceData = {turbulence.Data()[0], turbulence.Data()[1], turbulence.Data()[2]};
-            //VectorScale(turbulenceData, flock->turbulence, turbulenceData);
-            //VectorAdd( particle->effectiveVelocity, turbulenceData, particle->effectiveVelocity );
             VectorMA( particle->effectiveVelocity, flock->turbulence, turbulenceData, particle->effectiveVelocity);
         }
 
