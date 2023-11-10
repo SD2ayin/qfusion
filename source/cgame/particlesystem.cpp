@@ -120,9 +120,12 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 	flock->numDelayedParticles       = fillResult.numParticles * delayedCountMultiplier;
 	flock->delayedParticlesOffset    = ( initialOffset + 1 ) - fillResult.numParticles * delayedCountMultiplier;
 	flock->drag                      = flockParams.drag;
-	flock->vorticity                 = flockParams.vorticity * 20; // so the speed in u/s at 20 units radius from the vorticityOrigin is the value chosen in params
+	flock->vorticity                 = flockParams.vorticity * 16; // so the speed in u/s up until 16 units radius from the vorticityOrigin is the value chosen in params
 	Vector4Set(flock->vorticityOrigin, flockParams.origin[0], flockParams.origin[1], flockParams.origin[2], 0.0f );
 	Vector4Set(flock->vorticityAxis, flockParams.vorticityAxis[0], flockParams.vorticityAxis[1], flockParams.vorticityAxis[2], 0.0f );
+    flock->outflow                   = flockParams.outflow;
+    Vector4Set(flock->outflowOrigin, flockParams.origin[0], flockParams.origin[1], flockParams.origin[2], 0.0f );
+    Vector4Set(flock->outflowAxis, flockParams.outflowAxis[0], flockParams.outflowAxis[1], flockParams.outflowAxis[2], 0.0f );
     flock->turbulence                = flockParams.turbulence;
     flock->turbulenceCoordinateScale = Q_Rcp( flockParams.turbulenceScale );
 	flock->restitution               = flockParams.restitution;
@@ -697,7 +700,7 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 				VectorMA( accel, -drag, particle->velocity, accel );
 			}
 		}
-		if( flock->vorticity > 0.0f ) {
+		if( flock->vorticity != 0.0f ) { // negative will cause rotation in the opposite direction
 			vec4_t offset;
 			VectorSubtract(particle->origin, flock->vorticityOrigin, offset );
 			vec4_t vorticity;
@@ -705,13 +708,30 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
             // we only have to check that the magnitude of the cross product is not 0 to know the magnitude of the offset is not 0
             // as RxA=RAsin(x)
 			const float vorticityMagnitudeSquared = VectorLengthSquared( vorticity );
-            if( vorticityMagnitudeSquared > 0.f ){
+            if( vorticityMagnitudeSquared > 0.f ) [[likely]]{
                 VectorScale(vorticity, Q_RSqrt(vorticityMagnitudeSquared), vorticity);
-                const float offsetMagnitudeSquared = VectorLengthSquared( offset );
-                VectorScale(vorticity, Q_RSqrt(offsetMagnitudeSquared), vorticity);
+                const float rcpOffsetMagnitude = wsw::min( Q_RSqrt( VectorLengthSquared( offset ) ), 0.0625f ); // make the maximum the value at a radius of 16 units
+                VectorScale(vorticity, rcpOffsetMagnitude, vorticity);
             }
 			VectorMA( particle->effectiveVelocity, flock->vorticity, vorticity, particle->effectiveVelocity );
 		}
+        if( flock->outflow != 0.0f ) { // negative will cause inflow
+            vec4_t offset;
+            VectorSubtract( particle->origin, flock->outflowOrigin, offset );
+            const float lengthAlongAxis = DotProduct(offset, flock->outflowAxis);
+            vec4_t perpendicularOffset;
+            // it is important that the axis is a unit vector for this step
+            VectorMA( offset, -lengthAlongAxis, flock->outflowAxis, perpendicularOffset );
+            vec4_t outflow;
+            const float radiusSquared = VectorLengthSquared(perpendicularOffset);
+            if( radiusSquared > 0.0f ){
+                const float rcpRadiusSquared = wsw::min( Q_Rcp(radiusSquared), 0.25f ); // make the maximum the value at a radius of 2 units
+                VectorScale( perpendicularOffset, rcpRadiusSquared , outflow ); // make dependancy 1/r
+            } else {
+                VectorSet(outflow, 0.f, 0.f, 0.f);
+            }
+            VectorMA( particle->effectiveVelocity, flock->outflow, outflow, particle->effectiveVelocity );
+        }
         if( flock->turbulence > 0.0f && particle->lifetimeFrac > 0.1f ) {
             vec3_t scaledOrigin;
             VectorScale( particle->origin, flock->turbulenceCoordinateScale, scaledOrigin);

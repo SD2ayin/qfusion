@@ -35,8 +35,10 @@ struct EllipsoidalFlockParams {
 	float stretchScale { 1.0f };
 	float gravity { 600 };
 	float drag { 0.0f };
-	float vorticity { 0.0f }; // induced velocity at 20 units radius from particle origin
+	float vorticity { 0.0f }; // induced velocity at up to 16 units radius from particle origin
 	float vorticityAxis[3] {0.0f, 0.0f, 1.0f }; // the axis around which particles rotate
+    float outflow {0.0f};
+    float outflowAxis[3] {0.0f, 0.0f, 1.0f}; // axis of the outflow, should be a unit vector
     float turbulence { 0.0f };
     float turbulenceScale {1.0f};
 	float restitution { 0.75f };
@@ -58,8 +60,10 @@ struct ConicalFlockParams {
 	float shiftDir[3] { 0.0f, 0.0f, 1.0f };
 	float gravity { 600 };
 	float drag { 0.0f };
-	float vorticity { 0.0f }; // induced velocity at 20 units radius from particle origin
+	float vorticity { 0.0f }; // induced velocity at up to 16 units radius from particle origin
 	float vorticityAxis[3] {0.0f, 0.0f, 1.0f }; // the axis around which particles rotate
+    float outflow {0.0f};
+    float outflowAxis[3] {0.0f, 0.0f, 1.0f}; // axis of the outflow, should be a unit vector
     float turbulence { 0.0f };
     float turbulenceScale {1.0f};
 	float restitution { 0.75f };
@@ -100,9 +104,16 @@ struct alignas( 16 ) ParticleFlock {
 	Particle::AppearanceRules appearanceRules;
 	// Caution: No drag simulation is currently performed for non-clipped flocks
 	float drag { 0.0f };
-	float vorticity { 0.0f }; // the induced velocity at 20 units radius from the vorticity origin
-	float vorticityOrigin[4]; // the origin of the vorticity effect
-	float vorticityAxis[4]; // the axis around which particles rotate
+    // note that the accumulated error due simulation timestep size leads to travelling in the radial direction
+    // this leads to larger spirals at lower framerates (or at lag spikes)
+    // also note induced velocities by vorticity and outflow are proportional to 1/r
+    // for vorticity the distance to vorticityOrigin and for outflow the distance to the line formed by the origin and vector
+	float vorticity { 0.0f }; // the induced velocity up to 16 units radius from the vorticity origin
+	float vorticityOrigin[3]; // the origin of the vorticity effect
+	float vorticityAxis[3]; // the axis around which particles rotate
+    float outflow {0.0f};
+    float outflowOrigin[3]; // point used to define the line of the outflow
+    float outflowAxis[3] {0.0f, 0.0f, 1.0f}; // axis of the outflow, should be a unit vector
     float turbulence { 0.0f };
     float turbulenceCoordinateScale {1.0f};
 	float restitution { 0.75f };
