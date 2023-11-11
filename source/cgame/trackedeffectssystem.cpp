@@ -436,7 +436,7 @@ static ConicalFlockParams g_rocketFireParticlesFlockParams {
 	.gravity         = 0.f,
 	.drag			 = 0.5f,
     .turbulence      = 100.0f, // 100
-    .turbulenceScale = .007f,
+    .turbulenceScale = 143.f,
 	.angle           = 33.f,
 	.speed           = { .min = 75, .max = 150 },
 	.timeout         = { .min = 450, .max = 500 },

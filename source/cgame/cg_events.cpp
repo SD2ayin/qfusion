@@ -19,8 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 #include "cg_local.h"
 #include "../client/snd_public.h"
-#include "../game/ai/vec3.h"
-#include "../cgame/noise.h"
 
 /*
 * CG_Event_WeaponBeam
@@ -138,20 +136,45 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 				}
                 /*
 				EllipsoidalFlockParams flockParams {
-					.origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
-					.offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.stretchDir   = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.stretchScale = 0.5f,
-					.gravity      = 0.7f * GRAVITY,
-					.vorticity    = 1000.0f,
-					.refAxis      = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.speed        = { .min = 150, .max = 200 },
-					.shiftSpeed   = { .min = 100, .max = 125 },
-					.percentage   = { .min = 1.0f, .max = 1.0f },
-					.timeout      = { .min = 250, .max = 500 },
+					.origin        = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
+					.offset        = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+					//.stretchDir    = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+					//.stretchScale  = 0.5f,
+					.gravity       = 0.f,
+                    .drag          = 0.1f,
+					.vorticity     = 1200.0f,
+					.vorticityAxis = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+					.speed         = { .min = 200, .max = 250 },
+					//.shiftSpeed    = { .min = 100, .max = 125 },
+					.percentage    = { .min = 1.0f, .max = 1.0f },
+					.timeout       = { .min = 400, .max = 700 },
 				};*/
+                float gravity = Cvar_Value("LGgravity");
+                float drag = Cvar_Value("LGdrag");
+                float vorticity = Cvar_Value("LGvorticity");
+                float outflow = Cvar_Value("LGoutflow");
+                float angle = Cvar_Value("LGangle");
+                float innerAngle = Cvar_Value("LGinnerAngle");
+                float minSpeed = Cvar_Value("LGminSpeed");
+                float maxSpeed = Cvar_Value("LGmaxSpeed");;
+                ConicalFlockParams flockParams {
+                        .origin        = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
+                        .offset        = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                        .dir           = { -trace->plane.normal[0], -trace->plane.normal[1], trace->plane.normal[2] }, // somehow we need to negate XY probably a bug with the cone code
+                        .gravity       = gravity,
+                        .drag          = drag,
+                        .vorticity     = vorticity,
+                        .vorticityAxis = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                        .outflow       = outflow,
+                        .outflowAxis   = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                        .angle         = angle,
+                        .innerAngle    = innerAngle,
+                        .speed         = { .min = minSpeed, .max = maxSpeed },
+                        .percentage    = { .min = 1.0f, .max = 1.0f },
+                        .timeout       = { .min = 600, .max = 900 },
+                };
                 //float turbulenceScale = 0.003f;
-                float turbulenceScale = 0.001f;
+                /*float turbulenceScale = 0.001f;
                 EllipsoidalFlockParams flockParams {
                         .origin     = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
                         .offset     = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
@@ -166,7 +189,7 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                         .percentage = { .min = 0.5f, .max = 0.8f },
                         .timeout    = { .min = 4000, .max = 4800 },
                         //.timeout    = { .min = 150, .max = 180 },
-                };
+                };*/
 				Particle::AppearanceRules appearanceRules {
 					.materials      = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
 					.colors         = { singleColorAddress, singleColorAddress + 1 },
@@ -175,18 +198,7 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					},
 				};
 
-                float max = 0;
-                for( int i = 0; i < 100; i++){
-                    for( int j = 0; j < 100; j++){
-                        for( int k = 0; k < 100; k++){
-                            const float noise = calcSimplexNoise3D(trace->endpos[0]  * turbulenceScale + (float)i * 0.05f, trace->endpos[1] * turbulenceScale + (float)j * 0.05f, trace->endpos[2] * turbulenceScale + (float)k * 0.05f);
-                            max = wsw::max(noise, max);
-                        }
-                    }
-                }
-                Com_Printf("max:%f", max);
-
-				cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+				cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 			}
 
 			SoundSystem::instance()->startFixedSound( cgs.media.sfxLasergunHit[rand() % 3], trace->endpos, CHAN_AUTO,

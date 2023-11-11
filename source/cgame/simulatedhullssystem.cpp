@@ -698,14 +698,11 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         const HullLayerParams *__restrict params    = &layerParams[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
         byte_vec4_t *const __restrict colors        = layer->vertexColors;
-        float *const __restrict offsets             = layer->vertexOffsets;
 
         const float *const __restrict baseColor  = params->baseInitialColor;
         for( size_t i = 0; i < verticesSpan.size(); ++i ) {
             // Position XYZ is computed prior to submission in stateless fashion
             positions[i][3] = 1.0f;
-
-            offsets[i] = 0.0f;
 
             colors[i][0] = (uint8_t)( 255.0f * baseColor[0]  );
             colors[i][1] = (uint8_t)( 255.0f * baseColor[1]  );
@@ -1030,6 +1027,11 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             SharedMeshData *const __restrict sharedMeshData = layer->sharedMeshData;
 
             sharedMeshData->simulatedPositions   = layer->vertexPositions;
+
+            sharedMeshData->vertexMaskValues     = layer->vertexMaskValues;
+            sharedMeshData->maskedColors         = layer->maskedColors;
+            sharedMeshData->maskedColorRanges    = layer->maskedColorRanges;
+
             sharedMeshData->simulatedNormals     = nullptr;
             sharedMeshData->simulatedColors      = layer->vertexColors;
 
@@ -1060,6 +1062,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
                 //mesh->material            = nullptr;
                 mesh->applyVertexDynLight = hull->applyVertexDynLight;
                 mesh->m_shared            = sharedMeshData;
+                Com_Printf("mesh->m_shared->lifetimefrac:%f\n", mesh->m_shared->lifetimeFrac);
 
                 if( layer->useDrawOnTopHack ) [[unlikely]] {
                     assert( drawOnTopSolidPartIndex == std::nullopt );
@@ -1470,8 +1473,8 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     lastKeyframeNum = computeCurrKeyframeIndex(lastKeyframeNum, currTime, spawnTime, lifetime, offsetKeyframeSet);
     const unsigned keyframe = lastKeyframeNum;
 
-    float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
-    float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
+    const float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
+    const float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
 
     // Sanity check
     assert( numLayers >= 1 && numLayers < 8 );
@@ -1480,12 +1483,27 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
         BaseKeyframedHull::Layer *layer             = &layers[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
-        float *const __restrict offsets             = layer->vertexOffsets;
+
+        float *const __restrict vertexMaskValues    = layer->vertexMaskValues;
+
+        unsigned numMaskedColors = 2; // temporary for debugging
+        for( unsigned numColor = 0; numColor < numMaskedColors; ++numColor ) {
+            for( unsigned i = 0; i < 4; i++ ) {
+                layer->maskedColors[numColor][i] = (uint8_t)( (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].maskedColors[numColor][i]
+                        + fracFromCurrKeyframe * offsetKeyframeSet[keyframe + 1].maskedColors[numColor][i] );
+            }
+            layer->maskedColorRanges[numColor] = (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].maskedColorRanges[numColor]
+                                       + fracFromCurrKeyframe * offsetKeyframeSet[keyframe + 1].maskedColorRanges[numColor];
+        }
 
         const float finalOffset = layer->finalOffset;
         for( unsigned i = 0; i < numVertices; ++i ) {
-            float offset = (1 - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].offsets[i] + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].offsets[i];
+            float offset = (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].offsets[i]
+                    + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].offsets[i];
             offset *= scale;
+
+            vertexMaskValues[i] = (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].vertexMaskValues[i]
+                    + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].vertexMaskValues[i];
 
             // Limit growth by the precomputed obstacle distance
             const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
@@ -1495,9 +1513,6 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
             // TODO: Allow supplying 4-component in-memory vectors directly
             layerBoundsBuilder.addPoint( positions[i] );
-
-            // Write back to memory
-            offsets[i] = offset;
         }
 
         // TODO: Allow storing 4-component float vectors to memory directly
@@ -2537,9 +2552,10 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     VectorScale( normal, rcpNormalLength, normal );
                     VectorScale( viewDir, rcpDistance, viewDir );
                     const float absDot = std::fabs( DotProduct( viewDir, normal ) );
+                    const uint8_t num = (uint8_t) ( m_shared->lifetimeFrac * 125.f );
                     for( int i = 0; i < 3; i++ ){
                         //resultColors[vertexNum][i] = 125 - (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.5f, 0.0f, 1.0f));
-                        resultColors[vertexNum][i] = 125 + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
+                        resultColors[vertexNum][i] = num + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
                     }
                 } else {
                     resultColors[vertexNum][3] = 255;

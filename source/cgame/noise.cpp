@@ -471,7 +471,11 @@ wsw_forceinline auto calcSimplexNoise3DImpl( float givenX, float givenY, float g
         }
         return Vec3( tmp );
     } else {
-        const float result = 32.0f * tmp[0];
+        // The paper suggests using 32.0 as a normalizing scale.
+        // According to sampling results, produced values are within (-0.42, +0.42) range.
+        // Upon normalizing, we have to map it from [-1, +1] to [0, +1]
+        constexpr float normalizingScale = 32.0f * ( 1.0f / 0.42f );
+        const float result               = 0.5f * ( normalizingScale * tmp[0] + 1.0f );
         assert( result >= 0.0f && result <= 1.0f );
         return result;
     }

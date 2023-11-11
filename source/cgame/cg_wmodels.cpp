@@ -903,7 +903,7 @@ void CG_AddWeaponOnTag( entity_t *ent,
 	}
 
 	if( weaponInfo->emitAmount || weaponInfo->emitPeriod ) {
-		if( CG_GrabTag( tag, &weapon, "tag_emitter" ) ) { // the only thing that can depend of the orientation of the vector is the normal and refAxis, but later also mesh origins
+		if( CG_GrabTag( tag, &weapon, "tag_emitter" ) ) { // the only thing that can depend of the orientation of the vector is the normal and vorticityAxis, but later also mesh origins
 			if( timeDelta > 0 ) { //ensures no division by 0 and that the function only runs once, either for weapon in player POV or real world space
 				vec3_t tagCoords;
 				VectorCopy( weapon.origin, tagCoords );

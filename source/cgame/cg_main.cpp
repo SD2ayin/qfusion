@@ -118,6 +118,15 @@ cvar_t *cg_showClamp;
 
 cvar_t *debug_impact;
 
+cvar_t *LGgravity;
+cvar_t *LGdrag;
+cvar_t *LGvorticity;
+cvar_t *LGoutflow;
+cvar_t *LGangle;
+cvar_t *LGinnerAngle;
+cvar_t *LGminSpeed;
+cvar_t *LGmaxSpeed;
+
 cvar_t *cg_damage_indicator;
 cvar_t *cg_damage_indicator_time;
 cvar_t *cg_pickup_flash;
@@ -651,6 +660,15 @@ static void CG_RegisterVariables( void ) {
 	cg_showSelfShadow = Cvar_Get( "cg_showSelfShadow", "0", CVAR_ARCHIVE );
 
     debug_impact = Cvar_Get("debug_impact", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+
+    LGgravity = Cvar_Get("LGgravity", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGdrag = Cvar_Get("LGdrag", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGvorticity = Cvar_Get("LGvorticity", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGoutflow = Cvar_Get("LGoutflow", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGangle = Cvar_Get("LGangle", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGinnerAngle = Cvar_Get("LGinnerAngle", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGminSpeed = Cvar_Get("LGminSpeed", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
+    LGmaxSpeed = Cvar_Get("LGmaxSpeed", "0.0", CVAR_CHEAT | CVAR_ARCHIVE);
 
 	cg_cartoonEffects =     Cvar_Get( "cg_cartoonEffects", "7", CVAR_ARCHIVE );
 	cg_cartoonHitEffect =   Cvar_Get( "cg_cartoonHitEffect", "1", CVAR_ARCHIVE );
