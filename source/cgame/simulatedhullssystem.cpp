@@ -1487,13 +1487,9 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
         float *const __restrict vertexMaskValues    = layer->vertexMaskValues;
 
-        unsigned numMaskedColors = 2; // temporary for debugging
+        unsigned numMaskedColors = 2;// layer->maskedColors.size(); // temporary for debugging
         for( unsigned numColor = 0; numColor < numMaskedColors; ++numColor ) {
-            /*for( unsigned i = 0; i < 4; i++ ) {
-                layer->maskedColors[numColor][i] = lerpValue(offsetKeyframeSet[keyframe].maskedColors[numColor][i],
-                                                             offsetKeyframeSet[keyframe+1].maskedColors[numColor][i],
-                                                             fracFromCurrKeyframe);
-            }*/
+            byte_vec4_t interpolatedColor;
             Vector4Lerp(offsetKeyframeSet[keyframe].maskedColors[numColor], fracFromCurrKeyframe, offsetKeyframeSet[keyframe+1].maskedColors[numColor], layer->maskedColors[numColor]);
             layer->maskedColorRanges[numColor] = lerpValue(offsetKeyframeSet[keyframe].maskedColorRanges[numColor],
                                                            offsetKeyframeSet[keyframe+1].maskedColorRanges[numColor],
@@ -2558,13 +2554,13 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     VectorScale( normal, rcpNormalLength, normal );
                     VectorScale( viewDir, rcpDistance, viewDir );
                     const float absDot = std::fabs( DotProduct( viewDir, normal ) );
-                    const uint8_t num = (uint8_t) ( m_shared->lifetimeFrac * 125.f );
+                    const auto num = (uint8_t) ( m_shared->lifetimeFrac * 125.f );
 
                     const uint8_t numColors = 2;
                     int j = 0;
                     while( m_shared->vertexMaskValues[vertexNum] > m_shared->maskedColorRanges[j] && j < numColors ){
                         j++;
-                    }
+                    }/*
                     if( j == 0 ) {
                         Vector4Copy(m_shared->maskedColors[0], resultColors[vertexNum]);
                     } else if( j == numColors ) {
@@ -2572,12 +2568,12 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     } else {
                         const float lerpFrac = ( m_shared->vertexMaskValues[vertexNum] - m_shared->maskedColorRanges[j-1] ) / ( m_shared->maskedColorRanges[j] - m_shared->maskedColorRanges[j-1] );
                         Vector4Lerp(m_shared->maskedColors[j-1], lerpFrac, m_shared->maskedColors[j], resultColors[vertexNum]);
-                    }
+                    }*/
 
-                    /*for( int i = 0; i < 3; i++ ){
+                    for( int i = 0; i < 3; i++ ){
                         //resultColors[vertexNum][i] = 125 - (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.5f, 0.0f, 1.0f));
                         resultColors[vertexNum][i] = num + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
-                    }*/
+                    }
                 } else {
                     resultColors[vertexNum][3] = 255;
                 }

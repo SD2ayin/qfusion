@@ -70,7 +70,7 @@ public:
         float lifeTimeFraction {0.0f};
         float *offsets;
         float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
-        byte_vec4_t maskedColors[maxColors]; //colors are interpolated between these based on ranges and the vertex mask value
+        std::span<byte_vec4_t> maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
         float maskedColorRanges[maxColors]; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
         byte_vec4_t dotColors[maxColors]; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
         float dotColorRanges[maxColors]; //values between 0-1, -1 because the first color always starts at 0
@@ -142,7 +142,8 @@ private:
 
         bool keyframedHull {false};
         float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
-        byte_vec4_t *maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
+        //byte_vec4_t *maskedColors;
+        std::span<byte_vec4_t> maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
         float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
         byte_vec4_t *dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
         float *dotColorRanges; //values between 0-1, -1 because the first color always starts at 0
@@ -446,8 +447,9 @@ private:
             vec4_t mins, maxs;
             vec4_t *vertexPositions;
             float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
-            byte_vec4_t *maskedColors;
-            //std::span<byte_vec4_t> maskedColors; // colors are interpolated between these based on ranges and the vertex mask value
+            //byte_vec4_t *maskedColors;
+            std::span<byte_vec4_t> maskedColors;
+            //byte_vec4_t maskedColors[maxColors]; // colors are interpolated between these based on ranges and the vertex mask value
             float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
             byte_vec4_t dotColors[maxColors]; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
             float dotColorRanges[maxColors]; //values between 0-1, -1 because the first color always starts at 0
@@ -497,7 +499,7 @@ private:
         float storageOfLimits[kNumVertices];
         vec4_t storageOfPositions[kNumVertices * NumLayers];
         float storageOfMaskValues[kNumVertices * NumLayers];
-        byte_vec4_t storageOfMaskedColors[maxColors * NumLayers];
+        //byte_vec4_t storageOfMaskedColors[maxColors * NumLayers];
         float storageOfMaskedColorRanges[maxColors * NumLayers];
 
         byte_vec4_t storageOfColors[kNumVertices * NumLayers];
