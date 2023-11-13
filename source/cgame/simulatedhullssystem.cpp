@@ -7,6 +7,7 @@
 #include "../qcommon/mmcommon.h"
 #include "../cgame/noise.h"
 #include "../cgame/cg_local.h"
+#include "../gameshared/q_math.h"
 
 #include <memory>
 #include <unordered_map>
@@ -1488,22 +1489,27 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
         unsigned numMaskedColors = 2; // temporary for debugging
         for( unsigned numColor = 0; numColor < numMaskedColors; ++numColor ) {
-            for( unsigned i = 0; i < 4; i++ ) {
-                layer->maskedColors[numColor][i] = (uint8_t)( (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].maskedColors[numColor][i]
-                        + fracFromCurrKeyframe * offsetKeyframeSet[keyframe + 1].maskedColors[numColor][i] );
-            }
-            layer->maskedColorRanges[numColor] = (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].maskedColorRanges[numColor]
-                                       + fracFromCurrKeyframe * offsetKeyframeSet[keyframe + 1].maskedColorRanges[numColor];
+            /*for( unsigned i = 0; i < 4; i++ ) {
+                layer->maskedColors[numColor][i] = lerpValue(offsetKeyframeSet[keyframe].maskedColors[numColor][i],
+                                                             offsetKeyframeSet[keyframe+1].maskedColors[numColor][i],
+                                                             fracFromCurrKeyframe);
+            }*/
+            Vector4Lerp(offsetKeyframeSet[keyframe].maskedColors[numColor], fracFromCurrKeyframe, offsetKeyframeSet[keyframe+1].maskedColors[numColor], layer->maskedColors[numColor]);
+            layer->maskedColorRanges[numColor] = lerpValue(offsetKeyframeSet[keyframe].maskedColorRanges[numColor],
+                                                           offsetKeyframeSet[keyframe+1].maskedColorRanges[numColor],
+                                                           fracFromCurrKeyframe);
         }
 
         const float finalOffset = layer->finalOffset;
         for( unsigned i = 0; i < numVertices; ++i ) {
-            float offset = (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].offsets[i]
-                    + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].offsets[i];
+            float offset = lerpValue(offsetKeyframeSet[keyframe].offsets[i],
+                                     offsetKeyframeSet[keyframe+1].offsets[i],
+                                     fracFromCurrKeyframe);
             offset *= scale;
 
-            vertexMaskValues[i] = (1.f - fracFromCurrKeyframe) * offsetKeyframeSet[keyframe].vertexMaskValues[i]
-                    + fracFromCurrKeyframe * offsetKeyframeSet[keyframe+1].vertexMaskValues[i];
+            vertexMaskValues[i] = lerpValue(offsetKeyframeSet[keyframe].vertexMaskValues[i],
+                                            offsetKeyframeSet[keyframe+1].vertexMaskValues[i],
+                                            fracFromCurrKeyframe);
 
             // Limit growth by the precomputed obstacle distance
             const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
@@ -1530,7 +1536,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     hullBoundsBuilder.storeTo( this->mins, this->maxs );
     this->mins[3] = 0.0f, this->maxs[3] = 1.0f;
 
-    for( unsigned i = 0; i < numLayers; ++i ) {
+    /*for( unsigned i = 0; i < numLayers; ++i ) {
         Layer *const layer = &layers[i];
         for( unsigned j = 0; j < numVertices; ++j ) {
             const float scale = 0.018f;
@@ -1547,11 +1553,11 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
             else {
                 layer->vertexColors[j][3] = transparent[3];
             }
-        }
+        }*/
         /*
         processColorChange( currTime, spawnTime, lifetime, layer->colorChangeTimeline,
                             { layer->vertexColors, numVertices }, &layer->colorChangeState, rng );*/
-    }
+    //}
 }
 
 auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex, int64_t currTime, int64_t spawnTime,
@@ -2553,17 +2559,32 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     VectorScale( viewDir, rcpDistance, viewDir );
                     const float absDot = std::fabs( DotProduct( viewDir, normal ) );
                     const uint8_t num = (uint8_t) ( m_shared->lifetimeFrac * 125.f );
-                    for( int i = 0; i < 3; i++ ){
+
+                    const uint8_t numColors = 2;
+                    int j = 0;
+                    while( m_shared->vertexMaskValues[vertexNum] > m_shared->maskedColorRanges[j] && j < numColors ){
+                        j++;
+                    }
+                    if( j == 0 ) {
+                        Vector4Copy(m_shared->maskedColors[0], resultColors[vertexNum]);
+                    } else if( j == numColors ) {
+                        Vector4Copy(m_shared->maskedColors[numColors-1], resultColors[vertexNum]);
+                    } else {
+                        const float lerpFrac = ( m_shared->vertexMaskValues[vertexNum] - m_shared->maskedColorRanges[j-1] ) / ( m_shared->maskedColorRanges[j] - m_shared->maskedColorRanges[j-1] );
+                        Vector4Lerp(m_shared->maskedColors[j-1], lerpFrac, m_shared->maskedColors[j], resultColors[vertexNum]);
+                    }
+
+                    /*for( int i = 0; i < 3; i++ ){
                         //resultColors[vertexNum][i] = 125 - (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.5f, 0.0f, 1.0f));
                         resultColors[vertexNum][i] = num + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
-                    }
+                    }*/
                 } else {
                     resultColors[vertexNum][3] = 255;
                 }
             } else {
                 resultColors[vertexNum][3] = 255;
             }
-            resultColors[vertexNum][3] = m_shared->simulatedColors[vertexNum][3];
+            //resultColors[vertexNum][3] = m_shared->simulatedColors[vertexNum][3];
         } while( ++vertexNum < numVertices );
         overrideColors = buffer;
     }
