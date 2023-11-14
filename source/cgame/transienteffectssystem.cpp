@@ -282,30 +282,43 @@ struct ToonSmokeOffsetKeyframeHolder {
     const vec4_t *vertices = verticesSpan.data();
     SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
     ToonSmokeOffsetKeyframeHolder() noexcept {
-        std::array<std::array<uint8_t, 4>, 2> maskedColors = {{
-                {255, 144, 30, 255},
-                {25, 25, 25, 255}
-        }};
+        /*std::array<byte_vec4_t,2> maskedColorsArr = {{
+                {25,  25,  25, 255},
+                {255, 120, 30, 255}
+        }};*/
+        auto colors = new byte_vec4_t[3];
+        byte_vec4_t gray = {25, 25, 25, 255};
+        //byte_vec4_t orange = {255, 110, 30, 255};
+        byte_vec4_t orange = {255, 70, 30, 255};
+        byte_vec4_t yellow = {255, 160, 45, 255};
+
+        Vector4Copy(gray, colors[0]);
+        Vector4Copy(orange, colors[1]);
+        Vector4Copy(yellow, colors[2]);
+
+        std::span<byte_vec4_t> maskedColors(colors, 3);
+
         for (int i = 0; i < numKeyframes; i++) {
             auto *vertexOffsets = new float[numVerts];
             auto *vertexMaskValues = new float[numVerts];
-            // normalize the number of the keyframes so we get a range from 0-1 for easy mathematical manipulation
+            // normalize the number of the keyframes, so we get a range from 0-1 for easy mathematical manipulation
             const float x = (float)(i) / (float)(numKeyframes);
             const float expansion = -(x-1.f)*(x-1.f) + 1.f;
-            for (int vert = 0; vert < numVerts; vert++ ) {
+            for ( int vert = 0; vert < numVerts; vert++ ) {
                 const float voronoiNoise = calcVoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
                 const float offset = expansion * ( 1.0f - 0.7f * voronoiNoise );
                 vertexOffsets[vert] = offset;
-                vertexMaskValues[vert] = 1.0f - voronoiNoise; //values between 1 and 0 where 1 has the highest offset
+                vertexMaskValues[vert] = std::sqrt(voronoiNoise); //values between 1 and 0 where 1 has the highest offset
             }
+            //Vector4Copy(maskedColors[0], toonSmokeKeyframeSet[i].maskedColors[0]);
+            //Vector4Copy(maskedColors[1], toonSmokeKeyframeSet[i].maskedColors[1]);
 
             toonSmokeKeyframeSet[i].offsets = vertexOffsets;
             toonSmokeKeyframeSet[i].vertexMaskValues = vertexMaskValues;
-            for (int C = 0; C < 4; C++) {
-                toonSmokeKeyframeSet[i].maskedColors[0][C] = maskedColors[0][C];
-                toonSmokeKeyframeSet[i].maskedColors[1][C] = maskedColors[1][C];
-            }
-            toonSmokeKeyframeSet[i].maskedColorRanges[0] = (float)(i) / (numKeyframes);
+            toonSmokeKeyframeSet[i].maskedColors = maskedColors;
+            toonSmokeKeyframeSet[i].maskedColorRanges[0] = ( (float)(i) / (numKeyframes) ) * ( (float)(i) / (numKeyframes) );
+            toonSmokeKeyframeSet[i].maskedColorRanges[1] = (float)(i) / (numKeyframes);
+            toonSmokeKeyframeSet[i].maskedColorRanges[2] = std::sqrt( (float)(i) / (numKeyframes) );
             toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
         }
         maxOffset = 1.0f; // ensured by our method of deformation
@@ -462,7 +475,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
         toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
         const float toonSmokeScale = 50.0f;
-        if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 700 ) ) {
+        if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 1400 ) ) {
             hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale, kToonSmokeLayerParams, toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
             //hull->layers[0].useDrawOnTopHack = true;
             //hull->layers[0].overrideHullFade = SimulatedHullsSystem::ViewDotFade::NoFade;
