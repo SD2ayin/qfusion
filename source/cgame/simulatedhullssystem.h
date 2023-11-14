@@ -66,13 +66,61 @@ public:
 
 #define maxColors 16
 
+    using ShadingLayer = std::variant<SolidAppearanceRules, CloudAppearanceRules, SolidAndCloudAppearanceRules>;
+
+    enum class blendMode : unsigned {
+        ALPHA_BLEND,
+        ADD,
+        SUBTRACT
+    };
+    enum class alphaMode : unsigned {
+        ADD,
+        SUBTRACT,
+        OVERRIDE
+    };
+
+    struct maskedShadingLayer {
+        float *vertexMaskValues;
+        std::span<byte_vec4_t> colors;
+        float colorRanges[maxColors];
+        blendMode blendMode;
+        alphaMode alphaMode;
+    };
+
+    struct dotShadingLayer {
+        std::span<byte_vec4_t> colors;
+        float colorRanges[maxColors];
+        blendMode blendMode;
+        alphaMode alphaMode;
+    };
+
+    struct combinedShadingLayer {
+        float *vertexMaskValues;
+        std::span<byte_vec4_t> colors;
+        float colorRanges[maxColors];
+        float dotInfluence; //between 0 and 1, vertexValue = ( dotInfluence - 1 ) * vertexMaskValue + dotInfluence * dotProduct(viewVector, normal)
+        blendMode blendMode;
+        alphaMode alphaMode;
+    };
+
+    /*struct vertexShadingLayer{
+        enum ShadingType : unsigned {
+            DOT,
+            MASKED
+        };
+        float *vertexShadingValue;
+        std::span<byte_vec4_t> shadingColors;
+        float shadingColorRanges[maxColors];
+
+    };*/
+
     struct offsetKeyframe {
         float lifeTimeFraction {0.0f};
         float *offsets;
         float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
         std::span<byte_vec4_t> maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
         float maskedColorRanges[maxColors]; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
-        byte_vec4_t dotColors[maxColors]; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
+        std::span<byte_vec4_t> dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
         float dotColorRanges[maxColors]; //values between 0-1, -1 because the first color always starts at 0
         enum blendMode : uint8_t {
             BLEND_COLORS,
@@ -146,6 +194,7 @@ private:
         unsigned numMaskedColors;
         byte_vec4_t *maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
         float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
+        unsigned numDotColors;
         byte_vec4_t *dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
         float *dotColorRanges; //values between 0-1, -1 because the first color always starts at 0
 
@@ -452,8 +501,8 @@ private:
             byte_vec4_t *maskedColors;
             //byte_vec4_t maskedColors[maxColors]; // colors are interpolated between these based on ranges and the vertex mask value
             float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
-            byte_vec4_t dotColors[maxColors]; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
-            float dotColorRanges[maxColors]; //values between 0-1, -1 because the first color always starts at 0
+            byte_vec4_t *dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
+            float *dotColorRanges; //values between 0-1, -1 because the first color always starts at 0
             byte_vec4_t *vertexColors;
             SharedMeshData *sharedMeshData;
             HullSolidDynamicMesh *submittedSolidMesh;
@@ -502,6 +551,8 @@ private:
         float storageOfMaskValues[kNumVertices * NumLayers];
         byte_vec4_t storageOfMaskedColors[maxColors * NumLayers];
         float storageOfMaskedColorRanges[maxColors * NumLayers];
+        byte_vec4_t storageOfDotColors[maxColors * NumLayers];
+        float storageOfDotColorRanges[maxColors * NumLayers];
 
         byte_vec4_t storageOfColors[kNumVertices * NumLayers];
         SharedMeshData storageOfSharedMeshData[NumLayers];
@@ -526,6 +577,8 @@ private:
                 layer->vertexMaskValues         = &storageOfMaskValues[i * kNumVertices];
                 layer->maskedColors             = &storageOfMaskedColors[i * maxColors];
                 layer->maskedColorRanges        = &storageOfMaskedColorRanges[i * maxColors];
+                layer->dotColors                = &storageOfDotColors[i * maxColors];
+                layer->dotColorRanges           = &storageOfDotColorRanges[i * maxColors];
                 layer->vertexColors             = &storageOfColors[i * kNumVertices];
                 layer->sharedMeshData           = &storageOfSharedMeshData[i];
                 layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
