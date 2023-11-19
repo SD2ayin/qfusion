@@ -662,6 +662,10 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     const float originX = origin[0], originY = origin[1], originZ = origin[2];
     const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
+   ///
+    auto* layers = new shadingLayer[numLayers];
+    delete[] layers;
+   ///
     const vec4_t *__restrict vertices = verticesSpan.data();
     const offsetKeyframe *keyframeSet = offsetKeyframeSet.data();
 
@@ -1564,7 +1568,7 @@ auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex,
                                                     const offsetKeyframe *offsetKeyframeSet) -> unsigned int {
 
     const auto currLifetimeFraction = (float)( currTime - spawnTime ) * Q_Rcp( (float)effectDuration );
-    // TODO: compute actual amount of elements in the set
+    // TODO: compute actual amount of elements in the set (using a span)
     unsigned setSize = 20;
 
     // Assume that startFromIndex is "good" even if the conditions in the loop won't be held for it

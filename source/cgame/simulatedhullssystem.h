@@ -66,8 +66,6 @@ public:
 
 #define maxColors 16
 
-    using ShadingLayer = std::variant<SolidAppearanceRules, CloudAppearanceRules, SolidAndCloudAppearanceRules>;
-
     enum class blendMode : unsigned {
         ALPHA_BLEND,
         ADD,
@@ -103,16 +101,7 @@ public:
         alphaMode alphaMode;
     };
 
-    /*struct vertexShadingLayer{
-        enum ShadingType : unsigned {
-            DOT,
-            MASKED
-        };
-        float *vertexShadingValue;
-        std::span<byte_vec4_t> shadingColors;
-        float shadingColorRanges[maxColors];
-
-    };*/
+    using shadingLayer = std::variant<maskedShadingLayer, dotShadingLayer, combinedShadingLayer>;
 
     struct offsetKeyframe {
         float lifeTimeFraction {0.0f};
@@ -498,7 +487,10 @@ private:
             vec4_t *vertexPositions;
             float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
             //unsigned numMaskedColors;
-            byte_vec4_t *maskedColors;
+            shadingLayer *shadingLayer;
+           //
+            byte_vec4_t *maskedColors; // new stuff should replace other stored colors
+           //
             //byte_vec4_t maskedColors[maxColors]; // colors are interpolated between these based on ranges and the vertex mask value
             float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
             byte_vec4_t *dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
