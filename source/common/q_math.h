@@ -639,6 +639,11 @@ inline bool IsValidDirByte( int byte ) {
 	return (unsigned)byte < (unsigned)NUMVERTEXNORMALS;
 }
 
+template <typename value>
+inline value lerpValue(value previousValue, value nextValue, float lerpFrac) {
+    return (value) ( (1.0f-lerpFrac) * previousValue + lerpFrac * nextValue );
+}
+
 void NormToLatLong( const vec3_t normal, float latlong[2] );
 
 void MakeNormalVectors( const vec3_t forward, vec3_t right, vec3_t up );

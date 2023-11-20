@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../client/client.h"
 #include "../common/links.h"
 #include "../common/configvars.h"
+#include "../cgame/simulatedhullssystem.h"
+#include "../common/noise.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -251,6 +253,112 @@ struct FireHullLayerParamsHolder {
 
 static const FireHullLayerParamsHolder kFireHullParams;
 
+struct ToonSmokeOffsetKeyframeHolder {
+    static const int numVerts = 2562;
+    static const int numKeyframes = 20;
+    float maxOffset;
+    const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(4);
+    const vec4_t *vertices = verticesSpan.data();
+    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
+    ToonSmokeOffsetKeyframeHolder() noexcept {
+        /*std::array<byte_vec4_t,2> maskedColorsArr = {{
+                {25,  25,  25, 255},
+                {255, 120, 30, 255}
+        }};*/
+        auto colors = new byte_vec4_t[3];
+        byte_vec4_t gray = {25, 25, 25, 255};
+        //byte_vec4_t orange = {255, 110, 30, 255};
+        byte_vec4_t orange = {255, 70, 30, 255};
+        byte_vec4_t yellow = {255, 160, 45, 255};
+
+        Vector4Copy(gray, colors[0]);
+        Vector4Copy(orange, colors[1]);
+        Vector4Copy(yellow, colors[2]);
+
+        std::span<byte_vec4_t> maskedColors(colors, 3);
+
+        for (int i = 0; i < numKeyframes; i++) {
+            auto *vertexOffsets = new float[numVerts];
+            auto *vertexMaskValues = new float[numVerts];
+            // normalize the number of the keyframes, so we get a range from 0-1 for easy mathematical manipulation
+            const float x = (float)(i) / (float)(numKeyframes);
+            const float expansion = -(x-1.f)*(x-1.f) + 1.f;
+            for ( int vert = 0; vert < numVerts; vert++ ) {
+                const float voronoiNoise = calcVoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
+                const float offset = expansion * ( 1.0f - 0.7f * voronoiNoise );
+                vertexOffsets[vert] = offset;
+                vertexMaskValues[vert] = std::sqrt(voronoiNoise); //values between 1 and 0 where 1 has the highest offset
+            }
+            //Vector4Copy(maskedColors[0], toonSmokeKeyframeSet[i].maskedColors[0]);
+            //Vector4Copy(maskedColors[1], toonSmokeKeyframeSet[i].maskedColors[1]);
+
+            toonSmokeKeyframeSet[i].offsets = vertexOffsets;
+            toonSmokeKeyframeSet[i].vertexMaskValues = vertexMaskValues;
+            toonSmokeKeyframeSet[i].maskedColors = maskedColors;
+            toonSmokeKeyframeSet[i].maskedColorRanges[0] = ( (float)(i) / (numKeyframes) ) * ( (float)(i) / (numKeyframes) );
+            toonSmokeKeyframeSet[i].maskedColorRanges[1] = (float)(i) / (numKeyframes);
+            toonSmokeKeyframeSet[i].maskedColorRanges[2] = std::sqrt( (float)(i) / (numKeyframes) );
+            toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
+        }
+        maxOffset = 1.0f; // ensured by our method of deformation
+    }
+};
+
+static const ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes;
+
+static const byte_vec4_t kBlackToonSmokePalette[] {
+        asByteColor( 0.1f, 0.1f, 0.1f, 1.0f ),
+};
+
+static const byte_vec4_t kTransparentToonSmokePalette[] {
+        asByteColor( 0.95f, 0.95f, 0.95f, 0.4f ),
+};
+
+static const SimulatedHullsSystem::ColorChangeTimelineNode kBlackToonSmokeColorChangeTimeline[2] {
+        {
+                .activateAtLifetimeFraction = 0.1f, .replacementPalette = kBlackToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.1f,
+                .allowIncreasingOpacity = false,
+        },
+        {
+                .activateAtLifetimeFraction = 0.90f, .replacementPalette = kBlackToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.8f,
+                .allowIncreasingOpacity = false,
+        }
+};
+
+static const SimulatedHullsSystem::ColorChangeTimelineNode kTransparentToonSmokeColorChangeTimeline[2] {
+        {
+                .activateAtLifetimeFraction = 0.1f, .replacementPalette = kTransparentToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.1f,
+                .allowIncreasingOpacity = false,
+        },
+        {
+                .activateAtLifetimeFraction = 0.90f, .replacementPalette = kTransparentToonSmokePalette,
+                .sumOfReplacementChanceForThisSegment = 0.8f,
+                .allowIncreasingOpacity = false,
+        }
+};
+
+static const SimulatedHullsSystem::HullLayerParams kToonSmokeLayerParams[2] {
+        {
+                .speed = 0.0f, .finalOffset = 0.0f,
+                .speedSpikeChance = 0.10f, .minSpeedSpike = 5.0f, .maxSpeedSpike = 20.0f,
+                .biasAlongChosenDir = 15.0f,
+                .baseInitialColor = {0.95f, 0.95f, 0.95f, 0.4f},
+                .bulgeInitialColor = {0.95f, 0.95f, 0.95f, 0.4f},
+                .colorChangeTimeline = kTransparentToonSmokeColorChangeTimeline
+        },
+        {
+                .speed = 0.0f, .finalOffset = 5.0f,
+                .speedSpikeChance = 0.10f, .minSpeedSpike = 5.0f, .maxSpeedSpike = 20.0f,
+                .biasAlongChosenDir = 15.0f,
+                .baseInitialColor = {0.1f, 0.1f, 0.1f, 1.0f},
+                .bulgeInitialColor = {0.1f, 0.1f, 0.1f, 1.0f},
+                .colorChangeTimeline = kBlackToonSmokeColorChangeTimeline
+        }
+};
+
 static const byte_vec4_t kSmokeSoftLayerFadeInPalette[] {
 	asByteColor( 0.65f, 0.65f, 0.65f, 0.25f ),
 	asByteColor( 0.70f, 0.70f, 0.70f, 0.25f ),
@@ -374,7 +482,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		fireHullLayerParams = kFireHullParams.darkHullLayerParams;
 	}
 
-	if( auto *const hull = hullsSystem->allocFireHull( m_lastTime, fireHullTimeout ) ) {
+	/*if( auto *const hull = hullsSystem->allocFireHull( m_lastTime, fireHullTimeout ) ) {
 		hullsSystem->setupHullVertices( hull, fireOrigin, fireHullScale, fireHullLayerParams );
 		assert( !hull->layers[0].useDrawOnTopHack );
 		hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
@@ -400,16 +508,24 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 
 		hull->layers[0].overrideAppearanceRules                   = &g_fireInnerCloudAppearanceRules;
 		hull->layers[hull->numLayers - 1].overrideAppearanceRules = &g_fireOuterCloudAppearanceRules;
-	}
+	}*/
 
-	if( v_explosionWave.get() ) {
+	/*if( v_explosionWave.get() ) {
 		const vec4_t waveColor { 1.0f, 1.0f, 1.0f, 0.05f };
 		if( auto *const hull = hullsSystem->allocWaveHull( m_lastTime, 250 ) ) {
 			hullsSystem->setupHullVertices( hull, fireOrigin, waveColor, 500.0f, 50.0f );
 		}
-	}
+	}*/
 
 	if( smokeOrigin ) {
+        std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
+        toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
+        const float toonSmokeScale = 50.0f;
+        if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 1400 ) ) {
+            hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale, kToonSmokeLayerParams,
+                                           toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset);
+        }
+        /*
 		g_smokeOuterLayerCloudMeshProps[0].material = cgs.media.shaderSmokeHullHardParticle;
 		g_smokeOuterLayerCloudMeshProps[1].material = cgs.media.shaderSmokeHullSoftParticle;
 
@@ -473,10 +589,11 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 
 		for( const SmokeHullParams &hullSpawnParams: spawnSmokeHullParams ) {
 			spawnSmokeHull( m_lastTime, smokeOrigin, spikeSpeedMask, hullSpawnParams );
-		}
+		}*/
+
 	}
 
-	if( v_explosionClusters.get() ) {
+	/*if( v_explosionClusters.get() ) {
 		std::span<const SimulatedHullsSystem::HullLayerParams> clusterHullLayerParams;
 		float minSpawnerSpeed, maxSpawnerSpeed;
 		unsigned maxSpawnedClusters;
@@ -519,12 +636,12 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 			VectorScale( randomDir, randomSpeed, effect->velocity );
 			effect->simulation = DelayedEffect::SimulateMovement;
 		}
-	}
+	}*/
 }
 
 void TransientEffectsSystem::spawnSmokeHull( int64_t currTime, const float *origin, const float *spikeSpeedMask,
 											 const SmokeHullParams &params ) {
-	if( auto *const hull = cg.simulatedHullsSystem.allocSmokeHull( currTime, 2000 ) ) {
+	/*if( auto *const hull = cg.simulatedHullsSystem.allocSmokeHull( currTime, 2000 ) ) {
 		hull->archimedesTopAccel      = params.archimedesAccel.top;
 		hull->archimedesBottomAccel   = params.archimedesAccel.bottom;
 		hull->xyExpansionTopAccel     = params.xyExpansionAccel.top;
@@ -545,7 +662,7 @@ void TransientEffectsSystem::spawnSmokeHull( int64_t currTime, const float *orig
 		const vec4_t initialSmokeColor { 0.0f, 0.0f, 0.0f, 0.03f };
 		cg.simulatedHullsSystem.setupHullVertices( hull, origin, initialSmokeColor, params.speed.mean, params.speed.spread,
 												   params.appearanceRules, spikeSpeedMask, params.speed.maxSpike );
-	}
+	}*/
 }
 
 void TransientEffectsSystem::spawnCartoonHitEffect( const float *origin, const float *dir, int damage ) {

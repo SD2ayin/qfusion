@@ -5,6 +5,9 @@
 #include "../common/wswvector.h"
 #include "../common/memspecbuilder.h"
 #include "../common/mmcommon.h"
+#include "../common/noise.h"
+#include "../cgame/cg_local.h"
+#include "../common/q_math.h"
 
 #include <memory>
 #include <unordered_map>
@@ -342,20 +345,23 @@ void SimulatedHullsSystem::clear() {
 	for( BlastHull *hull = m_blastHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeBlastHull( hull );
 	}
-	for( SmokeHull *hull = m_smokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
-		unlinkAndFreeSmokeHull( hull );
-	}
+	//for( SmokeHull *hull = m_smokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
+	//	unlinkAndFreeSmokeHull( hull );
+	//}
+    for( toonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
+        unlinkAndFreeToonSmokeHull( hull );
+    }
 	for( WaveHull *hull = m_waveHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeWaveHull( hull );
 	}
 }
-
+/*
 void SimulatedHullsSystem::unlinkAndFreeSmokeHull( SmokeHull *hull ) {
 	wsw::unlink( hull, &m_smokeHullsHead );
 	m_freeShapeLists.push_back( hull->shapeList );
 	hull->~SmokeHull();
 	m_smokeHullsAllocator.free( hull );
-}
+}*/
 
 void SimulatedHullsSystem::unlinkAndFreeWaveHull( WaveHull *hull ) {
 	wsw::unlink( hull, &m_waveHullsHead );
@@ -382,6 +388,12 @@ void SimulatedHullsSystem::unlinkAndFreeBlastHull( BlastHull *hull ) {
 	m_blastHullsAllocator.free( hull );
 }
 
+void SimulatedHullsSystem::unlinkAndFreeToonSmokeHull( toonSmokeHull *hull ) {
+    wsw::unlink( hull, &m_toonSmokeHullsHead );
+    hull->~toonSmokeHull();
+    m_toonSmokeHullsAllocator.free( hull );
+}
+
 [[nodiscard]]
 auto SimulatedHullsSystem::allocFireHull( int64_t currTime, unsigned lifetime ) -> FireHull * {
 	return allocHull<FireHull, false>( &m_fireHullsHead, &m_fireHullsAllocator, currTime, lifetime );
@@ -396,15 +408,25 @@ auto SimulatedHullsSystem::allocFireClusterHull( int64_t currTime, unsigned life
 auto SimulatedHullsSystem::allocBlastHull( int64_t currTime, unsigned int lifetime ) -> BlastHull * {
 	return allocHull<BlastHull, false>( &m_blastHullsHead, &m_blastHullsAllocator, currTime, lifetime );
 }
-
+/*
 [[nodiscard]]
 auto SimulatedHullsSystem::allocSmokeHull( int64_t currTime, unsigned lifetime ) -> SmokeHull * {
 	return allocHull<SmokeHull, true>( &m_smokeHullsHead, &m_smokeHullsAllocator, currTime, lifetime );
-}
+}*/
 
 [[nodiscard]]
 auto SimulatedHullsSystem::allocWaveHull( int64_t currTime, unsigned lifetime ) -> WaveHull * {
 	return allocHull<WaveHull, true>( &m_waveHullsHead, &m_waveHullsAllocator, currTime, lifetime );
+}
+
+[[nodiscard]]
+auto SimulatedHullsSystem::allocToonSmokeHull(int64_t currTime, unsigned int lifetime) -> toonSmokeHull * {
+    return allocHull<toonSmokeHull, false>( &m_toonSmokeHullsHead, &m_toonSmokeHullsAllocator, currTime, lifetime );
+}
+
+std::span<const vec4_t> SimulatedHullsSystem::getUnitIcosphere(unsigned level) {
+    const auto [verticesSpan, indicesSpan, neighbourSpan] = ::basicHullsHolder.getIcosphereForLevel(level);
+    return verticesSpan;
 }
 
 // TODO: Turn on "Favor small code" for this template
@@ -634,6 +656,75 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 	hull->appearanceRules = appearanceRules;
 }
 
+void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
+                                              float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe> offsetKeyframeSet,
+                                              const float maxOffset, const AppearanceRules &appearanceRules ) {
+    assert( layerParams.size() == hull->numLayers );
+
+    const float originX = origin[0], originY = origin[1], originZ = origin[2];
+    const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
+    ///
+
+    ///
+    const vec4_t *__restrict vertices = verticesSpan.data();
+    const offsetKeyframe *keyframeSet = offsetKeyframeSet.data();
+
+    // Calculate move limits in each direction
+
+    const float radius = maxOffset * scale;
+    const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
+    const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
+
+    // TODO: Add a fused call
+    CM_BuildShapeList( cl.cms, m_tmpShapeList, growthMins, growthMaxs, MASK_SOLID );
+    CM_ClipShapeList( cl.cms, m_tmpShapeList, m_tmpShapeList, growthMins, growthMaxs );
+
+    if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
+        // Limits at each direction just match the given radius in this case
+        std::fill( hull->limitsAtDirections, hull->limitsAtDirections + verticesSpan.size(), radius );
+    } else {
+        trace_t trace;
+        for( size_t i = 0; i < verticesSpan.size(); ++i ) {
+            // Vertices of the unit hull define directions
+            const float *dir = verticesSpan[i];
+
+            vec3_t limitPoint;
+            VectorMA( origin, radius, dir, limitPoint );
+
+            CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin, MASK_SOLID );
+            hull->limitsAtDirections[i] = trace.fraction * radius;
+        }
+    }
+
+    // Setup layers data
+    assert( hull->numLayers >= 1 && hull->numLayers < 8 );
+    for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
+        BaseKeyframedHull::Layer *layer   = &hull->layers[layerNum];
+        const HullLayerParams *__restrict params    = &layerParams[layerNum];
+        vec4_t *const __restrict positions          = layer->vertexPositions;
+        byte_vec4_t *const __restrict colors        = layer->vertexColors;
+
+        const float *const __restrict baseColor  = params->baseInitialColor;
+        for( size_t i = 0; i < verticesSpan.size(); ++i ) {
+            // Position XYZ is computed prior to submission in stateless fashion
+            positions[i][3] = 1.0f;
+
+            colors[i][0] = (uint8_t)( 255.0f * baseColor[0]  );
+            colors[i][1] = (uint8_t)( 255.0f * baseColor[1]  );
+            colors[i][2] = (uint8_t)( 255.0f * baseColor[2]  );
+            colors[i][3] = (uint8_t)( 255.0f * baseColor[3]  );
+        }
+        layer->finalOffset         = params->finalOffset;
+    }
+
+    VectorCopy( origin, hull->origin );
+    hull->vertexMoveDirections = vertices;
+    hull->offsetKeyframeSet = keyframeSet;
+    hull->scale             = scale;
+
+    hull->appearanceRules = appearanceRules;
+}
+
 void SimulatedHullsSystem::calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes ) {
 	assert( subdivLevel < 4 );
 	assert( maxSpikes && maxSpikes < 10 );
@@ -747,11 +838,15 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	// Limit the time step
 	const float timeDeltaSeconds = 1e-3f * (float)wsw::min<int64_t>( 33, currTime - m_lastTime );
 
-	constexpr unsigned numRegularHulls = kMaxSmokeHulls + kMaxWaveHulls;
+	//constexpr unsigned numRegularHulls = kMaxSmokeHulls + kMaxWaveHulls;
+    constexpr unsigned numRegularHulls = kMaxWaveHulls;
 	wsw::StaticVector<BaseRegularSimulatedHull *, numRegularHulls> activeRegularHulls;
 
 	constexpr unsigned numConcentricHulls = kMaxFireHulls + kMaxFireClusterHulls + kMaxBlastHulls;
 	wsw::StaticVector<BaseConcentricSimulatedHull *, numConcentricHulls> activeConcentricHulls;
+
+    constexpr unsigned numKeyframedHulls = kMaxToonSmokeHulls;
+    wsw::StaticVector<BaseKeyframedHull *, numKeyframedHulls> activeKeyframedHulls;
 
 	for( FireHull *hull = m_fireHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
 		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
@@ -777,6 +872,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			unlinkAndFreeBlastHull( hull );
 		}
 	}
+    /*
 	for( SmokeHull *hull = m_smokeHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
 		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
 			hull->simulate( currTime, timeDeltaSeconds, &m_rng );
@@ -784,7 +880,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		} else {
 			unlinkAndFreeSmokeHull( hull );
 		}
-	}
+	}*/
 	for( WaveHull *hull = m_waveHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
 		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
 			hull->simulate( currTime, timeDeltaSeconds, &m_rng );
@@ -793,6 +889,14 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			unlinkAndFreeWaveHull( hull );
 		}
 	}
+    for( toonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
+        if (hull->spawnTime + hull->lifetime > currTime) [[likely]] {
+            hull->simulate(currTime, timeDeltaSeconds);
+            activeKeyframedHulls.push_back(hull);
+        } else {
+            unlinkAndFreeToonSmokeHull(hull);
+        }
+    }
 
 	m_frameSharedOverrideColorsBuffer.clear();
 
@@ -1006,6 +1110,140 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 													  drawOnTopCloudPartIndex );
 		}
 	}
+
+    for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls ) {
+        assert( hull->numLayers );
+
+        unsigned numSubmittedSolidMeshes = 0, numSubmittedCloudMeshes = 0;
+        std::optional<uint8_t> drawOnTopSolidPartIndex, drawOnTopCloudPartIndex;
+        for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
+            BaseKeyframedHull::Layer *__restrict layer = &hull->layers[layerNum];
+
+            const AppearanceRules *appearanceRules = &hull->appearanceRules;
+            if( layer->overrideAppearanceRules ) {
+                appearanceRules = layer->overrideAppearanceRules;
+            }
+
+            const SolidAppearanceRules *solidAppearanceRules = nullptr;
+            const CloudAppearanceRules *cloudAppearanceRules = nullptr;
+            if( const auto *solidAndCloudRules = std::get_if<SolidAndCloudAppearanceRules>( appearanceRules ) ) {
+                solidAppearanceRules = &solidAndCloudRules->solidRules;
+                cloudAppearanceRules = &solidAndCloudRules->cloudRules;
+            } else {
+                solidAppearanceRules = std::get_if<SolidAppearanceRules>( appearanceRules );
+                cloudAppearanceRules = std::get_if<CloudAppearanceRules>( appearanceRules );
+            }
+
+            assert( solidAppearanceRules || cloudAppearanceRules );
+            SharedMeshData *const __restrict sharedMeshData = layer->sharedMeshData;
+
+            sharedMeshData->simulatedPositions   = layer->vertexPositions;
+
+            sharedMeshData->vertexMaskValues     = layer->vertexMaskValues;
+            sharedMeshData->numMaskedColors      = hull->offsetKeyframeSet[0].maskedColors.size();
+            sharedMeshData->maskedColors         = layer->maskedColors;
+            sharedMeshData->maskedColorRanges    = layer->maskedColorRanges;
+
+            sharedMeshData->simulatedNormals     = nullptr;
+            sharedMeshData->simulatedColors      = layer->vertexColors;
+
+            sharedMeshData->minZLastFrame        = 0.0f;
+            sharedMeshData->maxZLastFrame        = 0.0f;
+            sharedMeshData->minFadedOutAlpha     = layer->overrideMinFadedOutAlpha.value_or( hull->minFadedOutAlpha );
+            sharedMeshData->viewDotFade          = layer->overrideHullFade.value_or( hull->vertexViewDotFade );
+            sharedMeshData->zFade                = ZFade::NoFade;
+            sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
+            sharedMeshData->tesselateClosestLod  = false;
+            sharedMeshData->lerpNextLevelColors  = true;
+
+            sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
+            sharedMeshData->cachedOverrideColorsSpanInBuffer = std::nullopt;
+            sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
+            sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
+
+            sharedMeshData->keyframedHull = true;
+            sharedMeshData->lifetimeFrac  = (float)( currTime - hull->spawnTime) * Q_Rcp( (float)hull->lifetime);
+
+            if( solidAppearanceRules ) [[likely]] {
+                HullSolidDynamicMesh *__restrict mesh = layer->submittedSolidMesh;
+
+                Vector4Copy( layer->mins, mesh->cullMins );
+                Vector4Copy( layer->maxs, mesh->cullMaxs );
+
+                mesh->material            = cgs.media.shaderSmokeHull;
+                //mesh->material            = nullptr;
+                mesh->applyVertexDynLight = hull->applyVertexDynLight;
+                mesh->m_shared            = sharedMeshData;
+                Com_Printf("mesh->m_shared->lifetimefrac:%f\n", mesh->m_shared->lifetimeFrac);
+
+                if( layer->useDrawOnTopHack ) [[unlikely]] {
+                    assert( drawOnTopSolidPartIndex == std::nullopt );
+                    drawOnTopSolidPartIndex = (uint8_t)numSubmittedSolidMeshes;
+                }
+
+                hull->submittedSolidMeshesBuffer[numSubmittedSolidMeshes++] = mesh;
+            }
+
+            if( cloudAppearanceRules ) [[unlikely]] {
+                assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
+                assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
+
+                const float hullLifetimeFrac = (float)( currTime - hull->spawnTime ) * Q_Rcp( (float)hull->lifetime );
+
+                for( size_t meshNum = 0; meshNum < cloudAppearanceRules->spanOfMeshProps.size(); ++meshNum ) {
+                    const CloudMeshProps &__restrict meshProps  = cloudAppearanceRules->spanOfMeshProps[meshNum];
+                    HullCloudDynamicMesh *const __restrict mesh = layer->submittedCloudMeshes[meshNum];
+
+                    mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+                    if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
+                        mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+                        if( mesh->m_alphaScale >= ( 1.0f / 255.0f ) ) {
+                            Vector4Copy( layer->mins, mesh->cullMins );
+                            Vector4Copy( layer->maxs, mesh->cullMaxs );
+
+                            Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
+
+                            mesh->material            = meshProps.material;
+                            mesh->applyVertexDynLight = hull->applyVertexDynLight;
+                            mesh->m_shared            = sharedMeshData;
+                            mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
+                            mesh->m_applyRotation     = meshProps.applyRotation;
+
+                            mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
+                            mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
+                            mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
+
+                            if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
+                                const auto randomWord          = (uint16_t)m_rng.next();
+                                mesh->m_speedIndexShiftInTable = ( randomWord >> 0 ) & 0xFF;
+                                mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
+                            }
+
+                            if( layer->useDrawOnTopHack ) [[unlikely]] {
+                                assert( drawOnTopCloudPartIndex == std::nullopt );
+                                drawOnTopCloudPartIndex = (uint8_t)numSubmittedCloudMeshes;
+                            }
+
+                            hull->submittedCloudMeshesBuffer[numSubmittedCloudMeshes++] = mesh;
+                        }
+                    }
+                }
+            }
+        }
+
+
+
+        if( numSubmittedSolidMeshes ) [[likely]] {
+            drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs,
+                                                      hull->submittedSolidMeshesBuffer, numSubmittedSolidMeshes,
+                                                      drawOnTopSolidPartIndex );
+        }
+        if( numSubmittedCloudMeshes ) [[unlikely]] {
+            drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs,
+                                                      hull->submittedCloudMeshesBuffer, numSubmittedCloudMeshes,
+                                                      drawOnTopCloudPartIndex );
+        }
+    }
 
 	m_lastTime = currTime;
 }
@@ -1334,6 +1572,125 @@ void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTi
 		processColorChange( currTime, spawnTime, lifetime, layer->colorChangeTimeline,
 							{ layer->vertexColors, numVertices }, &layer->colorChangeState, rng );
 	}
+}
+
+void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds) {
+    // Just move all vertices along directions clipping by limits
+
+    BoundsBuilder hullBoundsBuilder;
+
+    const float *__restrict growthOrigin = this->origin;
+    const unsigned numVertices = basicHullsHolder.getIcosphereForLevel( subdivLevel ).vertices.size();
+
+    lastKeyframeNum = computeCurrKeyframeIndex(lastKeyframeNum, currTime, spawnTime, lifetime, offsetKeyframeSet);
+    const unsigned keyframe = lastKeyframeNum;
+
+    const float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
+    const float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
+
+    // Sanity check
+    assert( numLayers >= 1 && numLayers < 8 );
+    for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
+        BoundsBuilder layerBoundsBuilder;
+
+        BaseKeyframedHull::Layer *layer             = &layers[layerNum];
+        vec4_t *const __restrict positions          = layer->vertexPositions;
+
+        float *const __restrict vertexMaskValues    = layer->vertexMaskValues;
+
+        unsigned numMaskedColors = offsetKeyframeSet[keyframe].maskedColors.size();
+        for( unsigned numColor = 0; numColor < numMaskedColors; ++numColor ) {
+            Vector4Lerp(offsetKeyframeSet[keyframe].maskedColors[numColor],
+                        fracFromCurrKeyframe, offsetKeyframeSet[keyframe+1].maskedColors[numColor],
+                        layer->maskedColors[numColor]);
+            layer->maskedColorRanges[numColor] = lerpValue(offsetKeyframeSet[keyframe].maskedColorRanges[numColor],
+                                                           offsetKeyframeSet[keyframe+1].maskedColorRanges[numColor],
+                                                           fracFromCurrKeyframe);
+        }
+
+
+        const float finalOffset = layer->finalOffset;
+        for( unsigned i = 0; i < numVertices; ++i ) {
+            float offset = lerpValue(offsetKeyframeSet[keyframe].offsets[i],
+                                     offsetKeyframeSet[keyframe+1].offsets[i],
+                                     fracFromCurrKeyframe);
+            offset *= scale;
+
+            vertexMaskValues[i] = lerpValue(offsetKeyframeSet[keyframe].vertexMaskValues[i],
+                                            offsetKeyframeSet[keyframe+1].vertexMaskValues[i],
+                                            fracFromCurrKeyframe);
+
+            // Limit growth by the precomputed obstacle distance
+            const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
+            offset = wsw::min( offset - finalOffset, limit );
+
+            VectorMA( growthOrigin, offset, vertexMoveDirections[i], positions[i] );
+
+            // TODO: Allow supplying 4-component in-memory vectors directly
+            layerBoundsBuilder.addPoint( positions[i] );
+        }
+
+        // TODO: Allow storing 4-component float vectors to memory directly
+        layerBoundsBuilder.storeTo( layer->mins, layer->maxs );
+        layer->mins[3] = 0.0f, layer->maxs[3] = 1.0f;
+
+        // Don't relying on what hull is external is more robust
+
+        // TODO: Allow adding other builder directly
+        hullBoundsBuilder.addPoint( layer->mins );
+        hullBoundsBuilder.addPoint( layer->maxs );
+    }
+
+    // TODO: Allow storing 4-component float vectors to memory directly
+    hullBoundsBuilder.storeTo( this->mins, this->maxs );
+    this->mins[3] = 0.0f, this->maxs[3] = 1.0f;
+
+    /*for( unsigned i = 0; i < numLayers; ++i ) {
+        Layer *const layer = &layers[i];
+        for( unsigned j = 0; j < numVertices; ++j ) {
+            const float scale = 0.018f;
+            const float noise = calcSimplexNoise3D(layer->vertexPositions[j][0] * scale, layer->vertexPositions[j][1] * scale, layer->vertexPositions[j][2] * scale + i * 20);
+            byte_vec4_t gray        = {25, 25, 25, 255};
+            byte_vec4_t transparent = {0, 0, 0, 0};
+            layer->vertexColors[j][0] = gray[0];
+            layer->vertexColors[j][1] = gray[1];
+            layer->vertexColors[j][2] = gray[2];
+            const float value = 1 + noise - 2 * lifeTimeFrac;
+            if ( value > 0) {
+                layer->vertexColors[j][3] = gray[3] * wsw::clamp(10.f*value, 0.f, 1.f);
+            }
+            else {
+                layer->vertexColors[j][3] = transparent[3];
+            }
+        }*/
+    /*
+    processColorChange( currTime, spawnTime, lifetime, layer->colorChangeTimeline,
+                        { layer->vertexColors, numVertices }, &layer->colorChangeState, rng );*/
+    //}
+}
+
+auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex, int64_t currTime, int64_t spawnTime,
+                                                    unsigned int effectDuration,
+                                                    const offsetKeyframe *offsetKeyframeSet) -> unsigned int {
+
+    const auto currLifetimeFraction = (float)( currTime - spawnTime ) * Q_Rcp( (float)effectDuration );
+    // TODO: compute actual amount of elements in the set (using a span)
+    unsigned setSize = 20;
+
+    // Assume that startFromIndex is "good" even if the conditions in the loop won't be held for it
+    unsigned currIndex = startFromIndex, lastGoodIndex = startFromIndex;
+    for(;; ) {
+        if( currIndex == setSize ) {
+            break;
+        }
+        if( offsetKeyframeSet[currIndex].lifeTimeFraction > currLifetimeFraction ) {
+            break;
+        }
+        lastGoodIndex = currIndex;
+        currIndex++;
+    }
+
+    return lastGoodIndex;
 }
 
 auto SimulatedHullsSystem::computeCurrTimelineNodeIndex( unsigned startFromIndex, int64_t currTime,
@@ -2258,8 +2615,86 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 	assert( colorsBufferSize && colorsBufferSize < ( 1 << 12 ) );
 	auto *const overrideColorsBuffer = (byte_vec4_t *)alloca( sizeof( byte_vec4_t ) * colorsBufferSize );
 
-	const byte_vec4_t *overrideColors = getOverrideColorsCheckingSiblingCache( overrideColorsBuffer, viewOrigin,
-																			   viewAxis, lights, affectingLightIndices );
+    const byte_vec4_t *overrideColors;
+    if(!m_shared->keyframedHull) {
+        overrideColors = getOverrideColorsCheckingSiblingCache(overrideColorsBuffer, viewOrigin,
+                                                               viewAxis, lights,
+                                                               affectingLightIndices);
+    } else {
+        Com_Printf("yyy");
+        byte_vec4_t *buffer = overrideColorsBuffer;
+        //const byte_vec4_t *resultColors;
+        //resultColors = buffer;
+        byte_vec4_t *resultColors = buffer;
+        const unsigned dataLevelToUse     = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
+        const IcosphereData &lodDataToUse = ::basicHullsHolder.getIcosphereForLevel( dataLevelToUse );
+        // If tesselation is going to be performed, apply light to the base non-tesselated lod colors
+        const auto numVertices = (unsigned)lodDataToUse.vertices.size();
+        const vec4_t *positions = m_shared->simulatedPositions;
+        const unsigned short (*neighboursOfVertices)[5] = lodDataToUse.vertexNeighbours.data();
+        const unsigned char (*givenColors)[4] = m_shared->simulatedColors;
+        unsigned vertexNum = 0;
+        do {
+            const uint16_t *const neighboursOfVertex = neighboursOfVertices[vertexNum];
+            const float *const __restrict currVertex = positions[vertexNum];
+            vec3_t normal { 0.0f, 0.0f, 0.0f };
+            unsigned neighbourIndex = 0;
+            do {
+                const float *__restrict v2 = positions[neighboursOfVertex[neighbourIndex]];
+                const float *__restrict v3 = positions[neighboursOfVertex[( neighbourIndex + 1 ) % 5]];
+                vec3_t currTo2, currTo3, cross;
+                VectorSubtract( v2, currVertex, currTo2 );
+                VectorSubtract( v3, currVertex, currTo3 );
+                CrossProduct( currTo2, currTo3, cross );
+                if( const float squaredLength = VectorLengthSquared( cross ); squaredLength > 1.0f ) [[likely]] {
+                    const float rcpLength = Q_RSqrt( squaredLength );
+                    VectorMA( normal, rcpLength, cross, normal );
+                }
+            } while( ++neighbourIndex < 5 );
+
+            VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
+            // The sum of partial non-zero directories could be zero, check again
+            const float squaredNormalLength = VectorLengthSquared( normal );
+            if( squaredNormalLength > wsw::square( 1e-3f ) ) [[likely]] {
+                vec3_t viewDir;
+                VectorSubtract( currVertex, viewOrigin, viewDir );
+                const float squareDistanceToVertex = VectorLengthSquared( viewDir );
+                if( squareDistanceToVertex > 1.0f ) [[likely]] {
+                    const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
+                    const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
+                    VectorScale( normal, rcpNormalLength, normal );
+                    VectorScale( viewDir, rcpDistance, viewDir );
+                    const float absDot = std::fabs( DotProduct( viewDir, normal ) );
+                    const auto num = (uint8_t) ( m_shared->lifetimeFrac * 125.f );
+
+                    const uint8_t numColors = m_shared->numMaskedColors;
+                    int j = 0;
+                    while( m_shared->vertexMaskValues[vertexNum] > m_shared->maskedColorRanges[j] && j < numColors ){
+                        j++;
+                    }
+                    if( j == 0 ) {
+                        Vector4Copy(m_shared->maskedColors[0], resultColors[vertexNum]);
+                    } else if( j == numColors ) {
+                        Vector4Copy(m_shared->maskedColors[numColors-1], resultColors[vertexNum]);
+                    } else {
+                        const float lerpFrac = ( m_shared->vertexMaskValues[vertexNum] - m_shared->maskedColorRanges[j-1] ) / ( m_shared->maskedColorRanges[j] - m_shared->maskedColorRanges[j-1] );
+                        Vector4Lerp(m_shared->maskedColors[j-1], lerpFrac, m_shared->maskedColors[j], resultColors[vertexNum]);
+                    }
+
+                    for( int i = 0; i < 3; i++ ){
+                        //resultColors[vertexNum][i] = 125 - (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.5f, 0.0f, 1.0f));
+                        //resultColors[vertexNum][i] = num + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
+                    }
+                } else {
+                    resultColors[vertexNum][3] = 255;
+                }
+            } else {
+                resultColors[vertexNum][3] = 255;
+            }
+            //resultColors[vertexNum][3] = m_shared->simulatedColors[vertexNum][3];
+        } while( ++vertexNum < numVertices );
+        overrideColors = buffer;
+    }
 
 	unsigned numResultVertices, numResultIndices;
 
