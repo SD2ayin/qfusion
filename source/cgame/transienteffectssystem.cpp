@@ -292,12 +292,16 @@ struct ToonSmokeOffsetKeyframeHolder {
             maskedShadingLayer.colorRanges[0]   = ((float)(i) / (numKeyframes) ) * ((float)(i) / (numKeyframes) );
             maskedShadingLayer.colorRanges[1]   = (float)(i) / (numKeyframes);
             maskedShadingLayer.colorRanges[2]   = std::sqrt((float)(i) / (numKeyframes) );
+            maskedShadingLayer.blendMode        = SimulatedHullsSystem::blendMode::ALPHA_BLEND;
+            maskedShadingLayer.alphaMode        = SimulatedHullsSystem::alphaMode::OVERRIDE;
 
             SimulatedHullsSystem::dotShadingLayer dotShadingLayer;
             dotShadingLayer.colors              = maskedColors;
             dotShadingLayer.colorRanges[0]      = ((float)(i) / (numKeyframes) ) * ((float)(i) / (numKeyframes) );
             dotShadingLayer.colorRanges[1]      = (float)(i) / (numKeyframes);
             dotShadingLayer.colorRanges[2]      = std::sqrt((float)(i) / (numKeyframes) );
+            dotShadingLayer.blendMode           = SimulatedHullsSystem::blendMode::ALPHA_BLEND;
+            dotShadingLayer.alphaMode           = SimulatedHullsSystem::alphaMode::OVERRIDE;
 
             auto *shadingLayers = new SimulatedHullsSystem::shadingLayer[2];
             shadingLayers[0] = maskedShadingLayer;

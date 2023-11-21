@@ -2388,6 +2388,7 @@ static const struct FadeFnHolder {
 #undef ADD_FN_FOR_FLAGS_TO_TABLES
 } fadeFnHolder;
 
+
 void SimulatedHullsSystem::HullDynamicMesh::calcOverrideColors( byte_vec4_t *__restrict buffer,
 																const float *__restrict viewOrigin,
 																const float *__restrict viewAxis,
@@ -2504,6 +2505,8 @@ auto SimulatedHullsSystem::HullDynamicMesh::getOverrideColorsCheckingSiblingCach
 	return buffer;
 }
 
+
+
 auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const float *viewOrigin,
 																		 const float *viewAxis,
 																		 float cameraViewTangent ) const
@@ -2612,89 +2615,51 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         // If tesselation is going to be performed, apply light to the base non-tesselated lod colors
         const auto numVertices = (unsigned)lodDataToUse.vertices.size();
 
-        
-
         const vec4_t *positions = m_shared->simulatedPositions;
         const unsigned short (*neighboursOfVertices)[5] = lodDataToUse.vertexNeighbours.data();
         const unsigned char (*givenColors)[4] = m_shared->simulatedColors;
-        unsigned vertexNum = 0;
-        do  {
-            const uint16_t *const neighboursOfVertex = neighboursOfVertices[vertexNum];
-            const float *const __restrict currVertex = positions[vertexNum];
-            vec3_t normal { 0.0f, 0.0f, 0.0f };
-            unsigned neighbourIndex = 0;
-            do {
-                const float *__restrict v2 = positions[neighboursOfVertex[neighbourIndex]];
-                const float *__restrict v3 = positions[neighboursOfVertex[( neighbourIndex + 1 ) % 5]];
-                vec3_t currTo2, currTo3, cross;
-                VectorSubtract( v2, currVertex, currTo2 );
-                VectorSubtract( v3, currVertex, currTo3 );
-                CrossProduct( currTo2, currTo3, cross );
-                if( const float squaredLength = VectorLengthSquared( cross ); squaredLength > 1.0f ) [[likely]] {
-                    const float rcpLength = Q_RSqrt( squaredLength );
-                    VectorMA( normal, rcpLength, cross, normal );
+
+        const unsigned numShadingLayers = m_shared->prevShadingLayers.size();
+        for( unsigned layerNum = 0; layerNum < numShadingLayers; layerNum++ ) {
+            if (auto prevMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->prevShadingLayers[layerNum])) {
+                auto nextMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
+
+                Com_Printf("yyy");
+                const unsigned numColors = prevMaskedLayer->colors.size();
+                constexpr int arbitrarySize = 6; //!!??
+                byte_vec4_t lerpedColors[arbitrarySize];
+                float lerpedColorRanges[arbitrarySize];
+                for (unsigned colorNum = 0; colorNum < numColors; colorNum++) {
+                    Vector4Lerp(prevMaskedLayer->colors[colorNum], m_shared->lerpFrac,
+                                nextMaskedLayer->colors[colorNum], lerpedColors[colorNum]);
+                    lerpedColorRanges[colorNum] = lerpValue(prevMaskedLayer->colorRanges[colorNum],
+                                                            nextMaskedLayer->colorRanges[colorNum],
+                                                            m_shared->lerpFrac);
                 }
-            } while( ++neighbourIndex < 5 );
 
-            VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
-            // The sum of partial non-zero directories could be zero, check again
-            const float squaredNormalLength = VectorLengthSquared( normal );
-            if( squaredNormalLength > wsw::square( 1e-3f ) ) [[likely]] {
-                vec3_t viewDir;
-                VectorSubtract( currVertex, viewOrigin, viewDir );
-                const float squareDistanceToVertex = VectorLengthSquared( viewDir );
-                if( squareDistanceToVertex > 1.0f ) [[likely]] {
-                    const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
-                    const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
-                    VectorScale( normal, rcpNormalLength, normal );
-                    VectorScale( viewDir, rcpDistance, viewDir );
-                    const float absDot = std::fabs( DotProduct( viewDir, normal ) );
+                unsigned vertexNum = 0;
+                do {
+                    const float vertexMaskValue = lerpValue(prevMaskedLayer->vertexMaskValues[vertexNum],
+                                                            nextMaskedLayer->vertexMaskValues[vertexNum],
+                                                            m_shared->lerpFrac);
 
-
-
-                    const unsigned numShadingLayers = m_shared->prevShadingLayers.size();
-                    for( unsigned layerNum = 0; layerNum < numShadingLayers; layerNum++ ){
-                        if( auto prevMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->prevShadingLayers[layerNum]) ){
-                            auto nextMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
-                            Com_Printf("yyy");
-                            const unsigned numColors = prevMaskedLayer->colors.size();
-                            constexpr int arbitrarySize = 6;
-                            byte_vec4_t lerpedColors[arbitrarySize];
-                            float lerpedColorRanges[arbitrarySize];
-                            for( unsigned colorNum = 0; colorNum < numColors; colorNum++ ) {
-                                Vector4Lerp(prevMaskedLayer->colors[colorNum], m_shared->lerpFrac,
-                                            nextMaskedLayer->colors[colorNum], lerpedColors[colorNum]);
-                                lerpedColorRanges[colorNum] = lerpValue(prevMaskedLayer->colorRanges[colorNum],
-                                                                        nextMaskedLayer->colorRanges[colorNum],
-                                                                        m_shared->lerpFrac);
-                            }
-
-                            const float vertexMaskValue = lerpValue(prevMaskedLayer->vertexMaskValues[vertexNum],
-                                                                    nextMaskedLayer->vertexMaskValues[vertexNum],
-                                                                    m_shared->lerpFrac);
-
-                            unsigned j = 0;
-                            while( vertexMaskValue > lerpedColorRanges[j] && j < numColors ){
-                                j++;
-                            }
-                            if( j == 0 ) {
-                                Vector4Copy(lerpedColors[0], resultColors[vertexNum]);
-                            } else if( j == numColors ) {
-                                Vector4Copy(lerpedColors[numColors-1], resultColors[vertexNum]);
-                            } else {
-                                const float lerpFrac = ( vertexMaskValue - lerpedColorRanges[j-1] ) / ( lerpedColorRanges[j] - lerpedColorRanges[j-1] );
-                                Vector4Lerp(lerpedColors[j-1], lerpFrac, lerpedColors[j], resultColors[vertexNum]);
-                            }
-                        }
+                    unsigned j = 0;
+                    while( vertexMaskValue > lerpedColorRanges[j] && j < numColors ){
+                        j++;
+                    }
+                    if( j == 0 ) {
+                        Vector4Copy(lerpedColors[0], resultColors[vertexNum]);
+                    } else if( j == numColors ) {
+                        Vector4Copy(lerpedColors[numColors-1], resultColors[vertexNum]);
+                    } else {
+                        const float lerpFrac = ( vertexMaskValue - lerpedColorRanges[j-1] ) / ( lerpedColorRanges[j] - lerpedColorRanges[j-1] );
+                        Vector4Lerp(lerpedColors[j-1], lerpFrac, lerpedColors[j], resultColors[vertexNum]);
                     }
 
-                } else {
-                    resultColors[vertexNum][3] = 0;
-                }
-            } else {
-                resultColors[vertexNum][3] = 255;
+                } while ( ++vertexNum < numVertices );
             }
-        } while( ++vertexNum < numVertices );
+        }
+
         overrideColors = buffer;
     }
 

@@ -201,6 +201,9 @@ private:
 													const Scene::DynamicLight *lights,
 													std::span<const uint16_t> affectingLightIndices ) const
 														-> const byte_vec4_t *;
+
+        /*auto copyColors( const unsigned numVertices, const byte_vec4_t* colors, const float* colorRanges ) const
+        -> const byte_vec4_t *;*/
 	};
 
 	class HullSolidDynamicMesh : public HullDynamicMesh {
@@ -221,6 +224,7 @@ private:
 							  vec2_t *__restrict destTexCoords,
 							  byte_vec4_t *__restrict destColors,
 							  uint16_t *__restrict destIndices ) const -> std::pair<unsigned, unsigned> override;
+
 	};
 
 	class HullCloudDynamicMesh : public HullDynamicMesh {
