@@ -133,16 +133,8 @@ public:
     struct offsetKeyframe {
         float lifeTimeFraction {0.0f};
         float *offsets;
-        float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
-        std::span<byte_vec4_t> maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
-        float maskedColorRanges[maxColors]; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
-        std::span<byte_vec4_t> dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
-        float dotColorRanges[maxColors]; //values between 0-1, -1 because the first color always starts at 0
-        enum blendMode : uint8_t {
-            BLEND_COLORS,
-            ADD_COLORS,
-            OVERRIDE_ALPHA
-        };
+        float *offsetsFromLimit; // the offset from an obstacle
+        std::span<const shadingLayer> shadingLayers;
     };
 
 
@@ -157,42 +149,32 @@ private:
 
 	// We have to supply solid and cloud parts separately for a proper handling of surface sorting in the renderer.
 	// Still, they share many properties.
-	struct SharedMeshData {
-		wsw::Vector<uint32_t> *overrideColorsBuffer { nullptr };
-
-		// Must be reset each frame
-		std::optional<std::variant<std::pair<unsigned, unsigned>, std::monostate>> cachedOverrideColorsSpanInBuffer;
-		std::optional<std::variant<unsigned, std::monostate>> cachedChosenSolidSubdivLevel;
-
-		const vec4_t *simulatedPositions { nullptr };
-		const vec4_t *simulatedNormals { nullptr };
-		const byte_vec4_t *simulatedColors { nullptr };
-		unsigned simulatedSubdivLevel { 0 };
-
-		float nextLodTangentRatio { 0.18f };
-		float minZLastFrame { 0.0f };
-		float maxZLastFrame { 0.0f };
-		float minFadedOutAlpha { 0.0f };
-		ViewDotFade viewDotFade { ViewDotFade::NoFade };
-		ZFade zFade { ZFade::NoFade };
-		bool tesselateClosestLod { false };
-		bool lerpNextLevelColors { false };
-
-		bool hasSibling { false };
+    struct SharedMeshData {
+        wsw::Vector<uint32_t> *overrideColorsBuffer { nullptr };
+        // Must be reset each frame
+        std::optional<std::variant<std::pair<unsigned, unsigned>, std::monostate>> cachedOverrideColorsSpanInBuffer;
+        std::optional<std::variant<unsigned, std::monostate>> cachedChosenSolidSubdivLevel;
+        const vec4_t *simulatedPositions { nullptr };
+        const vec4_t *simulatedNormals { nullptr };
+        const byte_vec4_t *simulatedColors { nullptr };
+        unsigned simulatedSubdivLevel { 0 };
+        float nextLodTangentRatio { 0.18f };
+        float minZLastFrame { 0.0f };
+        float maxZLastFrame { 0.0f };
+        float minFadedOutAlpha { 0.0f };
+        ViewDotFade viewDotFade { ViewDotFade::NoFade };
+        ZFade zFade { ZFade::NoFade };
+        bool tesselateClosestLod { false };
+        bool lerpNextLevelColors { false };
+        bool hasSibling { false };
 
         bool keyframedHull {false};
-        float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
-        //byte_vec4_t *maskedColors;
-        unsigned numMaskedColors;
-        byte_vec4_t *maskedColors; //colors are interpolated between these based on ranges and the vertex mask value
-        float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
-        unsigned numDotColors;
-        byte_vec4_t *dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
-        float *dotColorRanges; //values between 0-1, -1 because the first color always starts at 0
+        unsigned currentKeyframe;
+        std::span<const shadingLayer> prevShadingLayers;
+        std::span<const shadingLayer> nextShadingLayers;
+        float lerpFrac;
 
-
-        float lifetimeFrac {0.0f};
-	};
+    };
 
 	class HullDynamicMesh : public DynamicMesh {
 		friend class SimulatedHullsSystem;
@@ -524,6 +506,8 @@ private:
 
         unsigned numLayers { 0 };
         unsigned lifetime { 0 };
+
+        float lerpFrac {0.0f};
 
         float minFadedOutAlpha { 0.0f };
 

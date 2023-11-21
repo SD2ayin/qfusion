@@ -1139,10 +1139,11 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
             sharedMeshData->simulatedPositions   = layer->vertexPositions;
 
-            sharedMeshData->vertexMaskValues     = layer->vertexMaskValues;
-            sharedMeshData->numMaskedColors      = hull->offsetKeyframeSet[0].maskedColors.size();
-            sharedMeshData->maskedColors         = layer->maskedColors;
-            sharedMeshData->maskedColorRanges    = layer->maskedColorRanges;
+            const unsigned currentKeyframe = hull->lastKeyframeNum;
+            sharedMeshData->currentKeyframe      = currentKeyframe;
+            sharedMeshData->prevShadingLayers    = hull->offsetKeyframeSet[currentKeyframe].shadingLayers;
+            sharedMeshData->nextShadingLayers    = hull->offsetKeyframeSet[currentKeyframe + 1].shadingLayers;
+            sharedMeshData->lerpFrac             = hull->lerpFrac;
 
             sharedMeshData->simulatedNormals     = nullptr;
             sharedMeshData->simulatedColors      = layer->vertexColors;
@@ -1162,7 +1163,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
 
             sharedMeshData->keyframedHull = true;
-            sharedMeshData->lifetimeFrac  = (float)( currTime - hull->spawnTime) * Q_Rcp( (float)hull->lifetime);
 
             if( solidAppearanceRules ) [[likely]] {
                 HullSolidDynamicMesh *__restrict mesh = layer->submittedSolidMesh;
@@ -1174,7 +1174,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
                 //mesh->material            = nullptr;
                 mesh->applyVertexDynLight = hull->applyVertexDynLight;
                 mesh->m_shared            = sharedMeshData;
-                Com_Printf("mesh->m_shared->lifetimefrac:%f\n", mesh->m_shared->lifetimeFrac);
 
                 if( layer->useDrawOnTopHack ) [[unlikely]] {
                     assert( drawOnTopSolidPartIndex == std::nullopt );
@@ -1587,6 +1586,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
     const float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
     const float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
+    lerpFrac = fracFromCurrKeyframe;
 
     // Sanity check
     assert( numLayers >= 1 && numLayers < 8 );
@@ -1596,29 +1596,12 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
         BaseKeyframedHull::Layer *layer             = &layers[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
 
-        float *const __restrict vertexMaskValues    = layer->vertexMaskValues;
-
-        unsigned numMaskedColors = offsetKeyframeSet[keyframe].maskedColors.size();
-        for( unsigned numColor = 0; numColor < numMaskedColors; ++numColor ) {
-            Vector4Lerp(offsetKeyframeSet[keyframe].maskedColors[numColor],
-                        fracFromCurrKeyframe, offsetKeyframeSet[keyframe+1].maskedColors[numColor],
-                        layer->maskedColors[numColor]);
-            layer->maskedColorRanges[numColor] = lerpValue(offsetKeyframeSet[keyframe].maskedColorRanges[numColor],
-                                                           offsetKeyframeSet[keyframe+1].maskedColorRanges[numColor],
-                                                           fracFromCurrKeyframe);
-        }
-
-
         const float finalOffset = layer->finalOffset;
         for( unsigned i = 0; i < numVertices; ++i ) {
             float offset = lerpValue(offsetKeyframeSet[keyframe].offsets[i],
                                      offsetKeyframeSet[keyframe+1].offsets[i],
                                      fracFromCurrKeyframe);
             offset *= scale;
-
-            vertexMaskValues[i] = lerpValue(offsetKeyframeSet[keyframe].vertexMaskValues[i],
-                                            offsetKeyframeSet[keyframe+1].vertexMaskValues[i],
-                                            fracFromCurrKeyframe);
 
             // Limit growth by the precomputed obstacle distance
             const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
@@ -2621,20 +2604,21 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                                                                viewAxis, lights,
                                                                affectingLightIndices);
     } else {
-        Com_Printf("yyy");
         byte_vec4_t *buffer = overrideColorsBuffer;
-        //const byte_vec4_t *resultColors;
-        //resultColors = buffer;
         byte_vec4_t *resultColors = buffer;
+
         const unsigned dataLevelToUse     = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
         const IcosphereData &lodDataToUse = ::basicHullsHolder.getIcosphereForLevel( dataLevelToUse );
         // If tesselation is going to be performed, apply light to the base non-tesselated lod colors
         const auto numVertices = (unsigned)lodDataToUse.vertices.size();
+
+        
+
         const vec4_t *positions = m_shared->simulatedPositions;
         const unsigned short (*neighboursOfVertices)[5] = lodDataToUse.vertexNeighbours.data();
         const unsigned char (*givenColors)[4] = m_shared->simulatedColors;
         unsigned vertexNum = 0;
-        do {
+        do  {
             const uint16_t *const neighboursOfVertex = neighboursOfVertices[vertexNum];
             const float *const __restrict currVertex = positions[vertexNum];
             vec3_t normal { 0.0f, 0.0f, 0.0f };
@@ -2665,33 +2649,51 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     VectorScale( normal, rcpNormalLength, normal );
                     VectorScale( viewDir, rcpDistance, viewDir );
                     const float absDot = std::fabs( DotProduct( viewDir, normal ) );
-                    const auto num = (uint8_t) ( m_shared->lifetimeFrac * 125.f );
 
-                    const uint8_t numColors = m_shared->numMaskedColors;
-                    int j = 0;
-                    while( m_shared->vertexMaskValues[vertexNum] > m_shared->maskedColorRanges[j] && j < numColors ){
-                        j++;
-                    }
-                    if( j == 0 ) {
-                        Vector4Copy(m_shared->maskedColors[0], resultColors[vertexNum]);
-                    } else if( j == numColors ) {
-                        Vector4Copy(m_shared->maskedColors[numColors-1], resultColors[vertexNum]);
-                    } else {
-                        const float lerpFrac = ( m_shared->vertexMaskValues[vertexNum] - m_shared->maskedColorRanges[j-1] ) / ( m_shared->maskedColorRanges[j] - m_shared->maskedColorRanges[j-1] );
-                        Vector4Lerp(m_shared->maskedColors[j-1], lerpFrac, m_shared->maskedColors[j], resultColors[vertexNum]);
+
+
+                    const unsigned numShadingLayers = m_shared->prevShadingLayers.size();
+                    for( unsigned layerNum = 0; layerNum < numShadingLayers; layerNum++ ){
+                        if( auto prevMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->prevShadingLayers[layerNum]) ){
+                            auto nextMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
+                            Com_Printf("yyy");
+                            const unsigned numColors = prevMaskedLayer->colors.size();
+                            constexpr int arbitrarySize = 6;
+                            byte_vec4_t lerpedColors[arbitrarySize];
+                            float lerpedColorRanges[arbitrarySize];
+                            for( unsigned colorNum = 0; colorNum < numColors; colorNum++ ) {
+                                Vector4Lerp(prevMaskedLayer->colors[colorNum], m_shared->lerpFrac,
+                                            nextMaskedLayer->colors[colorNum], lerpedColors[colorNum]);
+                                lerpedColorRanges[colorNum] = lerpValue(prevMaskedLayer->colorRanges[colorNum],
+                                                                        nextMaskedLayer->colorRanges[colorNum],
+                                                                        m_shared->lerpFrac);
+                            }
+
+                            const float vertexMaskValue = lerpValue(prevMaskedLayer->vertexMaskValues[vertexNum],
+                                                                    nextMaskedLayer->vertexMaskValues[vertexNum],
+                                                                    m_shared->lerpFrac);
+
+                            unsigned j = 0;
+                            while( vertexMaskValue > lerpedColorRanges[j] && j < numColors ){
+                                j++;
+                            }
+                            if( j == 0 ) {
+                                Vector4Copy(lerpedColors[0], resultColors[vertexNum]);
+                            } else if( j == numColors ) {
+                                Vector4Copy(lerpedColors[numColors-1], resultColors[vertexNum]);
+                            } else {
+                                const float lerpFrac = ( vertexMaskValue - lerpedColorRanges[j-1] ) / ( lerpedColorRanges[j] - lerpedColorRanges[j-1] );
+                                Vector4Lerp(lerpedColors[j-1], lerpFrac, lerpedColors[j], resultColors[vertexNum]);
+                            }
+                        }
                     }
 
-                    for( int i = 0; i < 3; i++ ){
-                        //resultColors[vertexNum][i] = 125 - (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.5f, 0.0f, 1.0f));
-                        //resultColors[vertexNum][i] = num + (uint8_t)( 100.f * wsw::clamp(2.9f * absDot - 0.6f, 0.0f, 1.0f));
-                    }
                 } else {
-                    resultColors[vertexNum][3] = 255;
+                    resultColors[vertexNum][3] = 0;
                 }
             } else {
                 resultColors[vertexNum][3] = 255;
             }
-            //resultColors[vertexNum][3] = m_shared->simulatedColors[vertexNum][3];
         } while( ++vertexNum < numVertices );
         overrideColors = buffer;
     }

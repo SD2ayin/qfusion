@@ -261,10 +261,7 @@ struct ToonSmokeOffsetKeyframeHolder {
     const vec4_t *vertices = verticesSpan.data();
     SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
     ToonSmokeOffsetKeyframeHolder() noexcept {
-        /*std::array<byte_vec4_t,2> maskedColorsArr = {{
-                {25,  25,  25, 255},
-                {255, 120, 30, 255}
-        }};*/
+
         auto colors = new byte_vec4_t[3];
         byte_vec4_t gray = {25, 25, 25, 255};
         //byte_vec4_t orange = {255, 110, 30, 255};
@@ -287,17 +284,31 @@ struct ToonSmokeOffsetKeyframeHolder {
                 const float voronoiNoise = calcVoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2 * x);
                 const float offset = expansion * ( 1.0f - 0.7f * voronoiNoise );
                 vertexOffsets[vert] = offset;
-                vertexMaskValues[vert] = std::sqrt(voronoiNoise); //values between 1 and 0 where 1 has the highest offset
+                vertexMaskValues[vert] = voronoiNoise; //values between 1 and 0 where 1 has the highest offset
             }
-            //Vector4Copy(maskedColors[0], toonSmokeKeyframeSet[i].maskedColors[0]);
-            //Vector4Copy(maskedColors[1], toonSmokeKeyframeSet[i].maskedColors[1]);
+            SimulatedHullsSystem::maskedShadingLayer maskedShadingLayer;
+            maskedShadingLayer.vertexMaskValues = vertexMaskValues;
+            maskedShadingLayer.colors           = maskedColors;
+            maskedShadingLayer.colorRanges[0]   = ((float)(i) / (numKeyframes) ) * ((float)(i) / (numKeyframes) );
+            maskedShadingLayer.colorRanges[1]   = (float)(i) / (numKeyframes);
+            maskedShadingLayer.colorRanges[2]   = std::sqrt((float)(i) / (numKeyframes) );
+
+            SimulatedHullsSystem::dotShadingLayer dotShadingLayer;
+            dotShadingLayer.colors              = maskedColors;
+            dotShadingLayer.colorRanges[0]      = ((float)(i) / (numKeyframes) ) * ((float)(i) / (numKeyframes) );
+            dotShadingLayer.colorRanges[1]      = (float)(i) / (numKeyframes);
+            dotShadingLayer.colorRanges[2]      = std::sqrt((float)(i) / (numKeyframes) );
+
+            auto *shadingLayers = new SimulatedHullsSystem::shadingLayer[2];
+            shadingLayers[0] = maskedShadingLayer;
+            shadingLayers[1] = dotShadingLayer;
+
+            std::span<const SimulatedHullsSystem::shadingLayer> shadingLayerSpan(shadingLayers, 2);
+            //shadingLayerSpan = shadingLayers;
+
+            toonSmokeKeyframeSet[i].shadingLayers = shadingLayerSpan;
 
             toonSmokeKeyframeSet[i].offsets = vertexOffsets;
-            toonSmokeKeyframeSet[i].vertexMaskValues = vertexMaskValues;
-            toonSmokeKeyframeSet[i].maskedColors = maskedColors;
-            toonSmokeKeyframeSet[i].maskedColorRanges[0] = ( (float)(i) / (numKeyframes) ) * ( (float)(i) / (numKeyframes) );
-            toonSmokeKeyframeSet[i].maskedColorRanges[1] = (float)(i) / (numKeyframes);
-            toonSmokeKeyframeSet[i].maskedColorRanges[2] = std::sqrt( (float)(i) / (numKeyframes) );
             toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
         }
         maxOffset = 1.0f; // ensured by our method of deformation
