@@ -2607,8 +2607,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                                                                viewAxis, lights,
                                                                affectingLightIndices);
     } else {
-        byte_vec4_t *buffer = overrideColorsBuffer;
-        byte_vec4_t *resultColors = buffer;
+
+        byte_vec4_t *resultColors = overrideColorsBuffer;
 
         const unsigned dataLevelToUse     = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
         const IcosphereData &lodDataToUse = ::basicHullsHolder.getIcosphereForLevel( dataLevelToUse );
@@ -2620,15 +2620,19 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         const unsigned char (*givenColors)[4] = m_shared->simulatedColors;
 
         const unsigned numShadingLayers = m_shared->prevShadingLayers.size();
+        constexpr int maxLayers = 8;
+        assert( numShadingLayers <= maxLayers );
         for( unsigned layerNum = 0; layerNum < numShadingLayers; layerNum++ ) {
-            if (auto prevMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->prevShadingLayers[layerNum])) {
-                auto nextMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
+            if (auto* prevMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->prevShadingLayers[layerNum])) {
+                auto* nextMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
+
+                blendMode blendMode = prevMaskedLayer->blendMode;
+                alphaMode alphaMode = prevMaskedLayer->alphaMode;
 
                 Com_Printf("yyy");
                 const unsigned numColors = prevMaskedLayer->colors.size();
-                constexpr int arbitrarySize = 6; //!!??
-                byte_vec4_t lerpedColors[arbitrarySize];
-                float lerpedColorRanges[arbitrarySize];
+                byte_vec4_t lerpedColors[maxLayers];
+                float lerpedColorRanges[maxLayers];
                 for (unsigned colorNum = 0; colorNum < numColors; colorNum++) {
                     Vector4Lerp(prevMaskedLayer->colors[colorNum], m_shared->lerpFrac,
                                 nextMaskedLayer->colors[colorNum], lerpedColors[colorNum]);
@@ -2643,24 +2647,50 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                                                             nextMaskedLayer->vertexMaskValues[vertexNum],
                                                             m_shared->lerpFrac);
 
+                    byte_vec4_t layerColor;
+
                     unsigned j = 0;
                     while( vertexMaskValue > lerpedColorRanges[j] && j < numColors ){
                         j++;
                     }
                     if( j == 0 ) {
-                        Vector4Copy(lerpedColors[0], resultColors[vertexNum]);
+                        Vector4Copy(lerpedColors[0], layerColor);
                     } else if( j == numColors ) {
-                        Vector4Copy(lerpedColors[numColors-1], resultColors[vertexNum]);
+                        Vector4Copy(lerpedColors[numColors-1], layerColor);
                     } else {
                         const float lerpFrac = ( vertexMaskValue - lerpedColorRanges[j-1] ) / ( lerpedColorRanges[j] - lerpedColorRanges[j-1] );
-                        Vector4Lerp(lerpedColors[j-1], lerpFrac, lerpedColors[j], resultColors[vertexNum]);
+                        Vector4Lerp(lerpedColors[j-1], lerpFrac, lerpedColors[j], layerColor);
+                    }
+
+                    if( layerNum == 0 ){
+                        Vector4Copy(layerColor, resultColors[vertexNum]);
+                    } else {
+                        if (blendMode == blendMode::ALPHA_BLEND) {
+                            VectorLerp(resultColors[vertexNum], layerColor[3], layerColor, resultColors[vertexNum]);
+                        } else if (blendMode == blendMode::ADD) {
+                            for (int i = 0; i < 3; i++) {
+                                resultColors[vertexNum][i] = wsw::min(resultColors[vertexNum][i] + layerColor[i], 255);
+                            }
+                        } else if (blendMode == blendMode::SUBTRACT) {
+                            for (int i = 0; i < 3; i++) {
+                                resultColors[vertexNum][i] = wsw::max(resultColors[vertexNum][i] - layerColor[i], 0);
+                            }
+                        }
+
+                        if ( alphaMode == alphaMode::OVERRIDE ) {
+                            resultColors[vertexNum][3] = layerColor[3];
+                        } else if ( alphaMode == alphaMode::ADD ) {
+                            resultColors[vertexNum][3] = wsw::min(resultColors[vertexNum][3] + layerColor[3], 255);
+                        } else if ( alphaMode == alphaMode::SUBTRACT ) {
+                            resultColors[vertexNum][3] = wsw::max(resultColors[vertexNum][3] - layerColor[3], 0);
+                        }
                     }
 
                 } while ( ++vertexNum < numVertices );
             }
         }
 
-        overrideColors = buffer;
+        overrideColors = resultColors;
     }
 
 	unsigned numResultVertices, numResultIndices;
