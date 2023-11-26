@@ -657,7 +657,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 }
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                                              float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe> offsetKeyframeSet,
+                                              float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe>* offsetKeyframeSets,
                                               const float maxOffset, const AppearanceRules &appearanceRules ) {
     assert( layerParams.size() == hull->numLayers );
 
@@ -667,7 +667,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     ///
     const vec4_t *__restrict vertices = verticesSpan.data();
-    const offsetKeyframe *keyframeSet = offsetKeyframeSet.data();
 
     // Calculate move limits in each direction
 
@@ -699,7 +698,9 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
     // Setup layers data
     assert( hull->numLayers >= 1 && hull->numLayers < 8 );
     for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
+
         BaseKeyframedHull::Layer *layer   = &hull->layers[layerNum];
+        layer->offsetKeyframeSet = offsetKeyframeSets[layerNum];
         const HullLayerParams *__restrict params    = &layerParams[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
         byte_vec4_t *const __restrict colors        = layer->vertexColors;
@@ -719,7 +720,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     VectorCopy( origin, hull->origin );
     hull->vertexMoveDirections = vertices;
-    hull->offsetKeyframeSet = keyframeSet;
     hull->scale             = scale;
 
     hull->appearanceRules = appearanceRules;
@@ -1139,11 +1139,11 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
             sharedMeshData->simulatedPositions   = layer->vertexPositions;
 
-            const unsigned currentKeyframe = hull->lastKeyframeNum;
+            const unsigned currentKeyframe = layer->lastKeyframeNum;
             sharedMeshData->currentKeyframe      = currentKeyframe;
-            sharedMeshData->prevShadingLayers    = hull->offsetKeyframeSet[currentKeyframe].shadingLayers;
-            sharedMeshData->nextShadingLayers    = hull->offsetKeyframeSet[currentKeyframe + 1].shadingLayers;
-            sharedMeshData->lerpFrac             = hull->lerpFrac;
+            sharedMeshData->prevShadingLayers    = layer->offsetKeyframeSet[currentKeyframe].shadingLayers;
+            sharedMeshData->nextShadingLayers    = layer->offsetKeyframeSet[currentKeyframe + 1].shadingLayers;
+            sharedMeshData->lerpFrac             = layer->lerpFrac;
 
             sharedMeshData->simulatedNormals     = nullptr;
             sharedMeshData->simulatedColors      = layer->vertexColors;
@@ -1581,13 +1581,6 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     const float *__restrict growthOrigin = this->origin;
     const unsigned numVertices = basicHullsHolder.getIcosphereForLevel( subdivLevel ).vertices.size();
 
-    lastKeyframeNum = computeCurrKeyframeIndex(lastKeyframeNum, currTime, spawnTime, lifetime, offsetKeyframeSet);
-    const unsigned keyframe = lastKeyframeNum;
-
-    const float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
-    const float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
-    lerpFrac = fracFromCurrKeyframe;
-
     // Sanity check
     assert( numLayers >= 1 && numLayers < 8 );
     for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
@@ -1595,6 +1588,14 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
         BaseKeyframedHull::Layer *layer             = &layers[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
+        const auto offsetKeyframeSet   = layer->offsetKeyframeSet;
+
+        layer->lastKeyframeNum = computeCurrKeyframeIndex(layer->lastKeyframeNum, currTime, spawnTime, lifetime, offsetKeyframeSet);
+        const unsigned keyframe = layer->lastKeyframeNum;
+
+        const float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
+        const float fracFromCurrKeyframe = (lifeTimeFrac - offsetKeyframeSet[keyframe].lifeTimeFraction)/( offsetKeyframeSet[keyframe + 1].lifeTimeFraction - offsetKeyframeSet[keyframe].lifeTimeFraction );
+        layer->lerpFrac = fracFromCurrKeyframe;
 
         const float finalOffset = layer->finalOffset;
         for( unsigned i = 0; i < numVertices; ++i ) {
@@ -1654,11 +1655,11 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
 auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex, int64_t currTime, int64_t spawnTime,
                                                     unsigned int effectDuration,
-                                                    const offsetKeyframe *offsetKeyframeSet) -> unsigned int {
+                                                    std::span<const offsetKeyframe> offsetKeyframeSet) -> unsigned int {
 
     const auto currLifetimeFraction = (float)( currTime - spawnTime ) * Q_Rcp( (float)effectDuration );
     // TODO: compute actual amount of elements in the set (using a span)
-    unsigned setSize = 20;
+    unsigned setSize = offsetKeyframeSet.size();
 
     // Assume that startFromIndex is "good" even if the conditions in the loop won't be held for it
     unsigned currIndex = startFromIndex, lastGoodIndex = startFromIndex;
@@ -2648,7 +2649,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
                     byte_vec4_t layerColor;
 
-                    unsigned j = 0;
+                    unsigned j = 0; // the index of the next color after the point in the color ramp
                     while( vertexMaskValue > lerpedColorRanges[j] && j < numColors ){
                         j++;
                     }
@@ -2744,7 +2745,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
                     byte_vec4_t layerColor;
 
-                    unsigned j = 0;
+                    unsigned j = 0; // the index of the next color after the point in the color ramp
                     while( vertexDotValue > lerpedColorRanges[j] && j < numColors ){
                         j++;
                     }
@@ -2847,7 +2848,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
                     byte_vec4_t layerColor;
 
-                    unsigned j = 0;
+                    unsigned j = 0; // the index of the next color after the point in the color ramp
                     while (vertexCombinedValue > lerpedColorRanges[j] && j < numColors) {
                         j++;
                     }

@@ -667,7 +667,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         const float toonSmokeScale = 50.0f;
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 1400 ) ) {
             hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale, kToonSmokeLayerParams,
-                                           toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset);
+                                           &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset);
         }
         /*
 		g_smokeOuterLayerCloudMeshProps[0].material = cgs.media.shaderSmokeHullHardParticle;

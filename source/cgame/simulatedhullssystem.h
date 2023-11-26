@@ -463,15 +463,19 @@ private:
         float scale;
         // Externally managed, should point to the unit mesh data
         const vec4_t *vertexMoveDirections;
-        // Externally managed, the keyframe data of the hull
-        const offsetKeyframe *offsetKeyframeSet;
 
-        unsigned lastKeyframeNum;
+
         // Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
         float *limitsAtDirections;
         int64_t spawnTime { 0 };
 
         struct Layer {
+            // Externally managed, the keyframe data of the hull
+            //const offsetKeyframe *offsetKeyframeSet;
+            std::span<const offsetKeyframe> offsetKeyframeSet;
+            unsigned lastKeyframeNum;
+            float lerpFrac {0.0f};
+
             vec4_t mins, maxs;
             vec4_t *vertexPositions;
             float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
@@ -511,8 +515,6 @@ private:
         unsigned numLayers { 0 };
         unsigned lifetime { 0 };
 
-        float lerpFrac {0.0f};
-
         float minFadedOutAlpha { 0.0f };
 
         uint8_t subdivLevel { 0 };
@@ -547,7 +549,6 @@ private:
         const DynamicMesh *storageOfCloudMeshPointers[NumLayers];
 
         KeyframedHull() {
-            this->lastKeyframeNum            = 0;
             this->numLayers                  = NumLayers;
             this->subdivLevel                = SubdivLevel;
             this->layers                     = &storageOfLayers[0];
@@ -556,6 +557,7 @@ private:
             this->submittedCloudMeshesBuffer = storageOfCloudMeshPointers;
             for( unsigned i = 0; i < NumLayers; ++i ) {
                 Layer *const layer              = &layers[i];
+                layer->lastKeyframeNum          = 0;
                 layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
                 layer->vertexMaskValues         = &storageOfMaskValues[i * kNumVertices];
                 layer->maskedColors             = &storageOfMaskedColors[i * maxColors];
@@ -619,7 +621,7 @@ private:
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
     void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                            float scale, std::span<const HullLayerParams> paramsOfLayers, std::span<const offsetKeyframe> offsetKeyframeSet,
+                            float scale, std::span<const HullLayerParams> paramsOfLayers, std::span<const offsetKeyframe>* offsetKeyframeSets,
                             float maxOffset, const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
@@ -640,7 +642,7 @@ private:
     [[nodiscard]]
     static auto computeCurrKeyframeIndex(  unsigned startFromIndex, int64_t currTime,
                                            int64_t spawnTime, unsigned effectDuration,
-                                           const offsetKeyframe *offsetKeyframeSet ) -> unsigned;
+                                           std::span<const offsetKeyframe> offsetKeyframeSet ) -> unsigned;
 
 	FireHull *m_fireHullsHead { nullptr };
 	FireClusterHull *m_fireClusterHullsHead { nullptr };
