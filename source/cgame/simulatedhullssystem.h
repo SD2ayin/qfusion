@@ -91,17 +91,17 @@ public:
 		std::span<const ColorChangeTimelineNode> colorChangeTimeline;
 	};
 
-#define maxColors 16
+#define maxColors 8
 
     enum class blendMode : unsigned {
-        ALPHA_BLEND,
-        ADD,
-        SUBTRACT
+        AlphaBlend,
+        Add,
+        Subtract
     };
     enum class alphaMode : unsigned {
-        ADD,
-        SUBTRACT,
-        OVERRIDE
+        Add,
+        Subtract,
+        Override
     };
 
     struct maskedShadingLayer {
@@ -556,7 +556,8 @@ private:
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
 	//using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
-    using toonSmokeHull = KeyframedHull<4, 1>;
+    using toonSmokeHull   = KeyframedHull<4, 1>;
+    using electroHull     = KeyframedHull<4, 1>;
 
 
 	void unlinkAndFreeFireHull( FireHull *hull );
@@ -584,11 +585,13 @@ private:
 	//auto allocSmokeHull( int64_t currTime, unsigned lifetime ) -> SmokeHull *;
 	[[nodiscard]]
 	auto allocWaveHull( int64_t currTime, unsigned lifetime ) -> WaveHull *;
+    [[nodiscard]]
+    auto allocElectroHull( int64_t currTime, unsigned lifetime ) -> electroHull *;
 
 	void setupHullVertices( BaseRegularSimulatedHull *hull, const float *origin, const float *color,
-							float speed, float speedSpread,
-							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr },
-							const float *spikeImpactMask = nullptr, float maxSpikeSpeed = 0.0f );
+                           float speed, float speedSpread,
+                           const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr },
+                           const float *spikeImpactMask = nullptr, float maxSpikeSpeed = 0.0f );
 
 	void setupHullVertices( BaseConcentricSimulatedHull *hull, const float *origin,
 							float scale, std::span<const HullLayerParams> paramsOfLayers,
@@ -624,6 +627,7 @@ private:
 	//SmokeHull *m_smokeHullsHead { nullptr };
     toonSmokeHull *m_toonSmokeHullsHead { nullptr };
 	WaveHull *m_waveHullsHead { nullptr };
+    electroHull *m_electroHullsHead {nullptr};
 
 	static constexpr unsigned kMaxFireHulls  = 32;
 	static constexpr unsigned kMaxFireClusterHulls = kMaxFireHulls * 2;
@@ -631,6 +635,7 @@ private:
     //static constexpr unsigned kMaxSmokeHulls = kMaxFireHulls * 2;
     static constexpr unsigned kMaxToonSmokeHulls = kMaxFireHulls;
 	static constexpr unsigned kMaxWaveHulls  = kMaxFireHulls;
+    static constexpr unsigned kMaxElectroHulls = 32;
 
 	//wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists;
     wsw::StaticVector<CMShapeList *, kMaxWaveHulls> m_freeShapeLists;
@@ -642,6 +647,7 @@ private:
 	//wsw::HeapBasedFreelistAllocator m_smokeHullsAllocator { sizeof( SmokeHull ), kMaxSmokeHulls };
     wsw::HeapBasedFreelistAllocator m_toonSmokeHullsAllocator { sizeof( toonSmokeHull ), kMaxToonSmokeHulls };
 	wsw::HeapBasedFreelistAllocator m_waveHullsAllocator { sizeof( WaveHull ), kMaxWaveHulls };
+    wsw::HeapBasedFreelistAllocator m_electroHullsAllocator { sizeof( electroHull ), kMaxElectroHulls };
 
 	// Can't specify byte_vec4_t as the template parameter
 	wsw::Vector<uint32_t> m_frameSharedOverrideColorsBuffer;
