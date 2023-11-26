@@ -168,11 +168,11 @@ private:
         bool lerpNextLevelColors { false };
         bool hasSibling { false };
 
+        // currently for keyframed hull shading
         bool keyframedHull {false};
-        unsigned currentKeyframe;
+        float lerpFrac;
         std::span<const shadingLayer> prevShadingLayers;
         std::span<const shadingLayer> nextShadingLayers;
-        float lerpFrac;
 
     };
 
@@ -464,7 +464,6 @@ private:
         // Externally managed, should point to the unit mesh data
         const vec4_t *vertexMoveDirections;
 
-
         // Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
         float *limitsAtDirections;
         int64_t spawnTime { 0 };
@@ -478,16 +477,6 @@ private:
 
             vec4_t mins, maxs;
             vec4_t *vertexPositions;
-            float *vertexMaskValues; //values from 0-1 that are used to define colors of vertices
-            //unsigned numMaskedColors;
-            shadingLayer *shadingLayer;
-            //
-            byte_vec4_t *maskedColors; // new stuff should replace other stored colors
-            //
-            //byte_vec4_t maskedColors[maxColors]; // colors are interpolated between these based on ranges and the vertex mask value
-            float *maskedColorRanges; //values for color ranges from 0-1 to select a color based on vertex mask value, -1 because the first color always starts at 0
-            byte_vec4_t *dotColors; //colors are interpolated between these based on ranges and the result of the dot product with the normal and view axis
-            float *dotColorRanges; //values between 0-1, -1 because the first color always starts at 0
             byte_vec4_t *vertexColors;
             SharedMeshData *sharedMeshData;
             HullSolidDynamicMesh *submittedSolidMesh;
@@ -498,8 +487,6 @@ private:
             float finalOffset { 0 };
 
             const AppearanceRules *overrideAppearanceRules;
-            std::optional<ViewDotFade> overrideHullFade;
-            std::optional<float> overrideMinFadedOutAlpha;
             bool useDrawOnTopHack { false };
         };
 
@@ -515,11 +502,8 @@ private:
         unsigned numLayers { 0 };
         unsigned lifetime { 0 };
 
-        float minFadedOutAlpha { 0.0f };
-
         uint8_t subdivLevel { 0 };
-        bool applyVertexDynLight { false };
-        ViewDotFade vertexViewDotFade { ViewDotFade::NoFade };
+        //bool applyVertexDynLight { false }; should be re-implemented, if useful
 
         void simulate( int64_t currTime, float timeDeltaSeconds);
     };
@@ -533,11 +517,6 @@ private:
         Layer storageOfLayers[NumLayers];
         float storageOfLimits[kNumVertices];
         vec4_t storageOfPositions[kNumVertices * NumLayers];
-        float storageOfMaskValues[kNumVertices * NumLayers];
-        byte_vec4_t storageOfMaskedColors[maxColors * NumLayers];
-        float storageOfMaskedColorRanges[maxColors * NumLayers];
-        byte_vec4_t storageOfDotColors[maxColors * NumLayers];
-        float storageOfDotColorRanges[maxColors * NumLayers];
 
         byte_vec4_t storageOfColors[kNumVertices * NumLayers];
         SharedMeshData storageOfSharedMeshData[NumLayers];
@@ -559,11 +538,6 @@ private:
                 Layer *const layer              = &layers[i];
                 layer->lastKeyframeNum          = 0;
                 layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
-                layer->vertexMaskValues         = &storageOfMaskValues[i * kNumVertices];
-                layer->maskedColors             = &storageOfMaskedColors[i * maxColors];
-                layer->maskedColorRanges        = &storageOfMaskedColorRanges[i * maxColors];
-                layer->dotColors                = &storageOfDotColors[i * maxColors];
-                layer->dotColorRanges           = &storageOfDotColorRanges[i * maxColors];
                 layer->vertexColors             = &storageOfColors[i * kNumVertices];
                 layer->sharedMeshData           = &storageOfSharedMeshData[i];
                 layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
@@ -621,8 +595,8 @@ private:
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
     void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                            float scale, std::span<const HullLayerParams> paramsOfLayers, std::span<const offsetKeyframe>* offsetKeyframeSets,
-                            float maxOffset, const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+                            float scale, std::span<const offsetKeyframe>* offsetKeyframeSets, float maxOffset,
+                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );

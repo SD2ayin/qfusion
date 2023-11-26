@@ -389,10 +389,12 @@ struct ToonSmokeOffsetKeyframeHolder {
 
         std::span<byte_vec4_t> dotLayerColors(dotColors, 2);
 
+        auto *vertexOffsetsFromLimits = new float[numVerts];
+
         for (int i = 0; i < numKeyframes; i++) {
-            auto *vertexOffsets = new float[numVerts];
-            auto *firstVertexMaskValues = new float[numVerts];
-            auto *secondVertexMaskValues = new float[numVerts];
+            auto *vertexOffsets           = new float[numVerts];
+            auto *firstVertexMaskValues   = new float[numVerts];
+            auto *secondVertexMaskValues  = new float[numVerts];
             // normalize the number of the keyframes, so we get a range from 0-1 for easy mathematical manipulation
             const float x = (float)(i) / (float)(numKeyframes);
             const float expansion = -(x-1.f)*(x-1.f) + 1.f;
@@ -403,6 +405,7 @@ struct ToonSmokeOffsetKeyframeHolder {
                 firstVertexMaskValues[vert] = voronoiNoise; //values between 1 and 0 where 1 has the highest offset
                 const float simplexNoise = calcSimplexNoise3D(vertices[vert][0], vertices[vert][1], vertices[vert][2] - 2.f * x);
                 secondVertexMaskValues[vert] = ( 2.1f * x - 0.4f ) - simplexNoise;
+                vertexOffsetsFromLimits[vert] = 0.0f;
             }
             const int numShadingLayers = 3;
 
@@ -442,6 +445,7 @@ struct ToonSmokeOffsetKeyframeHolder {
             toonSmokeKeyframeSet[i].shadingLayers = shadingLayerSpan;
 
             toonSmokeKeyframeSet[i].offsets = vertexOffsets;
+            toonSmokeKeyframeSet[i].offsetsFromLimit = vertexOffsetsFromLimits;
             toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
         }
         maxOffset = 1.0f; // ensured by our method of deformation
@@ -666,7 +670,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
         const float toonSmokeScale = 50.0f;
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 1400 ) ) {
-            hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale, kToonSmokeLayerParams,
+            hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale,
                                            &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset);
         }
         /*

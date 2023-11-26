@@ -657,9 +657,9 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 }
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-                                              float scale, std::span<const HullLayerParams> layerParams, std::span<const offsetKeyframe>* offsetKeyframeSets,
+                                              float scale, std::span<const offsetKeyframe>* offsetKeyframeSets,
                                               const float maxOffset, const AppearanceRules &appearanceRules ) {
-    assert( layerParams.size() == hull->numLayers );
+    assert( offsetKeyframeSets.size() == hull->numLayers );
 
     const float originX = origin[0], originY = origin[1], originZ = origin[2];
     const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
@@ -701,26 +701,18 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
         BaseKeyframedHull::Layer *layer   = &hull->layers[layerNum];
         layer->offsetKeyframeSet = offsetKeyframeSets[layerNum];
-        const HullLayerParams *__restrict params    = &layerParams[layerNum];
         vec4_t *const __restrict positions          = layer->vertexPositions;
-        byte_vec4_t *const __restrict colors        = layer->vertexColors;
 
-        const float *const __restrict baseColor  = params->baseInitialColor;
         for( size_t i = 0; i < verticesSpan.size(); ++i ) {
             // Position XYZ is computed prior to submission in stateless fashion
             positions[i][3] = 1.0f;
 
-            colors[i][0] = (uint8_t)( 255.0f * baseColor[0]  );
-            colors[i][1] = (uint8_t)( 255.0f * baseColor[1]  );
-            colors[i][2] = (uint8_t)( 255.0f * baseColor[2]  );
-            colors[i][3] = (uint8_t)( 255.0f * baseColor[3]  );
         }
-        layer->finalOffset         = params->finalOffset;
     }
 
     VectorCopy( origin, hull->origin );
     hull->vertexMoveDirections = vertices;
-    hull->scale             = scale;
+    hull->scale                = scale;
 
     hull->appearanceRules = appearanceRules;
 }
@@ -1140,18 +1132,14 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             sharedMeshData->simulatedPositions   = layer->vertexPositions;
 
             const unsigned currentKeyframe = layer->lastKeyframeNum;
-            sharedMeshData->currentKeyframe      = currentKeyframe;
             sharedMeshData->prevShadingLayers    = layer->offsetKeyframeSet[currentKeyframe].shadingLayers;
             sharedMeshData->nextShadingLayers    = layer->offsetKeyframeSet[currentKeyframe + 1].shadingLayers;
             sharedMeshData->lerpFrac             = layer->lerpFrac;
 
             sharedMeshData->simulatedNormals     = nullptr;
-            sharedMeshData->simulatedColors      = layer->vertexColors;
 
             sharedMeshData->minZLastFrame        = 0.0f;
             sharedMeshData->maxZLastFrame        = 0.0f;
-            sharedMeshData->minFadedOutAlpha     = layer->overrideMinFadedOutAlpha.value_or( hull->minFadedOutAlpha );
-            sharedMeshData->viewDotFade          = layer->overrideHullFade.value_or( hull->vertexViewDotFade );
             sharedMeshData->zFade                = ZFade::NoFade;
             sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
             sharedMeshData->tesselateClosestLod  = false;
@@ -1170,9 +1158,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
                 Vector4Copy( layer->mins, mesh->cullMins );
                 Vector4Copy( layer->maxs, mesh->cullMaxs );
 
-                mesh->material            = cgs.media.shaderSmokeHull;
-                //mesh->material            = nullptr;
-                mesh->applyVertexDynLight = hull->applyVertexDynLight;
+                mesh->material            = cgs.media.shaderSmokeHull; // TODO: make material choosable
+                //mesh->applyVertexDynLight = hull->applyVertexDynLight; // TODO: restore this functionality if useful
                 mesh->m_shared            = sharedMeshData;
 
                 if( layer->useDrawOnTopHack ) [[unlikely]] {
@@ -1203,7 +1190,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
                             Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
 
                             mesh->material            = meshProps.material;
-                            mesh->applyVertexDynLight = hull->applyVertexDynLight;
+                            //mesh->applyVertexDynLight = hull->applyVertexDynLight; // TODO: restore this functionality if useful
                             mesh->m_shared            = sharedMeshData;
                             mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
                             mesh->m_applyRotation     = meshProps.applyRotation;
@@ -1604,8 +1591,13 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
                                      fracFromCurrKeyframe);
             offset *= scale;
 
+            float offsetFromLimit = lerpValue(offsetKeyframeSet[keyframe].offsetsFromLimit[i],
+                                              offsetKeyframeSet[keyframe+1].offsetsFromLimit[i],
+                                              fracFromCurrKeyframe);
+            offsetFromLimit *= scale;
+
             // Limit growth by the precomputed obstacle distance
-            const float limit = wsw::max( 0.0f, limitsAtDirections[i] - finalOffset );
+            const float limit = wsw::max( 0.0f, limitsAtDirections[i] - offsetFromLimit );
             offset = wsw::min( offset - finalOffset, limit );
 
             VectorMA( growthOrigin, offset, vertexMoveDirections[i], positions[i] );
@@ -2618,7 +2610,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
         const vec4_t *positions = m_shared->simulatedPositions;
         const unsigned short (*neighboursOfVertices)[5] = lodDataToUse.vertexNeighbours.data();
-        const unsigned char (*givenColors)[4] = m_shared->simulatedColors;
 
         const unsigned numShadingLayers = m_shared->prevShadingLayers.size();
         constexpr int maxLayers = 8;
