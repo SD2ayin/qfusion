@@ -137,6 +137,11 @@ public:
         std::span<const shadingLayer> shadingLayers;
     };
 
+    struct offsetKeyframeSet {
+        std::span<const offsetKeyframe> offsetKeyframes;
+        float maxOffset;
+    };
+
 
     SimulatedHullsSystem();
 	~SimulatedHullsSystem();
@@ -557,7 +562,7 @@ private:
 	//using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
     using toonSmokeHull   = KeyframedHull<4, 1>;
-    using electroHull     = KeyframedHull<4, 1>;
+    using electroHull     = KeyframedHull<4, 2>;
 
 
 	void unlinkAndFreeFireHull( FireHull *hull );
@@ -566,6 +571,7 @@ private:
 	//void unlinkAndFreeSmokeHull( SmokeHull *hull );
     void unlinkAndFreeToonSmokeHull( toonSmokeHull *hull);
 	void unlinkAndFreeWaveHull( WaveHull *hull );
+    void unlinkAndFreeElectroHull( electroHull *hull );
 
 	template <typename Hull, bool HasShapeLists>
 	[[nodiscard]]
