@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../client/client.h"
 #include "../common/links.h"
 #include "../common/configvars.h"
-#include "../cgame/simulatedhullssystem.h"
 #include "../common/noise.h"
 
 #include <cstdlib>
@@ -315,24 +314,24 @@ struct ToonSmokeOffsetKeyframeHolder {
             firstMaskedShadingLayer.colorRanges[0]   = ((float)(i) / (numKeyframes) ) * ((float)(i) / (numKeyframes) );
             firstMaskedShadingLayer.colorRanges[1]   = (float)(i) / (numKeyframes);
             firstMaskedShadingLayer.colorRanges[2]   = std::sqrt((float)(i) / (numKeyframes) );
-            firstMaskedShadingLayer.blendMode        = SimulatedHullsSystem::blendMode::AlphaBlend;
-            firstMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::alphaMode::Override;
+            firstMaskedShadingLayer.BlendMode        = SimulatedHullsSystem::BlendMode::AlphaBlend;
+            firstMaskedShadingLayer.AlphaMode        = SimulatedHullsSystem::AlphaMode::Override;
 
             // 0.1f to 0.2f produced a neat outline along the hull
             SimulatedHullsSystem::dotShadingLayer dotShadingLayer;
             dotShadingLayer.colors              = dotLayerColors;
             dotShadingLayer.colorRanges[0]      = 0.4f;
             dotShadingLayer.colorRanges[1]      = 0.48f;
-            dotShadingLayer.blendMode           = SimulatedHullsSystem::blendMode::Add;
-            dotShadingLayer.alphaMode           = SimulatedHullsSystem::alphaMode::Add;
+            dotShadingLayer.BlendMode           = SimulatedHullsSystem::BlendMode::Add;
+            dotShadingLayer.AlphaMode           = SimulatedHullsSystem::AlphaMode::Add;
 
             SimulatedHullsSystem::maskedShadingLayer secondMaskedShadingLayer;
             secondMaskedShadingLayer.vertexMaskValues = secondVertexMaskValues;
             secondMaskedShadingLayer.colors           = secondMaskedColors;
             secondMaskedShadingLayer.colorRanges[0]   = 0.48f;
             secondMaskedShadingLayer.colorRanges[1]   = 0.6f;
-            secondMaskedShadingLayer.blendMode        = SimulatedHullsSystem::blendMode::Add;
-            secondMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::alphaMode::Override;
+            secondMaskedShadingLayer.BlendMode        = SimulatedHullsSystem::BlendMode::Add;
+            secondMaskedShadingLayer.AlphaMode        = SimulatedHullsSystem::AlphaMode::Override;
 
             auto *shadingLayers = new SimulatedHullsSystem::shadingLayer[numShadingLayers];
             shadingLayers[0] = firstMaskedShadingLayer;
@@ -350,6 +349,7 @@ struct ToonSmokeOffsetKeyframeHolder {
     }
 };*/
 //FINAL?
+/*
 struct ToonSmokeOffsetKeyframeHolder {
     static const int numVerts = 2562;
     static const int numKeyframes = 20;
@@ -416,24 +416,24 @@ struct ToonSmokeOffsetKeyframeHolder {
             firstMaskedShadingLayer.colorRanges[0]   = wsw::min( 1.0f, ((float)(k) / (numKeyframes) ) * ((float)(k) / (numKeyframes) ) );
             firstMaskedShadingLayer.colorRanges[1]   = wsw::min( 1.0f, (float)(k) / (numKeyframes) );
             firstMaskedShadingLayer.colorRanges[2]   = wsw::min( 1.0f, std::sqrt((float)(k) / (numKeyframes) ) );
-            firstMaskedShadingLayer.blendMode        = SimulatedHullsSystem::blendMode::AlphaBlend;
-            firstMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::alphaMode::Override;
+            firstMaskedShadingLayer.BlendMode        = SimulatedHullsSystem::BlendMode::AlphaBlend;
+            firstMaskedShadingLayer.AlphaMode        = SimulatedHullsSystem::AlphaMode::Override;
 
             // 0.1f to 0.2f produced a neat outline along the hull
             SimulatedHullsSystem::dotShadingLayer dotShadingLayer;
             dotShadingLayer.colors              = dotLayerColors;
             dotShadingLayer.colorRanges[0]      = 0.4f;
             dotShadingLayer.colorRanges[1]      = 0.48f;
-            dotShadingLayer.blendMode           = SimulatedHullsSystem::blendMode::Add;
-            dotShadingLayer.alphaMode           = SimulatedHullsSystem::alphaMode::Add;
+            dotShadingLayer.BlendMode           = SimulatedHullsSystem::BlendMode::Add;
+            dotShadingLayer.AlphaMode           = SimulatedHullsSystem::AlphaMode::Add;
 
             SimulatedHullsSystem::maskedShadingLayer secondMaskedShadingLayer;
             secondMaskedShadingLayer.vertexMaskValues = secondVertexMaskValues;
             secondMaskedShadingLayer.colors           = secondMaskedColors;
             secondMaskedShadingLayer.colorRanges[0]   = 0.48f;
             secondMaskedShadingLayer.colorRanges[1]   = 0.6f;
-            secondMaskedShadingLayer.blendMode        = SimulatedHullsSystem::blendMode::Add;
-            secondMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::alphaMode::Override;
+            secondMaskedShadingLayer.BlendMode        = SimulatedHullsSystem::BlendMode::Add;
+            secondMaskedShadingLayer.AlphaMode        = SimulatedHullsSystem::AlphaMode::Override;
 
             auto *shadingLayers = new SimulatedHullsSystem::shadingLayer[numShadingLayers];
             shadingLayers[0] = firstMaskedShadingLayer;
@@ -450,9 +450,122 @@ struct ToonSmokeOffsetKeyframeHolder {
         }
         maxOffset = 1.0f; // ensured by our method of deformation
     }
+};*/
+
+struct ToonSmokeOffsetKeyframeHolder {
+    static const int numVerts = 2562;
+    static const int numKeyframes = 20;
+    float maxOffset;
+    const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(4);
+    const vec4_t *vertices = verticesSpan.data();
+    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
+    ToonSmokeOffsetKeyframeHolder() noexcept {
+
+        auto fireColors = new byte_vec4_t[3];
+        byte_vec4_t gray = {25, 25, 25, 255};
+        byte_vec4_t orange = {255, 70, 30, 255};
+        byte_vec4_t yellow = {255, 160, 45, 255};
+
+        Vector4Copy(gray, fireColors[0]);
+        Vector4Copy(orange, fireColors[1]);
+        Vector4Copy(yellow, fireColors[2]);
+
+        std::span<byte_vec4_t> fireMaskedColors(fireColors, 3);
+
+        auto fadeColors = new byte_vec4_t[2];
+        byte_vec4_t solid = {0, 0, 0, 255};
+        byte_vec4_t faded = {100, 100, 100, 0};
+
+        Vector4Copy(solid, fadeColors[0]);
+        Vector4Copy(faded, fadeColors[1]);
+
+        std::span<byte_vec4_t> fadeMaskedColors(fadeColors, 2);
+
+        auto highlightColors = new byte_vec4_t[2];
+        byte_vec4_t normal    = {0, 0, 0, 0};
+        byte_vec4_t highlight = {55, 55, 55, 0};
+
+        Vector4Copy(highlight, highlightColors[0]);
+        Vector4Copy(normal, highlightColors[1]);
+
+        std::span<byte_vec4_t> highlightDotColors(highlightColors, 2);
+
+        for (int i = 0; i < numKeyframes; i++) {
+            const float keyframeFrac = (float)(i) / (numKeyframes - 1); // -1 so the final value is 19/19 = 1
+
+            auto *vertexOffsets           = new float[numVerts];
+            auto *fireVertexMaskValues   = new float[numVerts];
+            auto *fadeVertexMaskValues  = new float[numVerts];
+            // normalize the number of the keyframes, so we get a range from 0-1 for easy mathematical manipulation
+            const float initialSize = 0.1f;
+
+            const float x = (float)(i) / (float)(numKeyframes);
+            //const float expansion = (1-initialSize) * ( 1.f - (x-1.f)*(x-1.f) ) + initialSize;
+            const float initialVelocity = 5.0f;
+            const float expansion = (1-initialSize) * ( 1.f - std::exp(-initialVelocity * keyframeFrac) ) + initialSize;
+
+            for ( int vert = 0; vert < numVerts; vert++ ) {
+                const float voronoiNoise = calcVoronoiNoiseSquared(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2.f * keyframeFrac);
+                const float offset = expansion * ( 1.0f - 0.7f * voronoiNoise );
+                vertexOffsets[vert] = offset;
+                fireVertexMaskValues[vert] = voronoiNoise; //values between 1 and 0 where 1 has the highest offset
+                const float simplexNoise = calcSimplexNoise3D(vertices[vert][0], vertices[vert][1], vertices[vert][2] + 2.f * keyframeFrac);
+                fadeVertexMaskValues[vert] = (2.1f * keyframeFrac - 0.4f ) - simplexNoise;
+            }
+            const int numShadingLayers = 3;
+
+            SimulatedHullsSystem::maskedShadingLayer fireMaskedShadingLayer;
+            fireMaskedShadingLayer.vertexMaskValues = fireVertexMaskValues;
+            fireMaskedShadingLayer.colors           = fireMaskedColors;
+            const float fireLifetime = 0.47f;
+            const float fireStartFrac = 0.9f;
+            const float fireLifetimeFrac = wsw::min( 1.0f, keyframeFrac * ( 1 / fireLifetime ) );
+            const float fireFrac = fireLifetimeFrac * fireStartFrac + ( 1.0f - fireStartFrac );
+            fireMaskedShadingLayer.colorRanges[0]   = fireFrac * fireFrac;
+            fireMaskedShadingLayer.colorRanges[1]   = fireFrac;
+            fireMaskedShadingLayer.colorRanges[2]   = std::sqrt(fireFrac );
+            fireMaskedShadingLayer.blendMode        = SimulatedHullsSystem::BlendMode::AlphaBlend;
+            fireMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::AlphaMode::Override;
+
+            // 0.1f to 0.2f produced a neat outline along the hull
+            SimulatedHullsSystem::dotShadingLayer highlightDotShadingLayer;
+            highlightDotShadingLayer.colors              = highlightDotColors;
+            highlightDotShadingLayer.colorRanges[0]      = 0.4f;
+            highlightDotShadingLayer.colorRanges[1]      = 0.48f;
+            highlightDotShadingLayer.blendMode           = SimulatedHullsSystem::BlendMode::Add;
+            highlightDotShadingLayer.alphaMode           = SimulatedHullsSystem::AlphaMode::Add;
+
+            SimulatedHullsSystem::maskedShadingLayer fadeMaskedShadingLayer;
+            fadeMaskedShadingLayer.vertexMaskValues = fadeVertexMaskValues;
+            fadeMaskedShadingLayer.colors           = fadeMaskedColors;
+            fadeMaskedShadingLayer.colorRanges[0]   = 0.48f;
+            fadeMaskedShadingLayer.colorRanges[1]   = 0.6f;
+            fadeMaskedShadingLayer.blendMode        = SimulatedHullsSystem::BlendMode::Add;
+            fadeMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::AlphaMode::Override;
+
+            auto *shadingLayers = new SimulatedHullsSystem::shadingLayer[numShadingLayers];
+            shadingLayers[0] = fireMaskedShadingLayer;
+            shadingLayers[1] = highlightDotShadingLayer;
+            shadingLayers[2] = fadeMaskedShadingLayer;
+
+            std::span<const SimulatedHullsSystem::shadingLayer> shadingLayerSpan(shadingLayers, numShadingLayers);
+
+            toonSmokeKeyframeSet[i].shadingLayers = shadingLayerSpan;
+
+            toonSmokeKeyframeSet[i].offsets = vertexOffsets;
+
+            auto *vertexOffsetsFromLimits = new float[numVerts];
+            std::fill(vertexOffsetsFromLimits, vertexOffsetsFromLimits + numVerts, 0);
+            toonSmokeKeyframeSet[i].offsetsFromLimit = vertexOffsetsFromLimits;
+
+            toonSmokeKeyframeSet[i].lifeTimeFraction = keyframeFrac;
+        }
+        maxOffset = 1.0f; // ensured by our method of deformation
+    }
 };
 
 static const ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes;
+
 
 struct ElectroOffsetKeyframeHolder {
     static const int numVerts = 2562;
@@ -514,8 +627,8 @@ struct ElectroOffsetKeyframeHolder {
             firstShadingLayer.vertexMaskValues = firstVertexMaskValues;
             firstShadingLayer.colorRanges[0] = 0.1f * ( 1.f - lifetimeFrac );
             firstShadingLayer.colorRanges[1] = 0.6f * ( 1.f - lifetimeFrac );
-            firstShadingLayer.blendMode = SimulatedHullsSystem::blendMode::AlphaBlend;
-            firstShadingLayer.alphaMode = SimulatedHullsSystem::alphaMode::Add;
+            firstShadingLayer.blendMode = SimulatedHullsSystem::BlendMode::AlphaBlend;
+            firstShadingLayer.alphaMode = SimulatedHullsSystem::AlphaMode::Add;
 
             auto *firstShadingLayers = new SimulatedHullsSystem::shadingLayer[1];
             firstShadingLayers[0] = firstShadingLayer;
@@ -532,8 +645,8 @@ struct ElectroOffsetKeyframeHolder {
             secondShadingLayer.vertexMaskValues = secondVertexMaskValues;
             secondShadingLayer.colorRanges[0] = 0.1f * ( 1.f - lifetimeFrac );
             secondShadingLayer.colorRanges[1] = 0.6f * ( 1.f - lifetimeFrac );
-            secondShadingLayer.blendMode = SimulatedHullsSystem::blendMode::AlphaBlend;
-            secondShadingLayer.alphaMode = SimulatedHullsSystem::alphaMode::Add;
+            secondShadingLayer.blendMode = SimulatedHullsSystem::BlendMode::AlphaBlend;
+            secondShadingLayer.alphaMode = SimulatedHullsSystem::AlphaMode::Add;
 
             auto *secondShadingLayers = new SimulatedHullsSystem::shadingLayer[1];
             secondShadingLayers[0] = secondShadingLayer;
@@ -716,8 +829,13 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 	if( smokeOrigin ) {
         std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
         toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
-        const float toonSmokeScale = 50.0f;
-        if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 140000 ) ) {
+
+        const float randomFactor = 0.5f;
+        const float randomScaling = 1.0f + randomFactor * m_rng.nextFloat();
+
+        const float toonSmokeScale = 50.0f * randomScaling;
+        const unsigned toonSmokeLifetime = 1400 * randomScaling;
+        if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
             hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale,
                                            &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset);
         }

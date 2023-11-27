@@ -93,12 +93,12 @@ public:
 
 #define maxColors 8
 
-    enum class blendMode : unsigned {
+    enum class BlendMode : unsigned {
         AlphaBlend,
         Add,
         Subtract
     };
-    enum class alphaMode : unsigned {
+    enum class AlphaMode : unsigned {
         Add,
         Subtract,
         Override
@@ -108,15 +108,15 @@ public:
         float *vertexMaskValues;
         std::span<byte_vec4_t> colors;
         float colorRanges[maxColors];
-        blendMode blendMode;
-        alphaMode alphaMode;
+        BlendMode blendMode;
+        AlphaMode alphaMode;
     };
 
     struct dotShadingLayer {
         std::span<byte_vec4_t> colors;
         float colorRanges[maxColors];
-        blendMode blendMode;
-        alphaMode alphaMode;
+        BlendMode blendMode;
+        AlphaMode alphaMode;
     };
 
     struct combinedShadingLayer {
@@ -124,8 +124,8 @@ public:
         std::span<byte_vec4_t> colors;
         float colorRanges[maxColors];
         float dotInfluence; //between 0 and 1, vertexValue = ( dotInfluence - 1 ) * vertexMaskValue + dotInfluence * dotProduct(viewVector, normal)
-        blendMode blendMode;
-        alphaMode alphaMode;
+        BlendMode blendMode;
+        AlphaMode alphaMode;
     };
 
     using shadingLayer = std::variant<maskedShadingLayer, dotShadingLayer, combinedShadingLayer>;
