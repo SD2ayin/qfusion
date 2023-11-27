@@ -259,7 +259,7 @@ struct ToonSmokeOffsetKeyframeHolder {
     float maxOffset;
     const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(4);
     const vec4_t *vertices = verticesSpan.data();
-    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframes[numKeyframes];
+    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
     ToonSmokeOffsetKeyframeHolder() noexcept {
 
         auto firstColors = new byte_vec4_t[3];
@@ -341,10 +341,10 @@ struct ToonSmokeOffsetKeyframeHolder {
 
             std::span<const SimulatedHullsSystem::shadingLayer> shadingLayerSpan(shadingLayers, numShadingLayers);
 
-            toonSmokeKeyframes[i].shadingLayers = shadingLayerSpan;
+            toonSmokeKeyframeSet[i].shadingLayers = shadingLayerSpan;
 
-            toonSmokeKeyframes[i].offsets = vertexOffsets;
-            toonSmokeKeyframes[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
+            toonSmokeKeyframeSet[i].offsets = vertexOffsets;
+            toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
         }
         maxOffset = 1.0f; // ensured by our method of deformation
     }
@@ -356,8 +356,7 @@ struct ToonSmokeOffsetKeyframeHolder {
     float maxOffset;
     const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(4);
     const vec4_t *vertices = verticesSpan.data();
-    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframes[numKeyframes];
-    SimulatedHullsSystem::offsetKeyframeSet toonSmokeKeyframeSet;
+    SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
     ToonSmokeOffsetKeyframeHolder() noexcept {
 
         auto firstColors = new byte_vec4_t[3];
@@ -443,14 +442,13 @@ struct ToonSmokeOffsetKeyframeHolder {
 
             std::span<const SimulatedHullsSystem::shadingLayer> shadingLayerSpan(shadingLayers, numShadingLayers);
 
-            toonSmokeKeyframes[i].shadingLayers = shadingLayerSpan;
+            toonSmokeKeyframeSet[i].shadingLayers = shadingLayerSpan;
 
-            toonSmokeKeyframes[i].offsets = vertexOffsets;
-            toonSmokeKeyframes[i].offsetsFromLimit = vertexOffsetsFromLimits;
-            toonSmokeKeyframes[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
+            toonSmokeKeyframeSet[i].offsets = vertexOffsets;
+            toonSmokeKeyframeSet[i].offsetsFromLimit = vertexOffsetsFromLimits;
+            toonSmokeKeyframeSet[i].lifeTimeFraction = (float)(i) / (numKeyframes - 1);
         }
-        toonSmokeKeyframeSet.maxOffset = 1.0f; // ensured by our method of deformation
-        toonSmokeKeyframeSet.offsetKeyframes = toonSmokeKeyframes;
+        maxOffset = 1.0f; // ensured by our method of deformation
     }
 };
 
@@ -717,7 +715,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 
 	if( smokeOrigin ) {
         std::span<const SimulatedHullsSystem::offsetKeyframe> toonSmokeKeyframeSet;
-        toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframes;
+        toonSmokeKeyframeSet = toonSmokeKeyframes.toonSmokeKeyframeSet;
         const float toonSmokeScale = 50.0f;
         if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, 140000 ) ) {
             hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale,
