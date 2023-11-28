@@ -719,7 +719,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
                                               float scale, std::span<const offsetKeyframe> *offsetKeyframeSets,
                                               const float maxOffset, const AppearanceRules &appearanceRules ) {
-    assert( offsetKeyframeSets.size() == hull->numLayers );
+    //assert( offsetKeyframeSets.size() == hull->numLayers );
 
     const float originX = origin[0], originY = origin[1], originZ = origin[2];
     const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel(

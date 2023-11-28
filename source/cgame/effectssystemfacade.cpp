@@ -447,15 +447,6 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 	}
 
-	if( smokeOrigin ) {
-		EllipsoidalFlockParams flockParams( kExplosionSmokeFlockParams );
-		VectorCopy( smokeOrigin, flockParams.origin );
-		Particle::AppearanceRules appearanceRules( kExplosionSmokeAppearanceRules );
-		appearanceRules.materials = cgs.media.shaderSmokeHullHardParticle.getAddressOfHandle();
-		m_transientEffectsSystem.addDelayedParticleEffect( 300, TransientEffectsSystem::ParticleFlockBin::Large,
-														   flockParams, appearanceRules );
-	}
-
 	m_transientEffectsSystem.spawnExplosionHulls( fireOrigin, smokeOrigin );
 
 	spawnMultipleExplosionImpactEffects( solidImpacts );
