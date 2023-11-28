@@ -2804,7 +2804,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
                 unsigned vertexNum = 0;
                 do {
-                    float vertexDotValue;
+                    float vertexDotValue = 0;
 
                     const uint16_t *const neighboursOfVertex = neighboursOfVertices[vertexNum];
                     const float *const __restrict currVertex = positions[vertexNum];
@@ -2824,21 +2824,18 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                         }
                     } while ( ++neighbourIndex < 5 );
 
-                    //VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
-                    // The sum of partial non-zero directories could be zero, check again
                     const float squaredNormalLength = VectorLengthSquared( normal );
-                    if ( squaredNormalLength > wsw::square( 1e-3f )) [[likely]] {
-                        vec3_t viewDir;
-                        VectorSubtract( currVertex, viewOrigin, viewDir );
-                        const float squareDistanceToVertex = VectorLengthSquared( viewDir );
-                        if ( squareDistanceToVertex > 1.0f ) [[likely]] {
-                            const float rcpNormalLength = Q_RSqrt( squaredNormalLength );
-                            const float rcpDistance = Q_RSqrt( squareDistanceToVertex );
-                            VectorScale( normal, rcpNormalLength, normal );
-                            VectorScale( viewDir, rcpDistance, viewDir );
-                            vertexDotValue = std::fabs(DotProduct( viewDir, normal ));
+                    vec3_t viewDir;
+                    VectorSubtract( currVertex, viewOrigin, viewDir );
+                    const float squareDistanceToVertex = VectorLengthSquared( viewDir );
 
-                        }
+                    const float rcpNormalizingFactorSquared = squaredNormalLength * squareDistanceToVertex;
+
+                    // check if both the normal and viewDir aren't 0 vectors
+                    if ( rcpNormalizingFactorSquared > 1e-9f ) [[likely]] {
+                        const float normalizingFactor = Q_RSqrt( rcpNormalizingFactorSquared );
+
+                        vertexDotValue = std::fabs(DotProduct( viewDir, normal )) * normalizingFactor;
                     }
 
                     byte_vec4_t layerColor;
@@ -2906,7 +2903,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
                 unsigned vertexNum = 0;
                 do {
-                    float vertexDotValue;
+                    float vertexDotValue = 0;
 
                     const uint16_t *const neighboursOfVertex = neighboursOfVertices[vertexNum];
                     const float *const __restrict currVertex = positions[vertexNum];
@@ -2926,21 +2923,18 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                         }
                     } while ( ++neighbourIndex < 5 );
 
-                    //VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
-                    // The sum of partial non-zero directories could be zero, check again
                     const float squaredNormalLength = VectorLengthSquared( normal );
-                    if ( squaredNormalLength > wsw::square( 1e-3f )) [[likely]] {
-                        vec3_t viewDir;
-                        VectorSubtract( currVertex, viewOrigin, viewDir );
-                        const float squareDistanceToVertex = VectorLengthSquared( viewDir );
-                        if ( squareDistanceToVertex > 1.0f ) [[likely]] {
-                            const float rcpNormalLength = Q_RSqrt( squaredNormalLength );
-                            const float rcpDistance = Q_RSqrt( squareDistanceToVertex );
-                            VectorScale( normal, rcpNormalLength, normal );
-                            VectorScale( viewDir, rcpDistance, viewDir );
-                            vertexDotValue = std::fabs(DotProduct( viewDir, normal ));
+                    vec3_t viewDir;
+                    VectorSubtract( currVertex, viewOrigin, viewDir );
+                    const float squareDistanceToVertex = VectorLengthSquared( viewDir );
 
-                        }
+                    const float rcpNormalizingFactorSquared = squaredNormalLength * squareDistanceToVertex;
+
+                    // check if both the normal and viewDir aren't 0 vectors
+                    if ( rcpNormalizingFactorSquared > 1e-9f ) [[likely]] {
+                        const float normalizingFactor = Q_RSqrt( rcpNormalizingFactorSquared );
+
+                        vertexDotValue = std::fabs(DotProduct( viewDir, normal )) * normalizingFactor;
                     }
 
                     const float vertexMaskValue = lerpValue( prevCombinedLayer->vertexMaskValues[vertexNum],
