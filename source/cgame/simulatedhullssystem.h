@@ -93,12 +93,12 @@ public:
 
 #define maxColors 8
 
-    enum class blendMode : unsigned {
+    enum class BlendMode : unsigned {
         AlphaBlend,
         Add,
         Subtract
     };
-    enum class alphaMode : unsigned {
+    enum class AlphaMode : unsigned {
         Add,
         Subtract,
         Override
@@ -108,15 +108,15 @@ public:
         float *vertexMaskValues;
         std::span<byte_vec4_t> colors;
         float colorRanges[maxColors];
-        blendMode blendMode;
-        alphaMode alphaMode;
+        BlendMode blendMode;
+        AlphaMode alphaMode;
     };
 
     struct dotShadingLayer {
         std::span<byte_vec4_t> colors;
         float colorRanges[maxColors];
-        blendMode blendMode;
-        alphaMode alphaMode;
+        BlendMode blendMode;
+        AlphaMode alphaMode;
     };
 
     struct combinedShadingLayer {
@@ -124,8 +124,8 @@ public:
         std::span<byte_vec4_t> colors;
         float colorRanges[maxColors];
         float dotInfluence; //between 0 and 1, vertexValue = ( dotInfluence - 1 ) * vertexMaskValue + dotInfluence * dotProduct(viewVector, normal)
-        blendMode blendMode;
-        alphaMode alphaMode;
+        BlendMode blendMode;
+        AlphaMode alphaMode;
     };
 
     using shadingLayer = std::variant<maskedShadingLayer, dotShadingLayer, combinedShadingLayer>;
@@ -135,6 +135,11 @@ public:
         float *offsets;
         float *offsetsFromLimit; // the offset from an obstacle
         std::span<const shadingLayer> shadingLayers;
+    };
+
+    struct offsetKeyframeSet {
+        std::span<const offsetKeyframe> offsetKeyframes;
+        float maxOffset;
     };
 
 
@@ -557,7 +562,7 @@ private:
 	//using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
     using toonSmokeHull   = KeyframedHull<4, 1>;
-    using electroHull     = KeyframedHull<4, 1>;
+    using electroHull     = KeyframedHull<4, 2>;
 
 
 	void unlinkAndFreeFireHull( FireHull *hull );
@@ -566,6 +571,7 @@ private:
 	//void unlinkAndFreeSmokeHull( SmokeHull *hull );
     void unlinkAndFreeToonSmokeHull( toonSmokeHull *hull);
 	void unlinkAndFreeWaveHull( WaveHull *hull );
+    void unlinkAndFreeElectroHull( electroHull *hull );
 
 	template <typename Hull, bool HasShapeLists>
 	[[nodiscard]]
@@ -617,9 +623,9 @@ private:
 											  std::span<const ColorChangeTimelineNode> timeline ) -> unsigned;
 
     [[nodiscard]]
-    static auto computeCurrKeyframeIndex(  unsigned startFromIndex, int64_t currTime,
-                                           int64_t spawnTime, unsigned effectDuration,
-                                           std::span<const offsetKeyframe> offsetKeyframeSet ) -> unsigned;
+    static auto computePrevKeyframeIndex(unsigned startFromIndex, int64_t currTime,
+                                         int64_t spawnTime, unsigned effectDuration,
+                                         std::span<const offsetKeyframe> offsetKeyframeSet ) -> unsigned;
 
 	FireHull *m_fireHullsHead { nullptr };
 	FireClusterHull *m_fireClusterHullsHead { nullptr };

@@ -2,12 +2,9 @@
 
 #include "../common/links.h"
 #include "../client/client.h"
-#include "../common/wswvector.h"
 #include "../common/memspecbuilder.h"
 #include "../common/mmcommon.h"
-#include "../common/noise.h"
 #include "../cgame/cg_local.h"
-#include "../common/q_math.h"
 
 #include <memory>
 #include <unordered_map>
@@ -306,6 +303,11 @@ private:
 
 static BasicHullsHolder basicHullsHolder;
 
+std::span<const vec4_t> SimulatedHullsSystem::getUnitIcosphere(unsigned level) {
+    const auto [verticesSpan, indicesSpan, neighbourSpan] = ::basicHullsHolder.getIcosphereForLevel(level);
+    return verticesSpan;
+}
+
 SimulatedHullsSystem::SimulatedHullsSystem() {
 	const auto seedUuid  = mm_uuid_t::Random();
 	const auto qwordSeed = seedUuid.loPart ^ seedUuid.hiPart;
@@ -354,6 +356,9 @@ void SimulatedHullsSystem::clear() {
 	for( WaveHull *hull = m_waveHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeWaveHull( hull );
 	}
+    for ( electroHull *hull = m_electroHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
+        unlinkAndFreeElectroHull( hull );
+    }
 }
 /*
 void SimulatedHullsSystem::unlinkAndFreeSmokeHull( SmokeHull *hull ) {
@@ -362,6 +367,12 @@ void SimulatedHullsSystem::unlinkAndFreeSmokeHull( SmokeHull *hull ) {
 	hull->~SmokeHull();
 	m_smokeHullsAllocator.free( hull );
 }*/
+
+void SimulatedHullsSystem::unlinkAndFreeElectroHull( electroHull *hull ) {
+    wsw::unlink( hull, &m_electroHullsHead );
+    hull->~electroHull();
+    m_electroHullsAllocator.free( hull );
+}
 
 void SimulatedHullsSystem::unlinkAndFreeWaveHull( WaveHull *hull ) {
 	wsw::unlink( hull, &m_waveHullsHead );
@@ -393,6 +404,7 @@ void SimulatedHullsSystem::unlinkAndFreeToonSmokeHull( toonSmokeHull *hull ) {
     hull->~toonSmokeHull();
     m_toonSmokeHullsAllocator.free( hull );
 }
+
 
 [[nodiscard]]
 auto SimulatedHullsSystem::allocFireHull( int64_t currTime, unsigned lifetime ) -> FireHull * {
@@ -427,11 +439,6 @@ auto SimulatedHullsSystem::allocToonSmokeHull(int64_t currTime, unsigned int lif
 [[nodiscard]]
 auto SimulatedHullsSystem::allocElectroHull(int64_t currTime, unsigned int lifetime) -> electroHull * {
     return allocHull<electroHull, false>( &m_electroHullsHead, &m_electroHullsAllocator, currTime, lifetime );
-}
-
-std::span<const vec4_t> SimulatedHullsSystem::getUnitIcosphere(unsigned level) {
-    const auto [verticesSpan, indicesSpan, neighbourSpan] = ::basicHullsHolder.getIcosphereForLevel(level);
-    return verticesSpan;
 }
 
 // TODO: Turn on "Favor small code" for this template
@@ -892,6 +899,15 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             activeKeyframedHulls.push_back(hull);
         } else {
             unlinkAndFreeToonSmokeHull(hull);
+        }
+    }
+    for ( electroHull *hull = m_electroHullsHead, *nextHull = nullptr; hull; hull = nextHull ) {
+        nextHull = hull->next;
+        if ( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
+            hull->simulate( currTime, timeDeltaSeconds );
+            activeKeyframedHulls.push_back( hull );
+        } else {
+            unlinkAndFreeElectroHull( hull );
         }
     }
 
@@ -1582,7 +1598,8 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
         vec4_t *const __restrict positions          = layer->vertexPositions;
         const auto offsetKeyframeSet   = layer->offsetKeyframeSet;
 
-        layer->lastKeyframeNum = computeCurrKeyframeIndex(layer->lastKeyframeNum, currTime, spawnTime, lifetime, offsetKeyframeSet);
+        layer->lastKeyframeNum = computePrevKeyframeIndex(layer->lastKeyframeNum, currTime, spawnTime, lifetime,
+                                                          offsetKeyframeSet);
         const unsigned keyframe = layer->lastKeyframeNum;
 
         const float lifeTimeFrac = (float)( currTime - spawnTime ) * Q_Rcp((float)lifetime);
@@ -1625,43 +1642,19 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
     // TODO: Allow storing 4-component float vectors to memory directly
     hullBoundsBuilder.storeTo( this->mins, this->maxs );
     this->mins[3] = 0.0f, this->maxs[3] = 1.0f;
-
-    /*for( unsigned i = 0; i < numLayers; ++i ) {
-        Layer *const layer = &layers[i];
-        for( unsigned j = 0; j < numVertices; ++j ) {
-            const float scale = 0.018f;
-            const float noise = calcSimplexNoise3D(layer->vertexPositions[j][0] * scale, layer->vertexPositions[j][1] * scale, layer->vertexPositions[j][2] * scale + i * 20);
-            byte_vec4_t gray        = {25, 25, 25, 255};
-            byte_vec4_t transparent = {0, 0, 0, 0};
-            layer->vertexColors[j][0] = gray[0];
-            layer->vertexColors[j][1] = gray[1];
-            layer->vertexColors[j][2] = gray[2];
-            const float value = 1 + noise - 2 * lifeTimeFrac;
-            if ( value > 0) {
-                layer->vertexColors[j][3] = gray[3] * wsw::clamp(10.f*value, 0.f, 1.f);
-            }
-            else {
-                layer->vertexColors[j][3] = transparent[3];
-            }
-        }*/
-    /*
-    processColorChange( currTime, spawnTime, lifetime, layer->colorChangeTimeline,
-                        { layer->vertexColors, numVertices }, &layer->colorChangeState, rng );*/
-    //}
 }
 
-auto SimulatedHullsSystem::computeCurrKeyframeIndex(unsigned int startFromIndex, int64_t currTime, int64_t spawnTime,
+auto SimulatedHullsSystem::computePrevKeyframeIndex(unsigned int startFromIndex, int64_t currTime, int64_t spawnTime,
                                                     unsigned int effectDuration,
                                                     std::span<const offsetKeyframe> offsetKeyframeSet) -> unsigned int {
 
     const auto currLifetimeFraction = (float)( currTime - spawnTime ) * Q_Rcp( (float)effectDuration );
-    // TODO: compute actual amount of elements in the set (using a span)
     unsigned setSize = offsetKeyframeSet.size();
 
     // Assume that startFromIndex is "good" even if the conditions in the loop won't be held for it
     unsigned currIndex = startFromIndex, lastGoodIndex = startFromIndex;
     for(;; ) {
-        if( currIndex == setSize ) {
+        if( currIndex == ( setSize - 1 ) ) { // it should never reach the last keyframe as we always need a next one for interpolation
             break;
         }
         if( offsetKeyframeSet[currIndex].lifeTimeFraction > currLifetimeFraction ) {
@@ -2621,8 +2614,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
             if (auto* prevMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->prevShadingLayers[layerNum])) {
                 auto* nextMaskedLayer = std::get_if<maskedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
 
-                blendMode blendMode = prevMaskedLayer->blendMode;
-                alphaMode alphaMode = prevMaskedLayer->alphaMode;
+                BlendMode blendMode = prevMaskedLayer->blendMode;
+                AlphaMode alphaMode = prevMaskedLayer->alphaMode;
 
                 const unsigned numColors = prevMaskedLayer->colors.size();
 
@@ -2662,23 +2655,23 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     if( layerNum == 0 ){
                         Vector4Copy(layerColor, resultColors[vertexNum]);
                     } else {
-                        if (blendMode == blendMode::AlphaBlend) {
+                        if (blendMode == BlendMode::AlphaBlend) {
                             VectorLerp(resultColors[vertexNum], layerColor[3], layerColor, resultColors[vertexNum]);
-                        } else if (blendMode == blendMode::Add) {
+                        } else if (blendMode == BlendMode::Add) {
                             for (int i = 0; i < 3; i++) {
                                 resultColors[vertexNum][i] = wsw::min(resultColors[vertexNum][i] + layerColor[i], 255);
                             }
-                        } else if (blendMode == blendMode::Subtract) {
+                        } else if (blendMode == BlendMode::Subtract) {
                             for (int i = 0; i < 3; i++) {
                                 resultColors[vertexNum][i] = wsw::max(resultColors[vertexNum][i] - layerColor[i], 0);
                             }
                         }
 
-                        if ( alphaMode == alphaMode::Override ) {
+                        if ( alphaMode == AlphaMode::Override ) {
                             resultColors[vertexNum][3] = layerColor[3];
-                        } else if ( alphaMode == alphaMode::Add ) {
+                        } else if ( alphaMode == AlphaMode::Add ) {
                             resultColors[vertexNum][3] = wsw::min(resultColors[vertexNum][3] + layerColor[3], 255);
-                        } else if ( alphaMode == alphaMode::Subtract ) {
+                        } else if ( alphaMode == AlphaMode::Subtract ) {
                             resultColors[vertexNum][3] = wsw::max(resultColors[vertexNum][3] - layerColor[3], 0);
                         }
                     }
@@ -2688,8 +2681,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
             if (auto* prevDotLayer = std::get_if<dotShadingLayer>(&m_shared->prevShadingLayers[layerNum])) {
                 auto *nextDotLayer = std::get_if<dotShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
 
-                blendMode blendMode = prevDotLayer->blendMode;
-                alphaMode alphaMode = prevDotLayer->alphaMode;
+                BlendMode blendMode = prevDotLayer->blendMode;
+                AlphaMode alphaMode = prevDotLayer->alphaMode;
 
                 const unsigned numColors = prevDotLayer->colors.size();
 
@@ -2726,21 +2719,19 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                         }
                     } while( ++neighbourIndex < 5 );
 
-                    //VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
-                    // The sum of partial non-zero directories could be zero, check again
                     const float squaredNormalLength = VectorLengthSquared( normal );
-                    if( squaredNormalLength > wsw::square( 1e-3f ) ) [[likely]] {
-                        vec3_t viewDir;
-                        VectorSubtract( currVertex, viewOrigin, viewDir );
-                        const float squareDistanceToVertex = VectorLengthSquared( viewDir );
-                        if( squareDistanceToVertex > 1.0f ) [[likely]] {
-                            const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
-                            const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
-                            VectorScale( normal, rcpNormalLength, normal );
-                            VectorScale( viewDir, rcpDistance, viewDir );
-                            vertexDotValue = std::fabs( DotProduct( viewDir, normal ) );
+                    vec3_t viewDir;
+                    VectorSubtract( currVertex, viewOrigin, viewDir );
+                    const float squareDistanceToVertex = VectorLengthSquared( viewDir );
 
-                        }
+                    const float squareRcpNormalizingFactor = squaredNormalLength * squareDistanceToVertex;
+                    // check that both the length of the normal and distance to vertex are not 0 in one branch
+                    if( squareRcpNormalizingFactor > 1.0f ) [[likely]] {
+                        const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
+                        const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
+                        VectorScale( normal, rcpNormalLength, normal );
+                        VectorScale( viewDir, rcpDistance, viewDir );
+                        vertexDotValue = std::fabs( DotProduct( viewDir, normal ) );
                     }
 
                     byte_vec4_t layerColor;
@@ -2761,23 +2752,23 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     if( layerNum == 0 ){
                         Vector4Copy(layerColor, resultColors[vertexNum]);
                     } else {
-                        if (blendMode == blendMode::AlphaBlend) {
+                        if (blendMode == BlendMode::AlphaBlend) {
                             VectorLerp(resultColors[vertexNum], layerColor[3], layerColor, resultColors[vertexNum]);
-                        } else if (blendMode == blendMode::Add) {
+                        } else if (blendMode == BlendMode::Add) {
                             for (int i = 0; i < 3; i++) {
                                 resultColors[vertexNum][i] = wsw::min(resultColors[vertexNum][i] + layerColor[i], 255);
                             }
-                        } else if (blendMode == blendMode::Subtract) {
+                        } else if (blendMode == BlendMode::Subtract) {
                             for (int i = 0; i < 3; i++) {
                                 resultColors[vertexNum][i] = wsw::max(resultColors[vertexNum][i] - layerColor[i], 0);
                             }
                         }
 
-                        if ( alphaMode == alphaMode::Override ) {
+                        if ( alphaMode == AlphaMode::Override ) {
                             resultColors[vertexNum][3] = layerColor[3];
-                        } else if ( alphaMode == alphaMode::Add ) {
+                        } else if ( alphaMode == AlphaMode::Add ) {
                             resultColors[vertexNum][3] = wsw::min(resultColors[vertexNum][3] + layerColor[3], 255);
-                        } else if ( alphaMode == alphaMode::Subtract ) {
+                        } else if ( alphaMode == AlphaMode::Subtract ) {
                             resultColors[vertexNum][3] = wsw::max(resultColors[vertexNum][3] - layerColor[3], 0);
                         }
                     }
@@ -2787,8 +2778,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
             if (auto* prevCombinedLayer = std::get_if<combinedShadingLayer>(&m_shared->prevShadingLayers[layerNum])) {
                 auto *nextCombinedLayer = std::get_if<combinedShadingLayer>(&m_shared->nextShadingLayers[layerNum]);
 
-                blendMode blendMode = prevCombinedLayer->blendMode;
-                alphaMode alphaMode = prevCombinedLayer->alphaMode;
+                BlendMode blendMode = prevCombinedLayer->blendMode;
+                AlphaMode alphaMode = prevCombinedLayer->alphaMode;
 
                 const unsigned numColors = prevCombinedLayer->colors.size();
 
@@ -2825,21 +2816,19 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                         }
                     } while (++neighbourIndex < 5);
 
-                    //VectorCopy( givenColors[vertexNum], resultColors[vertexNum] );
-                    // The sum of partial non-zero directories could be zero, check again
-                    const float squaredNormalLength = VectorLengthSquared(normal);
-                    if (squaredNormalLength > wsw::square(1e-3f)) [[likely]] {
-                        vec3_t viewDir;
-                        VectorSubtract(currVertex, viewOrigin, viewDir);
-                        const float squareDistanceToVertex = VectorLengthSquared(viewDir);
-                        if (squareDistanceToVertex > 1.0f) [[likely]] {
-                            const float rcpNormalLength = Q_RSqrt(squaredNormalLength);
-                            const float rcpDistance = Q_RSqrt(squareDistanceToVertex);
-                            VectorScale(normal, rcpNormalLength, normal);
-                            VectorScale(viewDir, rcpDistance, viewDir);
-                            vertexDotValue = std::fabs(DotProduct(viewDir, normal));
+                    const float squaredNormalLength = VectorLengthSquared( normal );
+                    vec3_t viewDir;
+                    VectorSubtract( currVertex, viewOrigin, viewDir );
+                    const float squareDistanceToVertex = VectorLengthSquared( viewDir );
 
-                        }
+                    const float squareRcpNormalizingFactor = squaredNormalLength * squareDistanceToVertex;
+                    // check that both the length of the normal and distance to vertex are not 0 in one branch
+                    if( squareRcpNormalizingFactor > 1.0f ) [[likely]] {
+                        const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
+                        const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
+                        VectorScale( normal, rcpNormalLength, normal );
+                        VectorScale( viewDir, rcpDistance, viewDir );
+                        vertexDotValue = std::fabs( DotProduct( viewDir, normal ) );
                     }
 
                     const float vertexMaskValue = lerpValue(prevCombinedLayer->vertexMaskValues[vertexNum],
@@ -2868,23 +2857,23 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     if (layerNum == 0) {
                         Vector4Copy(layerColor, resultColors[vertexNum]);
                     } else {
-                        if (blendMode == blendMode::AlphaBlend) {
+                        if (blendMode == BlendMode::AlphaBlend) {
                             VectorLerp(resultColors[vertexNum], layerColor[3], layerColor, resultColors[vertexNum]);
-                        } else if (blendMode == blendMode::Add) {
+                        } else if (blendMode == BlendMode::Add) {
                             for (int i = 0; i < 3; i++) {
                                 resultColors[vertexNum][i] = wsw::min(resultColors[vertexNum][i] + layerColor[i], 255);
                             }
-                        } else if (blendMode == blendMode::Subtract) {
+                        } else if (blendMode == BlendMode::Subtract) {
                             for (int i = 0; i < 3; i++) {
                                 resultColors[vertexNum][i] = wsw::max(resultColors[vertexNum][i] - layerColor[i], 0);
                             }
                         }
 
-                        if (alphaMode == alphaMode::Override) {
+                        if (alphaMode == AlphaMode::Override) {
                             resultColors[vertexNum][3] = layerColor[3];
-                        } else if (alphaMode == alphaMode::Add) {
+                        } else if (alphaMode == AlphaMode::Add) {
                             resultColors[vertexNum][3] = wsw::min(resultColors[vertexNum][3] + layerColor[3], 255);
-                        } else if (alphaMode == alphaMode::Subtract) {
+                        } else if (alphaMode == AlphaMode::Subtract) {
                             resultColors[vertexNum][3] = wsw::max(resultColors[vertexNum][3] - layerColor[3], 0);
                         }
                     }
