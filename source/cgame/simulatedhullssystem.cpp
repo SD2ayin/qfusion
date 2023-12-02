@@ -2727,11 +2727,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     const float squareRcpNormalizingFactor = squaredNormalLength * squareDistanceToVertex;
                     // check that both the length of the normal and distance to vertex are not 0 in one branch
                     if( squareRcpNormalizingFactor > 1.0f ) [[likely]] {
-                        const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
-                        const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
-                        VectorScale( normal, rcpNormalLength, normal );
-                        VectorScale( viewDir, rcpDistance, viewDir );
-                        vertexDotValue = std::fabs( DotProduct( viewDir, normal ) );
+                        const float normalizingFactor = Q_RSqrt( squareRcpNormalizingFactor );
+                        vertexDotValue = std::fabs( DotProduct( viewDir, normal ) ) * normalizingFactor;
                     }
 
                     byte_vec4_t layerColor;
@@ -2824,11 +2821,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
                     const float squareRcpNormalizingFactor = squaredNormalLength * squareDistanceToVertex;
                     // check that both the length of the normal and distance to vertex are not 0 in one branch
                     if( squareRcpNormalizingFactor > 1.0f ) [[likely]] {
-                        const float rcpNormalLength   = Q_RSqrt( squaredNormalLength );
-                        const float rcpDistance       = Q_RSqrt( squareDistanceToVertex );
-                        VectorScale( normal, rcpNormalLength, normal );
-                        VectorScale( viewDir, rcpDistance, viewDir );
-                        vertexDotValue = std::fabs( DotProduct( viewDir, normal ) );
+                        const float normalizingFactor = Q_RSqrt( squareRcpNormalizingFactor );
+                        vertexDotValue = std::fabs( DotProduct( viewDir, normal ) ) * normalizingFactor;
                     }
 
                     const float vertexMaskValue = lerpValue(prevCombinedLayer->vertexMaskValues[vertexNum],
