@@ -43,6 +43,8 @@ class TransientEffectsSystem {
 public:
 	~TransientEffectsSystem();
 
+    void regenerateToonSmokeHullKeyframeSets();
+
 	void spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, float radius = 72.0f );
 	void spawnCartoonHitEffect( const float *origin, const float *dir, int damage );
 	void spawnBleedingVolumeEffect( const float *origin, const float *dir, unsigned damageLevel,

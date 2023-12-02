@@ -35,6 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cg_local.h"
 #include "../ui/uisystem.h"
 #include "../ui/huddatamodel.h"
+#include "../cgame/transienteffectssystem.h"
 
 using wsw::operator""_asView;
 
@@ -5411,6 +5412,8 @@ void CG_Precache( void ) {
 		return;
 	}
 
+    TransientEffectsSystem effectsSystem;
+    effectsSystem.regenerateToonSmokeHullKeyframeSets();
 	cgs.precacheDone = true;
 }
 
