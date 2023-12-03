@@ -231,6 +231,8 @@ static centity_t *cg_item_timers[MAX_ITEM_TIMERS];
 
 static float predictedSteps[CMD_BACKUP]; // for step smoothing
 
+static TransientEffectsSystem::ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes[numToonSmokeKeyframeVariants];
+
 static void CG_SC_Print( const CmdArgs &cmdArgs ) {
 	CG_LocalPrint( "%s", Cmd_Argv( 1 ) );
 }
@@ -2220,9 +2222,9 @@ static void handleGrenadeExplosionEvent( entity_state_t *ent, int parm, bool pre
 	if( parm ) {
 		// we have a direction
 		ByteToDir( parm, dir );
-		cg.effectsSystem.spawnGrenadeExplosionEffect( ent->origin, dir, ent->firemode );
+		cg.effectsSystem.spawnGrenadeExplosionEffect( ent->origin, dir, ent->firemode, toonSmokeKeyframes );
 	} else {
-		cg.effectsSystem.spawnGrenadeExplosionEffect( ent->origin, &axis_identity[AXIS_UP], ent->firemode );
+		cg.effectsSystem.spawnGrenadeExplosionEffect( ent->origin, &axis_identity[AXIS_UP], ent->firemode, toonSmokeKeyframes );
 	}
 
 	if( ent->firemode == FIRE_MODE_STRONG ) {
@@ -2236,7 +2238,7 @@ static void handleRocketExplosionEvent( entity_state_t *ent, int parm, bool pred
 	vec3_t dir;
 	ByteToDir( parm, dir );
 
-	cg.effectsSystem.spawnRocketExplosionEffect( ent->origin, dir, ent->firemode );
+	cg.effectsSystem.spawnRocketExplosionEffect( ent->origin, dir, ent->firemode, toonSmokeKeyframes );
 
 	if( ent->firemode == FIRE_MODE_STRONG ) {
 		CG_StartKickAnglesEffect( ent->origin, 135, ent->weapon * 8, 300 );
@@ -5413,7 +5415,7 @@ void CG_Precache( void ) {
 	}
 
     TransientEffectsSystem effectsSystem;
-    effectsSystem.regenerateToonSmokeHullKeyframeSets();
+    effectsSystem.regenerateToonSmokeHullKeyframeSets( Sys_Microseconds(), toonSmokeKeyframes );
 	cgs.precacheDone = true;
 }
 

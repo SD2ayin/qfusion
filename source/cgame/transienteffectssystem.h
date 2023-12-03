@@ -43,7 +43,23 @@ class TransientEffectsSystem {
 public:
 	~TransientEffectsSystem();
 
-    void regenerateToonSmokeHullKeyframeSets();
+    struct ToonSmokeOffsetKeyframeHolder {
+        static const int numVerts = 2562;
+        static const int numKeyframes = 20;
+        const unsigned minLifetime = 850;
+        const float scrollSpeed = 1.43;
+        const int numShadingLayers = 3;
+        float maxOffset;
+        const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere(4);
+        const vec4_t *vertices = verticesSpan.data();
+        SimulatedHullsSystem::offsetKeyframe toonSmokeKeyframeSet[numKeyframes];
+        ToonSmokeOffsetKeyframeHolder( uint32_t seed = 2 ) noexcept;
+        ~ToonSmokeOffsetKeyframeHolder() noexcept;
+    };
+
+#define numToonSmokeKeyframeVariants 10
+
+    void regenerateToonSmokeHullKeyframeSets( unsigned numVariants, TransientEffectsSystem::ToonSmokeOffsetKeyframeHolder* keyframeHolder );
 
 	void spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, float radius = 72.0f );
 	void spawnCartoonHitEffect( const float *origin, const float *dir, int damage );
@@ -264,7 +280,7 @@ private:
 	// TODO: Replace by a fixed vector/fixed buffer
 	wsw::Vector<uint8_t> m_cachedSmokeBulgeMasksBuffer;
 
-	wsw::RandomGenerator m_rng;
+	static wsw::RandomGenerator m_rng;
 	int64_t m_lastTime { 0 };
 };
 
