@@ -475,7 +475,6 @@ private:
 
 			vec4_t mins, maxs;
 			vec4_t *vertexPositions;
-			byte_vec4_t *vertexColors;
 			SharedMeshData *sharedMeshData;
 			HullSolidDynamicMesh *submittedSolidMesh;
 			HullCloudDynamicMesh *submittedCloudMeshes[1];
@@ -516,7 +515,6 @@ private:
 		float storageOfLimits[kNumVertices];
 		vec4_t storageOfPositions[kNumVertices * NumLayers];
 
-		byte_vec4_t storageOfColors[kNumVertices * NumLayers];
 		SharedMeshData storageOfSharedMeshData[NumLayers];
 		// TODO: Allocate dynamically on demand?
 		// TODO: Optimize the memory layout
@@ -536,7 +534,6 @@ private:
 				Layer *const layer              = &layers[i];
 				layer->lastKeyframeNum          = 0;
 				layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
-				layer->vertexColors             = &storageOfColors[i * kNumVertices];
 				layer->sharedMeshData           = &storageOfSharedMeshData[i];
 				layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
 

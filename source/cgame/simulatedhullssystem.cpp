@@ -1144,7 +1144,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				Vector4Copy( layer->maxs, mesh->cullMaxs );
 
 				// TODO: Make the material configurable
-				mesh->material = cgs.shaderWhite;
+				mesh->material = cgs.media.shaderSmokeHull;
 				mesh->m_shared = sharedMeshData;
 				// TODO: Restore this functionality if it could be useful for toon hull
 				//mesh->applyVertexDynLight = hull->applyVertexDynLight;

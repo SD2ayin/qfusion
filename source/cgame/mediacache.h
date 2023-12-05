@@ -266,6 +266,8 @@ public:
 
 	CachedMaterial shaderLaser { this, wsw::StringView( "gfx/misc/laser" ) };
 
+    CachedMaterial shaderSmokeHull { this, wsw::StringView( "gfx/misc/smokehull" ) };
+
 	CachedMaterial shaderFlagFlare { this, wsw::StringView( PATH_FLAG_FLARE_SHADER ) };
 
 	CachedMaterial shaderRaceGhostEffect { this, wsw::StringView( "gfx/raceghost" ) };

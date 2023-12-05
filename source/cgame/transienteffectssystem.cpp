@@ -255,7 +255,7 @@ static const FireHullLayerParamsHolder kFireHullParams;
 struct ToonSmokeOffsetKeyframeHolder {
 	static constexpr int kNumVertices           = 2562;
 	static constexpr int kNumKeyframes          = 20;
-	static constexpr unsigned kMinLifetime      = 850;
+	static constexpr unsigned kMinLifetime      = 1400; //850;
 	static constexpr unsigned kNumShadingLayers = 3;
 	// Looks like a variable and not a constant, even it's technicall is the latter thing
 	static constexpr float maxOffset            = 1.0f;
@@ -270,11 +270,11 @@ struct ToonSmokeOffsetKeyframeHolder {
 	// This type needs careful initialization of fields, hence it's better to construct instances manually
 	wsw::StaticVector<SimulatedHullsSystem::OffsetKeyframe, kNumKeyframes> setOfKeyframes;
 
-	static constexpr byte_vec4_t kFireColors[3] {
-		{ 25, 25, 25, 255 },   // Gray
-		{ 255, 70, 30, 255 },  // Orange
-		{ 255, 160, 45, 255 }, // Yellow
-	};
+    static constexpr byte_vec4_t kFireColors[3] {
+            { 25, 25, 25, 255 },   // Gray
+            { 255, 70, 30, 255 },  // Orange
+            { 255, 160, 45, 255 }, // Yellow
+    };
 
 	static constexpr byte_vec4_t kFadeColors[2] {
 		{ 0, 0, 0, 255 },
@@ -286,8 +286,16 @@ struct ToonSmokeOffsetKeyframeHolder {
 		{ 0, 0, 0, 0 },
 	};
 
-	ToonSmokeOffsetKeyframeHolder() noexcept {
-		constexpr float scrollSpeed     = 1.43f;
+	ToonSmokeOffsetKeyframeHolder( int32_t seed ) noexcept {
+        wsw::RandomGenerator rng( (int32_t) std::time( nullptr ) + seed );
+        const float voronoiNoiseScale = 1.05f + 0.15f * rng.nextFloat( -1.f, 1.f );
+        const vec3_t coords = {
+                (float)rng.nextBounded(100),
+                (float)rng.nextBounded(100),
+                (float)rng.nextBounded(100)
+        };
+
+        constexpr float scrollSpeed     = 1.43f;
 		constexpr float scrollDistance  = scrollSpeed * ( (float)kMinLifetime * 1e-3f );
 
 		constexpr float initialSize     = 0.1f;
@@ -318,8 +326,14 @@ struct ToonSmokeOffsetKeyframeHolder {
 
 			const vec4_t *const vertices = verticesSpan.data();
 			for( unsigned vertexNum = 0; vertexNum < kNumVertices; vertexNum++ ) {
+
 				const float *const vertex = vertices[vertexNum];
-				const float voronoiNoise  = calcVoronoiNoiseSquared( vertex[0], vertex[1], vertex[2] + scrolledDistance );
+				/*const float voronoiNoise = calcVoronoiNoiseSquared( vertex[0] * voronoiNoiseScale,
+                                                                     vertex[1] * voronoiNoiseScale,
+                                                                     vertex[2] * voronoiNoiseScale + scrolledDistance );*/
+                const float voronoiNoise = calcVoronoiNoiseSquared( vertex[0] * voronoiNoiseScale + coords[0],
+                                                                    vertex[1] * voronoiNoiseScale + coords[1],
+                                                                    vertex[2] * voronoiNoiseScale + coords[2] + scrolledDistance );
 				const float offset        = expansion * ( 1.0f - 0.7f * voronoiNoise );
 
 				frameVertexOffsets[vertexNum]  = offset;
@@ -375,7 +389,32 @@ struct ToonSmokeOffsetKeyframeHolder {
 	}
 };
 
-static const ToonSmokeOffsetKeyframeHolder toonSmokeKeyframes;
+#define numToonSmokeVariants 10
+//static ToonSmokeOffsetKeyframeHolder toonSmokeKeyframesVariants[numToonSmokeVariants];
+
+static ToonSmokeOffsetKeyframeHolder toonSmokeKeyframesVariants[numToonSmokeVariants] = {
+        ToonSmokeOffsetKeyframeHolder(0),
+        ToonSmokeOffsetKeyframeHolder(1),
+        ToonSmokeOffsetKeyframeHolder(2),
+        ToonSmokeOffsetKeyframeHolder(3),
+        ToonSmokeOffsetKeyframeHolder(4),
+        ToonSmokeOffsetKeyframeHolder(5),
+        ToonSmokeOffsetKeyframeHolder(6),
+        ToonSmokeOffsetKeyframeHolder(7),
+        ToonSmokeOffsetKeyframeHolder(8),
+        ToonSmokeOffsetKeyframeHolder(9),
+};
+/*
+struct toonSmokeKeyframesVariantsHolder {
+    wsw::Vector<ToonSmokeOffsetKeyframeHolder> holders;
+    ToonSmokeOffsetKeyframeHolder toonSmokeKeyframesVariants[numToonSmokeVariants];
+
+    toonSmokeKeyframesVariantsHolder(){
+        for( size_t i = 0; i < numToonSmokeVariants; ++i ) {
+            toonSmokeKeyframesVariants[i] = ToonSmokeOffsetKeyframeHolder( (int32_t) std::time( nullptr ) + i );
+        }
+    }
+};*/
 
 static const byte_vec4_t kSmokeSoftLayerFadeInPalette[] {
 	asByteColor( 0.65f, 0.65f, 0.65f, 0.25f ),
@@ -538,16 +577,23 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 #endif
 
 	if( smokeOrigin ) {
-		const std::span<const SimulatedHullsSystem::OffsetKeyframe> toonSmokeKeyframeSet = toonSmokeKeyframes.setOfKeyframes;
+        const unsigned randomIdx = m_rng.nextBounded( numToonSmokeVariants );
+        ToonSmokeOffsetKeyframeHolder* chosenToonSmokeKeyframes;
+        chosenToonSmokeKeyframes = &toonSmokeKeyframesVariants[randomIdx];
+
+        auto* firstShadingLayer = std::get_if<SimulatedHullsSystem::MaskedShadingLayer>( &chosenToonSmokeKeyframes->setOfKeyframes[0].shadingLayers[0] );
+        Com_Printf("idx:%i, color:%i", randomIdx, firstShadingLayer->colors[1][2]);
+
+        std::span<const SimulatedHullsSystem::OffsetKeyframe> toonSmokeKeyframeSet = chosenToonSmokeKeyframes->setOfKeyframes;
 
 		const float randomFactor  = 0.4f;
 		const float randomScaling = 1.0f + randomFactor * m_rng.nextFloat();
 
 		const float toonSmokeScale   = 38.0f * randomScaling;
-		const auto toonSmokeLifetime = (unsigned)( (float)toonSmokeKeyframes.kMinLifetime * randomScaling );
+		const auto toonSmokeLifetime = (unsigned)( (float)ToonSmokeOffsetKeyframeHolder::kMinLifetime * randomScaling );
 		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
 			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
+											&toonSmokeKeyframeSet, ToonSmokeOffsetKeyframeHolder::maxOffset );
 		}
 
 #if 0
