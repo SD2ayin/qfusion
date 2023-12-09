@@ -649,7 +649,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 											  float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets,
-											  const float maxOffset, const AppearanceRules &appearanceRules ) {
+											  const float maxOffset, const float *rotation,
+                                              const AppearanceRules &appearanceRules ) {
 	const float originX = origin[0], originY = origin[1], originZ = origin[2];
 	const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
 
@@ -660,6 +661,23 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	const float radius = maxOffset * scale;
 	const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
 	const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
+
+    if( rotation ) {
+        mat3_t rotationMatrix;
+        Quat_ToMatrix3(rotation, rotationMatrix);
+
+        const auto before = Sys_Microseconds();
+        for( size_t i = 0; i < verticesSpan.size(); i++ ) {
+            vec3_t moveDirection;
+            Matrix3_TransformVector(&rotationMatrix[0], vertices[i], moveDirection);
+
+            VectorCopy( moveDirection, hull->vertexMoveDirections[i] );
+
+        }
+        Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
+    } else {
+        std::memcpy( hull->vertexMoveDirections[0], vertices[0], sizeof(vec4_t) * verticesSpan.size() );
+    }
 
 	// TODO: Add a fused call
 	CM_BuildShapeList( cl.cms, m_tmpShapeList, growthMins, growthMaxs, MASK_SOLID );
@@ -672,7 +690,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 		trace_t trace;
 		for( size_t i = 0; i < verticesSpan.size(); ++i ) {
 			// Vertices of the unit hull define directions
-			const float *dir = verticesSpan[i];
+			const float *dir = hull->vertexMoveDirections[i];
 
 			vec3_t limitPoint;
 			VectorMA( origin, radius, dir, limitPoint );
@@ -690,16 +708,15 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 		vec4_t *const __restrict positions          = layer->vertexPositions;
 
 		for( size_t i = 0; i < verticesSpan.size(); ++i ) {
+
 			// Position XYZ is computed prior to submission in stateless fashion
 			positions[i][3] = 1.0f;
 		}
 	}
 
 	VectorCopy( origin, hull->origin );
-	hull->vertexMoveDirections = vertices;
 	hull->scale                = scale;
-
-	hull->appearanceRules = appearanceRules;
+	hull->appearanceRules      = appearanceRules;
 }
 
 void SimulatedHullsSystem::calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes ) {

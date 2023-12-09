@@ -255,7 +255,7 @@ static const FireHullLayerParamsHolder kFireHullParams;
 struct ToonSmokeOffsetKeyframeHolder {
 	static constexpr int kNumVertices           = 2562;
 	static constexpr int kNumKeyframes          = 20;
-	static constexpr unsigned kMinLifetime      = 1400; //850;
+	static constexpr unsigned kMinLifetime      = 2100; //850;
 	static constexpr unsigned kNumShadingLayers = 3;
 	// Looks like a variable and not a constant, even it's technicall is the latter thing
 	static constexpr float maxOffset            = 1.0f;
@@ -288,7 +288,7 @@ struct ToonSmokeOffsetKeyframeHolder {
 
 	ToonSmokeOffsetKeyframeHolder( int32_t seed ) noexcept {
         wsw::RandomGenerator rng( (int32_t) std::time( nullptr ) + seed );
-        const float voronoiNoiseScale = 1.05f + 0.15f * rng.nextFloat( -1.f, 1.f );
+        const float voronoiNoiseScale = 0.95f + 0.15f * rng.nextFloat( 0.0f, 1.0f );
         const vec3_t coords = {
                 (float)rng.nextBounded(100),
                 (float)rng.nextBounded(100),
@@ -320,26 +320,27 @@ struct ToonSmokeOffsetKeyframeHolder {
 			float *const frameFadeVertexMask    = fadeVertexMaskStorage[frameNum];
 			float *const frameOffsetsFromLimits = vertexOffsetsFromLimitsStorage[frameNum];
 
-			//const float expansion = (1-initialSize) * ( 1.f - (x-1.f)*(x-1.f) ) + initialSize;
 			const float initialVelocity = 5.0f;
 			const float expansion       = ( 1.0f - initialSize ) * ( 1.0f - std::exp( -initialVelocity * keyframeFrac ) ) + initialSize;
 
 			const vec4_t *const vertices = verticesSpan.data();
-			for( unsigned vertexNum = 0; vertexNum < kNumVertices; vertexNum++ ) {
+                for( unsigned vertexNum = 0; vertexNum < kNumVertices; vertexNum++ ) {
 
 				const float *const vertex = vertices[vertexNum];
 				/*const float voronoiNoise = calcVoronoiNoiseSquared( vertex[0] * voronoiNoiseScale,
                                                                      vertex[1] * voronoiNoiseScale,
                                                                      vertex[2] * voronoiNoiseScale + scrolledDistance );*/
-                const float voronoiNoise = calcVoronoiNoiseSquared( vertex[0] * voronoiNoiseScale + coords[0],
-                                                                    vertex[1] * voronoiNoiseScale + coords[1],
-                                                                    vertex[2] * voronoiNoiseScale + coords[2] + scrolledDistance );
+                const float voronoiNoise = calcVoronoiNoiseSquared( vertex[0] * voronoiNoiseScale,
+                                                                    vertex[1] * voronoiNoiseScale,
+                                                                    vertex[2] * voronoiNoiseScale + scrolledDistance );
 				const float offset        = expansion * ( 1.0f - 0.7f * voronoiNoise );
 
 				frameVertexOffsets[vertexNum]  = offset;
 				frameFireVertexMask[vertexNum] = voronoiNoise; // Values between 1 and 0 where 1 has the highest offset
 
-				const float simplexNoise       = calcSimplexNoise3D( vertex[0], vertex[1], vertex[2] - scrolledDistance);
+				const float simplexNoise       = calcSimplexNoise3D( vertex[0] + coords[0],
+                                                                     vertex[1] + coords[1],
+                                                                     vertex[2] + coords[2] - scrolledDistance);
 				const float fadeFrac           = ( keyframeFrac - fadeStartAtFrac ) / ( 1.0f - fadeStartAtFrac );
 				const float zFade              = 0.5f * ( vertex[2] + 1.0f ) * zFadeInfluence;
 				frameFadeVertexMask[vertexNum] = fadeFrac - simplexNoise * ( 1.0f - zFadeInfluence ) - zFade + fadeRange;
@@ -581,6 +582,9 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         ToonSmokeOffsetKeyframeHolder* chosenToonSmokeKeyframes;
         chosenToonSmokeKeyframes = &toonSmokeKeyframesVariants[randomIdx];
 
+        const float randomAngle = m_rng.nextFloat(0, 2 * M_PI);
+        const quat_t rotation = { 0.f, 0.f,std::sin(randomAngle/2), std::cos(randomAngle/2) };
+
         auto* firstShadingLayer = std::get_if<SimulatedHullsSystem::MaskedShadingLayer>( &chosenToonSmokeKeyframes->setOfKeyframes[0].shadingLayers[0] );
         Com_Printf("idx:%i, color:%i", randomIdx, firstShadingLayer->colors[1][2]);
 
@@ -593,8 +597,11 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const auto toonSmokeLifetime = (unsigned)( (float)ToonSmokeOffsetKeyframeHolder::kMinLifetime * randomScaling );
 		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
 			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet, ToonSmokeOffsetKeyframeHolder::maxOffset );
+											&toonSmokeKeyframeSet,
+                                            ToonSmokeOffsetKeyframeHolder::maxOffset, rotation );
 		}
+        Com_Printf("rotation quaternion:%f %f %f %f", rotation[0], rotation[1], rotation[2], rotation[3]);
+
 
 #if 0
 		g_smokeOuterLayerCloudMeshProps[0].material = cgs.media.shaderSmokeHullHardParticle;

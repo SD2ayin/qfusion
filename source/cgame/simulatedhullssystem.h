@@ -460,7 +460,7 @@ private:
 	struct BaseKeyframedHull {
 		float scale;
 		// Externally managed, should point to the unit mesh data
-		const vec4_t *vertexMoveDirections;
+		vec4_t *vertexMoveDirections;
 
 		// Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
 		float *limitsAtDirections;
@@ -514,6 +514,7 @@ private:
 		Layer storageOfLayers[NumLayers];
 		float storageOfLimits[kNumVertices];
 		vec4_t storageOfPositions[kNumVertices * NumLayers];
+        vec4_t storageOfMoveDirections[kNumVertices];
 
 		SharedMeshData storageOfSharedMeshData[NumLayers];
 		// TODO: Allocate dynamically on demand?
@@ -528,6 +529,7 @@ private:
 			this->subdivLevel                = SubdivLevel;
 			this->layers                     = &storageOfLayers[0];
 			this->limitsAtDirections         = &storageOfLimits[0];
+            this->vertexMoveDirections       = &storageOfMoveDirections[0];
 			this->submittedSolidMeshesBuffer = storageOfSolidMeshPointers;
 			this->submittedCloudMeshesBuffer = storageOfCloudMeshPointers;
 			for( unsigned i = 0; i < NumLayers; ++i ) {
@@ -587,8 +589,9 @@ private:
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets, float maxOffset,
-							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets,
+                            float maxOffset, const float *rotation = nullptr,
+                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
