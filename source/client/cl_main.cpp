@@ -294,9 +294,9 @@ void CL_GameModule_RenderView() {
 	}
 }
 
-void CL_GameModule_InputFrame( int frameTime ) {
+void CL_GameModule_InputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis ) {
 	if( cge ) {
-		CG_InputFrame( frameTime );
+		CG_InputFrame( inputTimestamp, keyboardDeltaMillis, mouseDeltaMillis );
 	}
 }
 
@@ -350,21 +350,21 @@ void CL_ClearInputState( void ) {
 *
 * Notifies cgame of new frame, refreshes input timings, coordinates and angles
 */
-static void CL_UpdateGameInput( int frameTime ) {
+static void CL_UpdateGameInput( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis ) {
 	int mx, my;
 	IN_GetMouseMovement( &mx, &my );
 
 	// refresh input in cgame
-	CL_GameModule_InputFrame( frameTime );
+	CL_GameModule_InputFrame( inputTimestamp, keyboardDeltaMillis, mouseDeltaMillis );
 
-	if( !wsw::ui::UISystem::instance()->handleMouseMove( frameTime, mx, my ) ) {
+	if( !wsw::ui::UISystem::instance()->handleMouseMove( mouseDeltaMillis, mx, my ) ) {
 		CL_GameModule_MouseMove( mx, my );
 		// TODO: Check whether a console is open?
 		CL_GameModule_AddViewAngles( cl.viewangles );
 	}
 }
 
-void CL_UserInputFrame( int realMsec ) {
+void CL_UserInputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis, int realMsec ) {
 	// let the mouse activate or deactivate
 	IN_Frame();
 
@@ -375,13 +375,10 @@ void CL_UserInputFrame( int realMsec ) {
 	IN_Commands();
 
 	// refresh mouse angles and movement velocity
-	CL_UpdateGameInput( realMsec );
+	CL_UpdateGameInput( inputTimestamp, keyboardDeltaMillis, mouseDeltaMillis );
 
 	// create a new usercmd_t structure for this frame
 	CL_CreateNewUserCommand( realMsec );
-
-	// process console commands
-	CL_Cbuf_ExecutePendingCommands();
 }
 
 void CL_InitInput( void ) {
@@ -5440,6 +5437,9 @@ static void CL_NetFrame( int realMsec, int gameMsec ) {
 	ServerList::instance()->frame();
 }
 
+static int64_t oldKeyboardTimestamp;
+static int64_t oldMouseTimestamp;
+
 void CL_Frame( int realMsec, int gameMsec ) {
 	static int allRealMsec = 0, allGameMsec = 0, extraMsec = 0;
 	static float roundingMsec = 0.0f;
@@ -5468,7 +5468,20 @@ void CL_Frame( int realMsec, int gameMsec ) {
 
 	CL_UpdateSnapshot();
 	CL_AdjustServerTime( gameMsec );
-	CL_UserInputFrame( realMsec );
+
+	const auto currTimestampMicros = (int64_t)Sys_Microseconds();
+	const auto currTimestampMillis = currTimestampMicros / 1000;
+	if( currTimestampMillis > oldKeyboardTimestamp ) {
+		const int64_t keyboardDelta = currTimestampMillis - oldKeyboardTimestamp;
+		const int64_t mouseDelta    = currTimestampMicros - oldMouseTimestamp;
+		oldKeyboardTimestamp = currTimestampMillis;
+		oldMouseTimestamp    = currTimestampMicros;
+
+		CL_UserInputFrame( currTimestampMicros, (int)keyboardDelta, ( (float)mouseDelta * 1e-3f ), realMsec );
+	}
+
+	CL_Cbuf_ExecutePendingCommands();
+
 	CL_NetFrame( realMsec, gameMsec );
 
 	int minMsec;

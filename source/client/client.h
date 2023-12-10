@@ -404,7 +404,7 @@ void CL_GameModule_ConfigString( int number, const wsw::StringView &s );
 
 bool CL_GameModule_NewSnapshot( int pendingSnapshot );
 void CL_GameModule_RenderView();
-void CL_GameModule_InputFrame( int frameTime );
+void CL_GameModule_InputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis );
 void CL_GameModule_ClearInputState( void );
 unsigned CL_GameModule_GetButtonBits( void );
 void CL_GameModule_AddViewAngles( vec3_t viewAngles );
@@ -422,7 +422,7 @@ void CL_SoundModule_Shutdown( bool verbose );
 //
 void CL_InitInput( void );
 void CL_ShutdownInput( void );
-void CL_UserInputFrame( int realMsec );
+void CL_UserInputFrame( int64_t inputTimestamp, int inputDeltaMillis, float mouseDeltaMillis, int clientDeltaMillis );
 void CL_WriteUcmdsToMessage( msg_t *msg );
 
 /**

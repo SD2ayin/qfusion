@@ -92,7 +92,7 @@ void CG_GetEntitySpatilization( int entNum, vec3_t origin, vec3_t velocity );
 float CG_GetSensitivityScale( float sens, float zoomSens );
 bool CG_NewFrameSnap( snapshot_t *frame, snapshot_t *lerpframe );
 void CG_RenderView( int frameTime, int realFrameTime, int64_t realTime, int64_t serverTime, unsigned extrapolationTime );
-void CG_InputFrame( int frameTime );
+void CG_InputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis );
 void CG_ClearInputState();
 unsigned CG_GetButtonBits();
 void CG_AddViewAngles( vec3_t viewAngles );

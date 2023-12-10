@@ -32,9 +32,30 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 using wsw::operator""_asView;
 
-static int64_t cg_inputTime;
-static int cg_inputFrameTime;
+static FloatConfigVar v_yawSpeed( "cl_yawSpeed"_asView, { .byDefault = 140.0f } );
+static FloatConfigVar v_pitchSpeed( "cl_pitchSpeed"_asView, { .byDefault = 150.0f } );
+static FloatConfigVar v_angleSpeedKey( "cl_angleSpeedKey"_asView, { .byDefault = 1.5f } );
+
+static BoolConfigVar v_run( "cl_run"_asView, { .byDefault = true, .flags = CVAR_ARCHIVE } );
+
+static FloatConfigVar v_sensitivity( "sensitivity"_asView, { .byDefault = 3.0f, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_zoomsens( "zoomsens"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_accel( "m_accel"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+static IntConfigVar v_accelStyle( "m_accelStyle"_asView, { .byDefault = 0, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_accelOffset( "m_accelOffset"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_accelPow( "m_accelPow"_asView, { .byDefault = 2.0f, .flags = CVAR_ARCHIVE } );
+static BoolConfigVar v_filter( "m_filter"_asView, { .byDefault = false, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_pitch( "m_pitch"_asView, { .byDefault = 0.022f, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_yaw( "m_yaw"_asView, { .byDefault = 0.022f, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_sensCap( "m_sensCap"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+static int64_t cg_inputTimestamp;
+static int cg_inputKeyboardDelta;
+static float cg_inputMouseDelta;
 static bool cg_inputCenterView;
+
+static float mouse_x = 0, mouse_y = 0;
+static float old_mouse_x = 0, old_mouse_y = 0;
 
 /*
 ===============================================================================
@@ -60,61 +81,98 @@ Key_Event (int key, bool down, int64_t time);
 ===============================================================================
 */
 
-typedef struct {
-	int down[2];            // key nums holding it down
-	int64_t downtime;       // msec timestamp
-	unsigned msec;          // msec down this frame
-	int state;
-} kbutton_t;
+struct CommandKeyState {
+	CommandKeyState *next { nullptr };
+	const char *name { nullptr };
+	int64_t downtime { 0 }; // msec timestamp
+	int keysHeldDown[2] { 0, 0 };   // key nums holding it down
+	unsigned msec { 0 };    // msec down this frame
+	int state { 0 };
+	static inline CommandKeyState *s_head { nullptr };
 
-static kbutton_t in_klook;
-static kbutton_t in_left, in_right, in_forward, in_back;
-static kbutton_t in_lookup, in_lookdown, in_moveleft, in_moveright;
-static kbutton_t in_strafe, in_speed, in_use, in_attack;
-static kbutton_t in_up, in_down;
-static kbutton_t in_special;
-static kbutton_t in_zoom;
+	explicit CommandKeyState( const char *name_ ) noexcept : name( name_ ) {
+		next = s_head;
+		s_head = this;
+	}
 
+	virtual ~CommandKeyState() = default;
 
-static FloatConfigVar v_yawSpeed( "cl_yawSpeed"_asView, { .byDefault = 140.0f } );
-static FloatConfigVar v_pitchSpeed( "cl_pitchSpeed"_asView, { .byDefault = 150.0f } );
-static FloatConfigVar v_angleSpeedKey( "cl_angleSpeedKey"_asView, { .byDefault = 1.5f } );
+	void prepareCommandNames( wsw::StaticString<24> *upName, wsw::StaticString<24> *downName ) const {
+		upName->clear(), downName->clear();
+		*upName << '-' << wsw::StringView( name );
+		*downName << '+' << wsw::StringView( name );
+	}
 
-static BoolConfigVar v_run( "cl_run"_asView, { .byDefault = true, .flags = CVAR_ARCHIVE } );
+	virtual void registerCommandCallbacks( wsw::StringView upName, wsw::StringView downName ) = 0;
 
-static FloatConfigVar v_sensitivity( "sensitivity"_asView, { .byDefault = 3.0f, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_zoomsens( "zoomsens"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_accel( "m_accel"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-static IntConfigVar v_accelStyle( "m_accelStyle"_asView, { .byDefault = 0, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_accelOffset( "m_accelOffset"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_accelPow( "m_accelPow"_asView, { .byDefault = 2.0f, .flags = CVAR_ARCHIVE } );
-static BoolConfigVar v_filter( "m_filter"_asView, { .byDefault = false, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_pitch( "m_pitch"_asView, { .byDefault = 0.022f, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_yaw( "m_yaw"_asView, { .byDefault = 0.022f, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_sensCap( "m_sensCap"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+	void registerCommands() {
+		wsw::StaticString<24> upName, downName;
+		prepareCommandNames( &upName, &downName );
+		registerCommandCallbacks( upName.asView(), downName.asView() );
+	}
 
-/*
-* CG_KeyDown
-*/
-static void CG_KeyDown( kbutton_t *b, const CmdArgs &cmdArgs ) {
+	void unregisterCommands() {
+		wsw::StaticString<24> upName, downName;
+		prepareCommandNames( &upName, &downName );
+		CL_Cmd_Unregister( upName.asView() );
+		CL_Cmd_Unregister( downName.asView() );
+	}
+
+	void handleUpCmd( const CmdArgs & );
+	void handleDownCmd( const CmdArgs & );
+};
+
+// This is a hack to generate different function pointers for registerCommandCallbacks() method.
+// Command handling does not currenly accept anything besides free function pointers,
+// and using std::function<> should be discouraged.
+// TODO: Allow passing user pointers during command registration.
+
+template <unsigned>
+struct CommandKeyState_ : public CommandKeyState {
+	explicit CommandKeyState_( const char *name_ ) noexcept : CommandKeyState( name_ ) {}
+	void registerCommandCallbacks( wsw::StringView upName, wsw::StringView downName ) override {
+		static CommandKeyState *myInstance = this;
+		static CmdFunc upFn = []( const CmdArgs &cmdArgs ) { myInstance->handleUpCmd( cmdArgs ); };
+		static CmdFunc downFn = []( const CmdArgs &cmdArgs ) { myInstance->handleDownCmd( cmdArgs ); };
+		CL_Cmd_Register( upName, upFn );
+		CL_Cmd_Register( downName, downFn );
+	}
+};
+
+static CommandKeyState_<0> in_klook( "klook" );
+static CommandKeyState_<1> in_left( "left" );
+static CommandKeyState_<2> in_right( "right" );
+static CommandKeyState_<3> in_forward( "forward" );
+static CommandKeyState_<4> in_back( "back" );
+static CommandKeyState_<5> in_lookup( "lookup" );
+static CommandKeyState_<6> in_lookdown( "lookdown" );
+static CommandKeyState_<7> in_moveleft( "moveleft" );
+static CommandKeyState_<8> in_moveright( "moveright" );
+static CommandKeyState_<9> in_strafe( "strafe" );
+static CommandKeyState_<10> in_speed( "speed" );
+static CommandKeyState_<11> in_use( "use" );
+static CommandKeyState_<12> in_attack( "attack" );
+static CommandKeyState_<13> in_up( "moveup" );
+static CommandKeyState_<14> in_down( "movedown" );
+static CommandKeyState_<15> in_special( "special" );
+static CommandKeyState_<16> in_zoom( "zoom" );
+
+static void CG_KeyDown( CommandKeyState *b, const CmdArgs &cmdArgs ) {
 	int k;
-	const char *c;
-
-	c = Cmd_Argv( 1 );
-	if( c[0] ) {
+	if( const char *c = Cmd_Argv( 1 ); c[0] ) {
 		k = atoi( c );
 	} else {
 		k = -1; // typed manually at the console for continuous down
-
 	}
-	if( k == b->down[0] || k == b->down[1] ) {
+
+	if( k == b->keysHeldDown[0] || k == b->keysHeldDown[1] ) {
 		return; // repeating key
-
 	}
-	if( !b->down[0] ) {
-		b->down[0] = k;
-	} else if( !b->down[1] ) {
-		b->down[1] = k;
+
+	if( !b->keysHeldDown[0] ) {
+		b->keysHeldDown[0] = k;
+	} else if( !b->keysHeldDown[1] ) {
+		b->keysHeldDown[1] = k;
 	} else {
 		cgWarning() << "Three keys down for a button!";
 		return;
@@ -122,53 +180,46 @@ static void CG_KeyDown( kbutton_t *b, const CmdArgs &cmdArgs ) {
 
 	if( b->state & 1 ) {
 		return; // still down
-
 	}
+
 	// save timestamp
-	c = Cmd_Argv( 2 );
-	b->downtime = atoi( c );
+	b->downtime = atoi( Cmd_Argv( 2 ) );
 	if( !b->downtime ) {
-		b->downtime = cg_inputTime - 100;
+		b->downtime = cg_inputTimestamp - 100;
 	}
 
 	b->state |= 1 + 2; // down + impulse down
 }
 
-/*
-* CG_KeyUp
-*/
-static void CG_KeyUp( kbutton_t *b, const CmdArgs &cmdArgs ) {
+static void CG_KeyUp( CommandKeyState *b, const CmdArgs &cmdArgs ) {
 	int k;
-	const char *c;
-	int uptime;
 
-	c = Cmd_Argv( 1 );
-	if( c[0] ) {
+	if( const char *c = Cmd_Argv( 1 ); c[0] ) {
 		k = atoi( c );
 	} else { // typed manually at the console, assume for unsticking, so clear all
-		b->down[0] = b->down[1] = 0;
+		b->keysHeldDown[0] = b->keysHeldDown[1] = 0;
 		b->state = 4; // impulse up
 		return;
 	}
 
-	if( b->down[0] == k ) {
-		b->down[0] = 0;
-	} else if( b->down[1] == k ) {
-		b->down[1] = 0;
+	if( b->keysHeldDown[0] == k ) {
+		b->keysHeldDown[0] = 0;
+	} else if( b->keysHeldDown[1] == k ) {
+		b->keysHeldDown[1] = 0;
 	} else {
 		return; // key up without corresponding down (menu pass through)
 	}
-	if( b->down[0] || b->down[1] ) {
-		return; // some other key is still holding it down
 
+	if( b->keysHeldDown[0] || b->keysHeldDown[1] ) {
+		return; // some other key is still holding it down
 	}
+
 	if( !( b->state & 1 ) ) {
 		return; // still up (this should not happen)
-
 	}
+
 	// save timestamp
-	c = Cmd_Argv( 2 );
-	uptime = atoi( c );
+	const int uptime = atoi( Cmd_Argv( 2 ) );
 	if( uptime ) {
 		b->msec += uptime - b->downtime;
 	} else {
@@ -179,78 +230,34 @@ static void CG_KeyUp( kbutton_t *b, const CmdArgs &cmdArgs ) {
 	b->state |= 4;  // impulse up
 }
 
-static void IN_KLookDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_klook, cmdArgs ); }
-static void IN_KLookUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_klook, cmdArgs ); }
-static void IN_UpDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_up, cmdArgs ); }
-static void IN_UpUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_up, cmdArgs ); }
-static void IN_DownDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_down, cmdArgs ); }
-static void IN_DownUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_down, cmdArgs ); }
-static void IN_LeftDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_left, cmdArgs ); }
-static void IN_LeftUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_left, cmdArgs ); }
-static void IN_RightDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_right, cmdArgs ); }
-static void IN_RightUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_right, cmdArgs ); }
-static void IN_ForwardDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_forward, cmdArgs ); }
-static void IN_ForwardUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_forward, cmdArgs ); }
-static void IN_BackDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_back, cmdArgs ); }
-static void IN_BackUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_back, cmdArgs ); }
-static void IN_LookupDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_lookup, cmdArgs ); }
-static void IN_LookupUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_lookup, cmdArgs ); }
-static void IN_LookdownDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_lookdown, cmdArgs ); }
-static void IN_LookdownUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_lookdown, cmdArgs ); }
-static void IN_MoveleftDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_moveleft, cmdArgs ); }
-static void IN_MoveleftUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_moveleft, cmdArgs ); }
-static void IN_MoverightDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_moveright, cmdArgs ); }
-static void IN_MoverightUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_moveright, cmdArgs ); }
-static void IN_SpeedDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_speed, cmdArgs ); }
-static void IN_SpeedUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_speed, cmdArgs ); }
-static void IN_StrafeDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_strafe, cmdArgs ); }
-static void IN_StrafeUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_strafe, cmdArgs ); }
-static void IN_AttackDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_attack, cmdArgs ); }
-static void IN_AttackUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_attack, cmdArgs ); }
-static void IN_UseDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_use, cmdArgs ); }
-static void IN_UseUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_use, cmdArgs ); }
-static void IN_SpecialDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_special, cmdArgs ); }
-static void IN_SpecialUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_special, cmdArgs ); }
-static void IN_ZoomDown( const CmdArgs &cmdArgs ) { CG_KeyDown( &in_zoom, cmdArgs ); }
-static void IN_ZoomUp( const CmdArgs &cmdArgs ) { CG_KeyUp( &in_zoom, cmdArgs ); }
+void CommandKeyState::handleUpCmd( const CmdArgs &cmdArgs ) { CG_KeyUp( this, cmdArgs ); }
+void CommandKeyState::handleDownCmd( const CmdArgs &cmdArgs ) { CG_KeyDown( this, cmdArgs ); }
 
-
-/*
-* CG_KeyState
-*/
-static float CG_KeyState( kbutton_t *key ) {
-	float val;
-	int msec;
-
+static float CG_KeyState( CommandKeyState *key ) {
 	key->state &= 1; // clear impulses
 
-	msec = key->msec;
+	int msec = (int)key->msec;
 	key->msec = 0;
 
 	if( key->state ) {
 		// still down
-		msec += cg_inputTime - key->downtime;
-		key->downtime = cg_inputTime;
+		msec += (int)( cg_inputTimestamp - key->downtime );
+		key->downtime = cg_inputTimestamp;
 	}
 
-	if( !cg_inputFrameTime )
-		return 0;
+	if( cg_inputKeyboardDelta > 0 ) {
+		return wsw::clamp( (float) msec / (float)cg_inputKeyboardDelta, 0.0f, 1.0f );
+	}
 
-	val = (float) msec / (float)cg_inputFrameTime;
-
-	return bound( 0, val, 1 );
+	return 0;
 }
 
-/*
-* CG_AddKeysViewAngles
-*/
 static void CG_AddKeysViewAngles( vec3_t viewAngles ) {
 	float speed;
-
 	if( in_speed.state & 1 ) {
-		speed = ( (float)cg_inputFrameTime * 0.001f ) * v_angleSpeedKey.get();
+		speed = ( (float)cg_inputKeyboardDelta * 0.001f ) * v_angleSpeedKey.get();
 	} else {
-		speed = (float)cg_inputFrameTime * 0.001f;
+		speed = (float)cg_inputKeyboardDelta * 0.001f;
 	}
 
 	if( !( in_strafe.state & 1 ) ) {
@@ -266,12 +273,7 @@ static void CG_AddKeysViewAngles( vec3_t viewAngles ) {
 	viewAngles[PITCH] += speed * v_pitchSpeed.get() * CG_KeyState( &in_lookdown );
 }
 
-/*
-* CG_AddKeysMovement
-*/
 static void CG_AddKeysMovement( vec3_t movement ) {
-	float down;
-
 	if( in_strafe.state & 1 ) {
 		movement[0] += CG_KeyState( &in_right );
 		movement[0] -= CG_KeyState( &in_left );
@@ -286,16 +288,12 @@ static void CG_AddKeysMovement( vec3_t movement ) {
 	}
 
 	movement[2] += CG_KeyState( &in_up );
-	down = CG_KeyState( &in_down );
-	if( down > movement[2] ) {
+	if( const float down = CG_KeyState( &in_down ); down > movement[2] ) {
 		movement[2] -= down;
 	}
 }
 
-/*
-* CG_GetButtonBitsFromKeys
-*/
-unsigned int CG_GetButtonBitsFromKeys( void ) {
+unsigned CG_GetButtonBits() {
 	int buttons = 0;
 
 	// figure button bits
@@ -327,40 +325,21 @@ unsigned int CG_GetButtonBitsFromKeys( void ) {
 	return buttons;
 }
 
-/*
-===============================================================================
-
-MOUSE
-
-===============================================================================
-*/
-
-static float mouse_x = 0, mouse_y = 0;
-
-/*
-* CG_MouseMove
-*/
 void CG_MouseMove( int mx, int my ) {
-	static float old_mouse_x = 0, old_mouse_y = 0;
-	float accelSensitivity;
-
-	// mouse filtering
 	if( v_filter.get() ) {
-		mouse_x = ( mx + old_mouse_x ) * 0.5;
-		mouse_y = ( my + old_mouse_y ) * 0.5;
+		mouse_x = 0.5f * ( (float)mx + old_mouse_x );
+		mouse_y = 0.5f * ( (float)my + old_mouse_y );
 	} else {
-		mouse_x = mx;
-		mouse_y = my;
+		mouse_x = (float)mx;
+		mouse_y = (float)my;
 	}
 
-	old_mouse_x = mx;
-	old_mouse_y = my;
+	old_mouse_x = (float)mx;
+	old_mouse_y = (float)my;
 
-	accelSensitivity = v_sensitivity.get();
+	float resultingSensitivity = v_sensitivity.get();
 
-	if( v_accel.get() != 0.0f && cg_inputFrameTime != 0 ) {
-		float rate;
-
+	if( v_accel.get() != 0.0f && cg_inputMouseDelta != 0.0f ) {
 		// QuakeLive-style mouse acceleration, ported from ioquake3
 		// original patch by Gabriel Schnoering and TTimo
 		if( v_accelStyle.get() == 1 ) {
@@ -372,257 +351,136 @@ void CG_MouseMove( int mx, int my ) {
 			// m_accelOffset is the rate for which the acceleration will have doubled the non accelerated amplification
 			// NOTE: decouple the config cvars for independent acceleration setup along X and Y?
 
-			base[0] = (float) ( abs( mx ) ) / (float) cg_inputFrameTime;
-			base[1] = (float) ( abs( my ) ) / (float) cg_inputFrameTime;
+			base[0] = (float) ( abs( mx ) ) / (float) cg_inputMouseDelta;
+			base[1] = (float) ( abs( my ) ) / (float) cg_inputMouseDelta;
 			power[0] = powf( base[0] / v_accelOffset.get(), v_accel.get() );
 			power[1] = powf( base[1] / v_accelOffset.get(), v_accel.get() );
 
 			mouse_x = ( mouse_x + ( ( mouse_x < 0 ) ? -power[0] : power[0] ) * v_accelOffset.get() );
 			mouse_y = ( mouse_y + ( ( mouse_y < 0 ) ? -power[1] : power[1] ) * v_accelOffset.get() );
 		} else if( v_accelStyle.get() == 2 ) {
-			float accelOffset, accelPow;
-
 			// ch : similar to normal acceleration with offset and variable pow mechanisms
 
 			// sanitize values
-			accelPow = v_accelPow.get() > 1.0 ? v_accelPow.get() : 2.0;
-			accelOffset = v_accelOffset.get() >= 0.0 ? v_accelOffset.get() : 0.0;
+			const float accelPow    = v_accelPow.get() > 1.0f ? v_accelPow.get() : 2.0f;
+			const float accelOffset = v_accelOffset.get() >= 0.0f ? v_accelOffset.get() : 0.0f;
 
-			rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputFrameTime;
+			float rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
 			rate -= accelOffset;
 			if( rate < 0 ) {
 				rate = 0.0;
 			}
+
 			// ch : TODO sens += pow( rate * m_accel->value, m_accelPow->value - 1.0 )
-			accelSensitivity += pow( rate * v_accel.get(), accelPow - 1.0 );
+			resultingSensitivity += std::pow( rate * v_accel.get(), accelPow - 1.0f );
 
 			// TODO : move this outside of this branch?
-			if( v_sensCap.get() > 0 && accelSensitivity > v_sensCap.get() ) {
-				accelSensitivity = v_sensCap.get();
+			if( v_sensCap.get() > 0 && resultingSensitivity > v_sensCap.get() ) {
+				resultingSensitivity = v_sensCap.get();
 			}
 		} else {
-			rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputFrameTime;
-			accelSensitivity += rate * v_accel.get();
+			float rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
+			resultingSensitivity += rate * v_accel.get();
 		}
 	}
 
-	accelSensitivity *= CG_GetSensitivityScale( v_sensitivity.get(), v_zoomsens.get() );
+	resultingSensitivity *= CG_GetSensitivityScale( v_sensitivity.get(), v_zoomsens.get() );
 
-	mouse_x *= accelSensitivity;
-	mouse_y *= accelSensitivity;
+	mouse_x *= resultingSensitivity;
+	mouse_y *= resultingSensitivity;
 }
 
-/**
-* Adds view rotation from mouse.
-*
-* @param viewAngles view angles to modify
-*/
 static void CG_AddMouseViewAngles( vec3_t viewAngles ) {
-	if( !mouse_x && !mouse_y ) {
-		return;
-	}
-
 	// add mouse X/Y movement to cmd
-	viewAngles[YAW] -= v_yaw.get() * mouse_x;
-	viewAngles[PITCH] += v_pitch.get() * mouse_y;
+	if( mouse_x != 0.0f ) {
+		viewAngles[YAW] -= v_yaw.get() * mouse_x;
+	}
+	if( mouse_y != 0.0f ) {
+		viewAngles[PITCH] += v_pitch.get() * mouse_y;
+	}
 }
 
-/*
-===============================================================================
-
-COMMON
-
-===============================================================================
-*/
-
-/*
-* CG_CenterView
-*/
 static void CG_CenterView( const CmdArgs & ) {
 	cg_inputCenterView = true;
 }
 
-/*
-* CG_InputInit
-*/
-void CG_InitInput( void ) {
-	CL_Cmd_Register( "+moveup"_asView, IN_UpDown );
-	CL_Cmd_Register( "-moveup"_asView, IN_UpUp );
-	CL_Cmd_Register( "+movedown"_asView, IN_DownDown );
-	CL_Cmd_Register( "-movedown"_asView, IN_DownUp );
-	CL_Cmd_Register( "+left"_asView, IN_LeftDown );
-	CL_Cmd_Register( "-left"_asView, IN_LeftUp );
-	CL_Cmd_Register( "+right"_asView, IN_RightDown );
-	CL_Cmd_Register( "-right"_asView, IN_RightUp );
-	CL_Cmd_Register( "+forward"_asView, IN_ForwardDown );
-	CL_Cmd_Register( "-forward"_asView, IN_ForwardUp );
-	CL_Cmd_Register( "+back"_asView, IN_BackDown );
-	CL_Cmd_Register( "-back"_asView, IN_BackUp );
-	CL_Cmd_Register( "+lookup"_asView, IN_LookupDown );
-	CL_Cmd_Register( "-lookup"_asView, IN_LookupUp );
-	CL_Cmd_Register( "+lookdown"_asView, IN_LookdownDown );
-	CL_Cmd_Register( "-lookdown"_asView, IN_LookdownUp );
-	CL_Cmd_Register( "+strafe"_asView, IN_StrafeDown );
-	CL_Cmd_Register( "-strafe"_asView, IN_StrafeUp );
-	CL_Cmd_Register( "+moveleft"_asView, IN_MoveleftDown );
-	CL_Cmd_Register( "-moveleft"_asView, IN_MoveleftUp );
-	CL_Cmd_Register( "+moveright"_asView, IN_MoverightDown );
-	CL_Cmd_Register( "-moveright"_asView, IN_MoverightUp );
-	CL_Cmd_Register( "+speed"_asView, IN_SpeedDown );
-	CL_Cmd_Register( "-speed"_asView, IN_SpeedUp );
-	CL_Cmd_Register( "+attack"_asView, IN_AttackDown );
-	CL_Cmd_Register( "-attack"_asView, IN_AttackUp );
-	CL_Cmd_Register( "+use"_asView, IN_UseDown );
-	CL_Cmd_Register( "-use"_asView, IN_UseUp );
-	CL_Cmd_Register( "+klook"_asView, IN_KLookDown );
-	CL_Cmd_Register( "-klook"_asView, IN_KLookUp );
-	// wsw
-	CL_Cmd_Register( "+special"_asView, IN_SpecialDown );
-	CL_Cmd_Register( "-special"_asView, IN_SpecialUp );
-	CL_Cmd_Register( "+zoom"_asView, IN_ZoomDown );
-	CL_Cmd_Register( "-zoom"_asView, IN_ZoomUp );
+void CG_InitInput() {
+	for( CommandKeyState *commandKeyState = CommandKeyState::s_head; commandKeyState; commandKeyState = commandKeyState->next ) {
+		commandKeyState->registerCommands();
+	}
 
 	CL_Cmd_Register( "centerview"_asView, CG_CenterView );
 }
 
-/*
-* CG_ShutdownInput
-*/
-void CG_ShutdownInput( void ) {
-	CL_Cmd_Unregister( "+moveup"_asView );
-	CL_Cmd_Unregister( "-moveup"_asView );
-	CL_Cmd_Unregister( "+movedown"_asView );
-	CL_Cmd_Unregister( "-movedown"_asView );
-	CL_Cmd_Unregister( "+left"_asView );
-	CL_Cmd_Unregister( "-left"_asView );
-	CL_Cmd_Unregister( "+right"_asView );
-	CL_Cmd_Unregister( "-right"_asView );
-	CL_Cmd_Unregister( "+forward"_asView );
-	CL_Cmd_Unregister( "-forward"_asView );
-	CL_Cmd_Unregister( "+back"_asView );
-	CL_Cmd_Unregister( "-back"_asView );
-	CL_Cmd_Unregister( "+lookup"_asView );
-	CL_Cmd_Unregister( "-lookup"_asView );
-	CL_Cmd_Unregister( "+lookdown"_asView );
-	CL_Cmd_Unregister( "-lookdown"_asView );
-	CL_Cmd_Unregister( "+strafe"_asView );
-	CL_Cmd_Unregister( "-strafe"_asView );
-	CL_Cmd_Unregister( "+moveleft"_asView );
-	CL_Cmd_Unregister( "-moveleft"_asView );
-	CL_Cmd_Unregister( "+moveright"_asView );
-	CL_Cmd_Unregister( "-moveright"_asView );
-	CL_Cmd_Unregister( "+speed"_asView );
-	CL_Cmd_Unregister( "-speed"_asView );
-	CL_Cmd_Unregister( "+attack"_asView );
-	CL_Cmd_Unregister( "-attack"_asView );
-	CL_Cmd_Unregister( "+use"_asView );
-	CL_Cmd_Unregister( "-use"_asView );
-	CL_Cmd_Unregister( "+klook"_asView );
-	CL_Cmd_Unregister( "-klook"_asView );
-	// wsw
-	CL_Cmd_Unregister( "+special"_asView );
-	CL_Cmd_Unregister( "-special"_asView );
-	CL_Cmd_Unregister( "+zoom"_asView );
-	CL_Cmd_Unregister( "-zoom"_asView );
+void CG_ShutdownInput() {
+	for( CommandKeyState *commandKeyState = CommandKeyState::s_head; commandKeyState; commandKeyState = commandKeyState->next ) {
+		commandKeyState->unregisterCommands();
+	}
 
 	CL_Cmd_Unregister( "centerview"_asView );
 }
 
-/*
-* CG_GetButtonBits
-*/
-unsigned int CG_GetButtonBits( void ) {
-	return CG_GetButtonBitsFromKeys();
-}
-
-/**
-* Adds view rotation from all kinds of input devices.
-*
-* @param viewAngles view angles to modify
-* @param flipped    horizontal flipping direction
-*/
 void CG_AddViewAngles( vec3_t viewAngles ) {
-	vec3_t am { 0.0f, 0.0f, 0.0f };
+	vec3_t deltaAngles { 0.0f, 0.0f, 0.0f };
 
-	CG_AddKeysViewAngles( am );
-	CG_AddMouseViewAngles( am );
+	CG_AddKeysViewAngles( deltaAngles );
+	CG_AddMouseViewAngles( deltaAngles );
 
-	VectorAdd( viewAngles, am, viewAngles );
+	VectorAdd( viewAngles, deltaAngles, viewAngles );
 
 	if( cg_inputCenterView ) {
-		viewAngles[PITCH] = -SHORT2ANGLE( cg.predictedPlayerState.pmove.delta_angles[PITCH] );
+		viewAngles[PITCH] = (float)-SHORT2ANGLE( cg.predictedPlayerState.pmove.delta_angles[PITCH] );
 		cg_inputCenterView = false;
 	}
 }
 
-/*
-* CG_AddMovement
-*/
 void CG_AddMovement( vec3_t movement ) {
-	vec3_t dm { 0.0f, 0.0f, 0.0f };
+	vec3_t deltaMovement { 0.0f, 0.0f, 0.0f };
 
-	CG_AddKeysMovement( dm );
+	CG_AddKeysMovement( deltaMovement );
 
-	VectorAdd( movement, dm, movement );
+	VectorAdd( movement, deltaMovement, movement );
 }
 
-/*
-* CG_InputFrame
-*/
-void CG_InputFrame( int frameTime ) {
-	cg_inputTime = Sys_Milliseconds();
-	cg_inputFrameTime = frameTime;
+void CG_InputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis ) {
+	cg_inputTimestamp     = inputTimestamp;
+	cg_inputKeyboardDelta = keyboardDeltaMillis;
+	cg_inputMouseDelta    = mouseDeltaMillis;
 }
 
-/*
-* CG_ClearInputState
-*/
-void CG_ClearInputState( void ) {
-	cg_inputFrameTime = 0;
+void CG_ClearInputState() {
+	cg_inputKeyboardDelta = 0;
+	cg_inputMouseDelta    = 0.0f;
 }
 
-/*
-* CG_GetBoundKeysString
-*/
 void CG_GetBoundKeysString( const char *cmd, char *keys, size_t keysSize ) {
-	int key;
-	int numKeys = 0;
-	const char *keyNames[2];
-	char charKeys[2][2];
-
 	const wsw::StringView cmdView( cmd );
-	memset( charKeys, 0, sizeof( charKeys ) );
+	wsw::StaticString<32> keyNames[2];
 
+	int numKeys = 0;
 	const auto *const bindingsSystem = wsw::cl::KeyBindingsSystem::instance();
 	// TODO: If the routine turns to be really useful,
 	// implement such functionality at the bindings system level
 	// in an optimized fashion instead of doing a loop over all keys here.
-	for( key = 0; key < 256; key++ ) {
-		auto maybeBinding = bindingsSystem->getBindingForKey( key );
-		if( !maybeBinding || !maybeBinding->equalsIgnoreCase( cmdView ) ) {
-			continue;
+	for( int key = 0; key < 256; key++ ) {
+		if( const std::optional<wsw::StringView> maybeBinding = bindingsSystem->getBindingForKey( key ) ) {
+			if( maybeBinding->equalsIgnoreCase( cmdView ) ) {
+				if( const std::optional<wsw::StringView> maybeName = bindingsSystem->getNameForKey( key ) ) {
+					keyNames[numKeys].assign( maybeName->take( keysSize ) );
+					numKeys++;
+					if( numKeys == 2 ) {
+						break;
+					}
+				}
+			}
 		}
-
-		if( ( key >= 'a' ) && ( key <= 'z' ) ) {
-			charKeys[numKeys][0] = key - ( 'a' - 'A' );
-			keyNames[numKeys] = charKeys[numKeys];
-		} else {
-			keyNames[numKeys] = bindingsSystem->getNameForKey( key )->data();
-		}
-
-		numKeys++;
-		if( numKeys == 2 ) {
-			break;
-		}
-	}
-
-	if( !numKeys ) {
-		keyNames[0] = "UNBOUND";
 	}
 
 	if( numKeys == 2 ) {
-		Q_snprintfz( keys, keysSize, "%s or %s", keyNames[0], keyNames[1] );
+		Q_snprintfz( keys, keysSize, "%s or %s", keyNames[0].data(), keyNames[1].data() );
+	} else if( numKeys == 1 ) {
+		Q_strncpyz( keys, keyNames[0].data(), keysSize );
 	} else {
-		Q_strncpyz( keys, keyNames[0], keysSize );
+		Q_strncpyz( keys, "UNBOUND", keysSize );
 	}
 }
