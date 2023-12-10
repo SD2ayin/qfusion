@@ -42,8 +42,8 @@ static FloatConfigVar v_sensitivity( "sensitivity"_asView, { .byDefault = 3.0f, 
 static FloatConfigVar v_zoomsens( "zoomsens"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 static FloatConfigVar v_accel( "m_accel"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 static IntConfigVar v_accelStyle( "m_accelStyle"_asView, { .byDefault = 0, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_accelOffset( "m_accelOffset"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-static FloatConfigVar v_accelPow( "m_accelPow"_asView, { .byDefault = 2.0f, .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_accelOffset( "m_accelOffset"_asView, { .byDefault = 0.0f, .min = inclusive( 0.0f ), .flags = CVAR_ARCHIVE } );
+static FloatConfigVar v_accelPow( "m_accelPow"_asView, { .byDefault = 2.0f, .min = exclusive( 1.0f ), .flags = CVAR_ARCHIVE } );
 static BoolConfigVar v_filter( "m_filter"_asView, { .byDefault = false, .flags = CVAR_ARCHIVE } );
 static FloatConfigVar v_pitch( "m_pitch"_asView, { .byDefault = 0.022f, .flags = CVAR_ARCHIVE } );
 static FloatConfigVar v_yaw( "m_yaw"_asView, { .byDefault = 0.022f, .flags = CVAR_ARCHIVE } );
@@ -318,48 +318,49 @@ void CG_MouseMove( int mx, int my ) {
 
 	float resultingSensitivity = v_sensitivity.get();
 
-	if( v_accel.get() != 0.0f && cg_inputMouseDelta != 0.0f ) {
+	if( const float accel = v_accel.get(); accel != 0.0f && cg_inputMouseDelta != 0.0f ) {
+		// TODO: Enum
+		const int accelStyle = v_accelStyle.get();
 		// QuakeLive-style mouse acceleration, ported from ioquake3
 		// original patch by Gabriel Schnoering and TTimo
-		if( v_accelStyle.get() == 1 ) {
-			float base[2];
-			float power[2];
+		if( accelStyle == 1 ) {
+			const float accelOffset = v_accelOffset.get();
+			assert( accelOffset > 0.0f );
 
 			// sensitivity remains pretty much unchanged at low speeds
 			// m_accel is a power value to how the acceleration is shaped
 			// m_accelOffset is the rate for which the acceleration will have doubled the non accelerated amplification
 			// NOTE: decouple the config cvars for independent acceleration setup along X and Y?
 
-			base[0] = (float) ( abs( mx ) ) / (float) cg_inputMouseDelta;
-			base[1] = (float) ( abs( my ) ) / (float) cg_inputMouseDelta;
-			power[0] = powf( base[0] / v_accelOffset.get(), v_accel.get() );
-			power[1] = powf( base[1] / v_accelOffset.get(), v_accel.get() );
+			const float baseX = (float)( std::abs( mx ) ) / (float)cg_inputMouseDelta;
+			const float baseY = (float)( std::abs( my ) ) / (float)cg_inputMouseDelta;
 
-			mouse_x = ( mouse_x + ( ( mouse_x < 0 ) ? -power[0] : power[0] ) * v_accelOffset.get() );
-			mouse_y = ( mouse_y + ( ( mouse_y < 0 ) ? -power[1] : power[1] ) * v_accelOffset.get() );
-		} else if( v_accelStyle.get() == 2 ) {
+			const float powerX = std::pow( baseX / accelOffset, accel );
+			const float powerY = std::pow( baseY / accelOffset, accel );
+
+			mouse_x = ( mouse_x + std::copysign( mouse_x, powerX ) * accelOffset );
+			mouse_y = ( mouse_y + std::copysign( mouse_y, powerY ) * accelOffset );
+		} else if( accelStyle == 2 ) {
 			// ch : similar to normal acceleration with offset and variable pow mechanisms
 
-			// sanitize values
-			const float accelPow    = v_accelPow.get() > 1.0f ? v_accelPow.get() : 2.0f;
-			const float accelOffset = v_accelOffset.get() >= 0.0f ? v_accelOffset.get() : 0.0f;
+			const float accelPow    = v_accelPow.get();
+			const float accelOffset = v_accelOffset.get();
+			assert( accelPow > 1.0f && accelOffset >= 0.0f );
 
-			float rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
-			rate -= accelOffset;
-			if( rate < 0 ) {
-				rate = 0.0;
-			}
+			float rate = std::sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
+			rate = std::max( 0.0f, rate - accelOffset );
 
 			// ch : TODO sens += pow( rate * m_accel->value, m_accelPow->value - 1.0 )
-			resultingSensitivity += std::pow( rate * v_accel.get(), accelPow - 1.0f );
+			resultingSensitivity += std::pow( rate * accel, accelPow - 1.0f );
 
-			// TODO : move this outside of this branch?
-			if( v_sensCap.get() > 0 && resultingSensitivity > v_sensCap.get() ) {
-				resultingSensitivity = v_sensCap.get();
+			// TODO : move sensCap outside of this branch?
+			const float sensCap = v_sensCap.get();
+			if( sensCap > 0.0f && resultingSensitivity > sensCap ) {
+				resultingSensitivity = sensCap;
 			}
 		} else {
-			const float rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
-			resultingSensitivity += rate * v_accel.get();
+			const float rate = std::sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
+			resultingSensitivity += rate * accel;
 		}
 	}
 
