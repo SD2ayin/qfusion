@@ -23,12 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
 #include "cg_local.h"
-#include "../common/common.h"
 #include "../client/input.h"
 #include "../client/keys.h"
 #include "../client/client.h"
 #include "../common/cmdargs.h"
 #include "../common/configvars.h"
+#include "../common/wswtonum.h"
 
 using wsw::operator""_asView;
 
@@ -82,37 +82,37 @@ Key_Event (int key, bool down, int64_t time);
 */
 
 struct CommandKeyState {
-	CommandKeyState *next { nullptr };
-	const char *name { nullptr };
-	int64_t downtime { 0 }; // msec timestamp
-	int keysHeldDown[2] { 0, 0 };   // key nums holding it down
-	unsigned msec { 0 };    // msec down this frame
-	int state { 0 };
+	CommandKeyState *m_next { nullptr };
+	const char *m_name { nullptr };
+	int64_t m_downtime { 0 }; // msec timestamp
+	int m_keysHeldDown[2] { 0, 0 };   // key nums holding it down
+	unsigned m_msec { 0 };    // msec down this frame
+	unsigned m_state { 0 };
 	static inline CommandKeyState *s_head { nullptr };
 
-	explicit CommandKeyState( const char *name_ ) noexcept : name( name_ ) {
-		next = s_head;
+	explicit CommandKeyState( const char *name ) noexcept : m_name( name ) {
+		m_next = s_head;
 		s_head = this;
 	}
 
 	virtual ~CommandKeyState() = default;
 
-	void prepareCommandNames( wsw::StaticString<24> *upName, wsw::StaticString<24> *downName ) const {
+	void prepareCommandNames( wsw::StaticString<32> *upName, wsw::StaticString<32> *downName ) const {
 		upName->clear(), downName->clear();
-		*upName << '-' << wsw::StringView( name );
-		*downName << '+' << wsw::StringView( name );
+		*upName << '-' << wsw::StringView( m_name );
+		*downName << '+' << wsw::StringView( m_name );
 	}
 
 	virtual void registerCommandCallbacks( wsw::StringView upName, wsw::StringView downName ) = 0;
 
 	void registerCommands() {
-		wsw::StaticString<24> upName, downName;
+		wsw::StaticString<32> upName, downName;
 		prepareCommandNames( &upName, &downName );
 		registerCommandCallbacks( upName.asView(), downName.asView() );
 	}
 
 	void unregisterCommands() {
-		wsw::StaticString<24> upName, downName;
+		wsw::StaticString<32> upName, downName;
 		prepareCommandNames( &upName, &downName );
 		CL_Cmd_Unregister( upName.asView() );
 		CL_Cmd_Unregister( downName.asView() );
@@ -157,92 +157,68 @@ static CommandKeyState_<14> in_down( "movedown" );
 static CommandKeyState_<15> in_special( "special" );
 static CommandKeyState_<16> in_zoom( "zoom" );
 
-static void CG_KeyDown( CommandKeyState *b, const CmdArgs &cmdArgs ) {
-	int k;
-	if( const char *c = Cmd_Argv( 1 ); c[0] ) {
-		k = atoi( c );
-	} else {
-		k = -1; // typed manually at the console for continuous down
+void CommandKeyState::handleDownCmd( const CmdArgs &cmdArgs ) {
+	// On parsing failure, assuming it being typed manually at the console for continuous down
+	const int key = wsw::toNum<int>( cmdArgs[1] ).value_or( -1 );
+	if( key != m_keysHeldDown[0] && key != m_keysHeldDown[1] ) {
+		// If there are free slots for this "down" key
+		if( auto end = m_keysHeldDown + 2, it = std::find( m_keysHeldDown, end, 0 ); it != end ) {
+			*it = key;
+			// If was not down
+			if( !( m_state & 1 ) ) {
+				// Save the timestamp
+				if( const std::optional<int64_t> downtime = wsw::toNum<int64_t>( cmdArgs[2] ) ) {
+					m_downtime = *downtime;
+				} else {
+					m_downtime = cg_inputTimestamp - 100;
+				}
+				m_state |= 1 + 2; // down + impulse down
+			}
+		} else {
+			cgWarning() << "Three keys down for a button!";
+		}
 	}
-
-	if( k == b->keysHeldDown[0] || k == b->keysHeldDown[1] ) {
-		return; // repeating key
-	}
-
-	if( !b->keysHeldDown[0] ) {
-		b->keysHeldDown[0] = k;
-	} else if( !b->keysHeldDown[1] ) {
-		b->keysHeldDown[1] = k;
-	} else {
-		cgWarning() << "Three keys down for a button!";
-		return;
-	}
-
-	if( b->state & 1 ) {
-		return; // still down
-	}
-
-	// save timestamp
-	b->downtime = atoi( Cmd_Argv( 2 ) );
-	if( !b->downtime ) {
-		b->downtime = cg_inputTimestamp - 100;
-	}
-
-	b->state |= 1 + 2; // down + impulse down
 }
 
-static void CG_KeyUp( CommandKeyState *b, const CmdArgs &cmdArgs ) {
-	int k;
-
-	if( const char *c = Cmd_Argv( 1 ); c[0] ) {
-		k = atoi( c );
-	} else { // typed manually at the console, assume for unsticking, so clear all
-		b->keysHeldDown[0] = b->keysHeldDown[1] = 0;
-		b->state = 4; // impulse up
-		return;
-	}
-
-	if( b->keysHeldDown[0] == k ) {
-		b->keysHeldDown[0] = 0;
-	} else if( b->keysHeldDown[1] == k ) {
-		b->keysHeldDown[1] = 0;
+void CommandKeyState::handleUpCmd( const CmdArgs &cmdArgs ) {
+	if( const std::optional<int> key = wsw::toNum<int>( cmdArgs[1] ) ) {
+		// Find slot of this key
+		if( auto end = m_keysHeldDown + 2, it = std::find( m_keysHeldDown, end, *key ); it != end ) {
+			*it = 0;
+			// If it cannot longer be considered down
+			if( !m_keysHeldDown[0] && !m_keysHeldDown[1] ) {
+				// Must be down (should always pass?)
+				if( m_state & 1 ) {
+					// save timestamp
+					if( const std::optional<int64_t> uptime = wsw::toNum<int>( cmdArgs[2] ) ) {
+						m_msec += *uptime - m_downtime;
+					} else {
+						m_msec += 10;
+					}
+					m_state &= ~1; // now up
+					m_state |= 4;  // impulse up
+				}
+			}
+		} else {
+			; // key up without corresponding down (menu pass through) TODO?
+		}
 	} else {
-		return; // key up without corresponding down (menu pass through)
+		// typed manually at the console, assume for unsticking, so clear all
+		m_keysHeldDown[0] = m_keysHeldDown[1] = 0;
+		m_state = 4;
 	}
-
-	if( b->keysHeldDown[0] || b->keysHeldDown[1] ) {
-		return; // some other key is still holding it down
-	}
-
-	if( !( b->state & 1 ) ) {
-		return; // still up (this should not happen)
-	}
-
-	// save timestamp
-	const int uptime = atoi( Cmd_Argv( 2 ) );
-	if( uptime ) {
-		b->msec += uptime - b->downtime;
-	} else {
-		b->msec += 10;
-	}
-
-	b->state &= ~1; // now up
-	b->state |= 4;  // impulse up
 }
-
-void CommandKeyState::handleUpCmd( const CmdArgs &cmdArgs ) { CG_KeyUp( this, cmdArgs ); }
-void CommandKeyState::handleDownCmd( const CmdArgs &cmdArgs ) { CG_KeyDown( this, cmdArgs ); }
 
 static float CG_KeyState( CommandKeyState *key ) {
-	key->state &= 1; // clear impulses
+	key->m_state &= 1; // clear impulses
 
-	int msec = (int)key->msec;
-	key->msec = 0;
+	int msec = (int)key->m_msec;
+	key->m_msec = 0;
 
-	if( key->state ) {
+	if( key->m_state ) {
 		// still down
-		msec += (int)( cg_inputTimestamp - key->downtime );
-		key->downtime = cg_inputTimestamp;
+		msec += (int)( cg_inputTimestamp - key->m_downtime );
+		key->m_downtime = cg_inputTimestamp;
 	}
 
 	if( cg_inputKeyboardDelta > 0 ) {
@@ -254,27 +230,30 @@ static float CG_KeyState( CommandKeyState *key ) {
 
 static void CG_AddKeysViewAngles( vec3_t viewAngles ) {
 	float speed;
-	if( in_speed.state & 1 ) {
+	if( in_speed.m_state & 1 ) {
 		speed = ( (float)cg_inputKeyboardDelta * 0.001f ) * v_angleSpeedKey.get();
 	} else {
 		speed = (float)cg_inputKeyboardDelta * 0.001f;
 	}
 
-	if( !( in_strafe.state & 1 ) ) {
-		viewAngles[YAW] -= speed * v_yawSpeed.get() * CG_KeyState( &in_right );
-		viewAngles[YAW] += speed * v_yawSpeed.get() * CG_KeyState( &in_left );
-	}
-	if( in_klook.state & 1 ) {
-		viewAngles[PITCH] -= speed * v_pitchSpeed.get() * CG_KeyState( &in_forward );
-		viewAngles[PITCH] += speed * v_pitchSpeed.get() * CG_KeyState( &in_back );
+	if( !( in_strafe.m_state & 1 ) ) {
+		const float yawSpeed = speed * v_yawSpeed.get();
+		viewAngles[YAW] -= yawSpeed * CG_KeyState( &in_right );
+		viewAngles[YAW] += yawSpeed * CG_KeyState( &in_left );
 	}
 
-	viewAngles[PITCH] -= speed * v_pitchSpeed.get() * CG_KeyState( &in_lookup );
-	viewAngles[PITCH] += speed * v_pitchSpeed.get() * CG_KeyState( &in_lookdown );
+	const float pitchSpeed = speed * v_pitchSpeed.get();
+	if( in_klook.m_state & 1 ) {
+		viewAngles[PITCH] -= pitchSpeed * CG_KeyState( &in_forward );
+		viewAngles[PITCH] += pitchSpeed * CG_KeyState( &in_back );
+	}
+
+	viewAngles[PITCH] -= pitchSpeed * CG_KeyState( &in_lookup );
+	viewAngles[PITCH] += pitchSpeed * CG_KeyState( &in_lookdown );
 }
 
 static void CG_AddKeysMovement( vec3_t movement ) {
-	if( in_strafe.state & 1 ) {
+	if( in_strafe.m_state & 1 ) {
 		movement[0] += CG_KeyState( &in_right );
 		movement[0] -= CG_KeyState( &in_left );
 	}
@@ -282,7 +261,7 @@ static void CG_AddKeysMovement( vec3_t movement ) {
 	movement[0] += CG_KeyState( &in_moveright );
 	movement[0] -= CG_KeyState( &in_moveleft );
 
-	if( !( in_klook.state & 1 ) ) {
+	if( !( in_klook.m_state & 1 ) ) {
 		movement[1] += CG_KeyState( &in_forward );
 		movement[1] -= CG_KeyState( &in_back );
 	}
@@ -298,29 +277,29 @@ unsigned CG_GetButtonBits() {
 
 	// figure button bits
 
-	if( in_attack.state & 3 ) {
+	if( in_attack.m_state & 3 ) {
 		buttons |= BUTTON_ATTACK;
 	}
-	in_attack.state &= ~2;
+	in_attack.m_state &= ~2;
 
-	if( in_special.state & 3 ) {
+	if( in_special.m_state & 3 ) {
 		buttons |= BUTTON_SPECIAL;
 	}
-	in_special.state &= ~2;
+	in_special.m_state &= ~2;
 
-	if( in_use.state & 3 ) {
+	if( in_use.m_state & 3 ) {
 		buttons |= BUTTON_USE;
 	}
-	in_use.state &= ~2;
+	in_use.m_state &= ~2;
 
-	if( ( in_speed.state & 1 ) ^ !v_run.get() ) {
+	if( ( in_speed.m_state & 1 ) ^ !v_run.get() ) {
 		buttons |= BUTTON_WALK;
 	}
 
-	if( in_zoom.state & 3 ) {
+	if( in_zoom.m_state & 3 ) {
 		buttons |= BUTTON_ZOOM;
 	}
-	in_zoom.state &= ~2;
+	in_zoom.m_state &= ~2;
 
 	return buttons;
 }
@@ -379,7 +358,7 @@ void CG_MouseMove( int mx, int my ) {
 				resultingSensitivity = v_sensCap.get();
 			}
 		} else {
-			float rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
+			const float rate = sqrt( mouse_x * mouse_x + mouse_y * mouse_y ) / (float)cg_inputMouseDelta;
 			resultingSensitivity += rate * v_accel.get();
 		}
 	}
@@ -405,16 +384,16 @@ static void CG_CenterView( const CmdArgs & ) {
 }
 
 void CG_InitInput() {
-	for( CommandKeyState *commandKeyState = CommandKeyState::s_head; commandKeyState; commandKeyState = commandKeyState->next ) {
-		commandKeyState->registerCommands();
+	for( CommandKeyState *state = CommandKeyState::s_head; state; state = state->m_next ) {
+		state->registerCommands();
 	}
 
 	CL_Cmd_Register( "centerview"_asView, CG_CenterView );
 }
 
 void CG_ShutdownInput() {
-	for( CommandKeyState *commandKeyState = CommandKeyState::s_head; commandKeyState; commandKeyState = commandKeyState->next ) {
-		commandKeyState->unregisterCommands();
+	for( CommandKeyState *state = CommandKeyState::s_head; state; state = state->m_next ) {
+		state->unregisterCommands();
 	}
 
 	CL_Cmd_Unregister( "centerview"_asView );
