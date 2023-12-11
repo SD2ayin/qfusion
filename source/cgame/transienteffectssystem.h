@@ -150,7 +150,6 @@ private:
 		AllocMethod allocMethod { nullptr };
 
 		SimulatedHullsSystem::ViewDotFade vertexViewDotFade { SimulatedHullsSystem::ViewDotFade::NoFade };
-		bool useLayer0DrawOnTopHack { false };
 		std::optional<SimulatedHullsSystem::ViewDotFade> overrideLayer0ViewDotFade;
 	};
 
@@ -261,6 +260,8 @@ private:
 
 	// TODO: Replace by a fixed vector/fixed buffer
 	wsw::Vector<uint8_t> m_cachedSmokeBulgeMasksBuffer;
+
+	unsigned m_explosionCompoundMeshCounter { 0 };
 
 	wsw::RandomGenerator m_rng;
 	int64_t m_lastTime { 0 };

@@ -315,6 +315,9 @@ SimulatedHullsSystem::SimulatedHullsSystem() {
 	// TODO: Use the same instance for all effect subsystems
 	m_rng.setSeed( dwordSeed );
 
+	m_storageOfSubmittedMeshOrderDesignators.reserve( kMaxMeshesPerHull * kMaxHullsWithLayers );
+	m_storageOfSubmittedMeshPtrs.reserve( kMaxMeshesPerHull * kMaxHullsWithLayers );
+
 	// TODO: Take care of exception-safety
 	while( !m_freeShapeLists.full() ) {
 		if( auto *shapeList = CM_AllocShapeList( cl.cms ) ) [[likely]] {
@@ -581,7 +584,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 	}
 
 	// Setup layers data
-	assert( hull->numLayers >= 1 && hull->numLayers < 8 );
+	assert( hull->numLayers >= 1 && hull->numLayers <= kMaxHullLayers );
 	for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
 		BaseConcentricSimulatedHull::Layer *layer   = &hull->layers[layerNum];
 		const HullLayerParams *__restrict params    = &layerParams[layerNum];
@@ -595,6 +598,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 		assert( std::fabs( VectorLengthFast( layerBiasDir ) - 1.0f ) < 0.001f );
 
 		layer->finalOffset         = params->finalOffset;
+		layer->drawOrderDesignator = (float)( hull->numLayers - layerNum );
 		layer->colorChangeTimeline = params->colorChangeTimeline;
 
 		std::fill( spikeSpeedBoost, spikeSpeedBoost + verticesSpan.size(), 0.0f );
@@ -701,11 +705,12 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	}
 
 	// Setup layers data
-	assert( hull->numLayers >= 1 && hull->numLayers < 8 );
+	assert( hull->numLayers >= 1 && hull->numLayers <= kMaxHullLayers );
 	for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
-		BaseKeyframedHull::Layer *layer   = &hull->layers[layerNum];
-		layer->offsetKeyframeSet = offsetKeyframeSets[layerNum];
-		vec4_t *const __restrict positions          = layer->vertexPositions;
+		BaseKeyframedHull::Layer *layer    = &hull->layers[layerNum];
+		layer->drawOrderDesignator         = (float)( hull->numLayers - layerNum );
+		layer->offsetKeyframeSet           = offsetKeyframeSets[layerNum];
+		vec4_t *const __restrict positions = layer->vertexPositions;
 
 		for( size_t i = 0; i < verticesSpan.size(); ++i ) {
 
@@ -828,19 +833,45 @@ void SimulatedHullsSystem::calcSmokeSpikeSpeedMask( float *__restrict vertexSpee
 	} while( ++vertexNum < numHullVertices );
 }
 
+auto SimulatedHullsSystem::buildMatchingHullPairs( const BaseKeyframedHull **toonHulls, unsigned numToonHulls,
+												   const BaseConcentricSimulatedHull **fireHulls, unsigned numFireHulls,
+												   wsw::StaticVector<std::optional<uint8_t>, kMaxKeyframedHulls>
+												       *pairIndicesForKeyframedHulls,
+												   wsw::StaticVector<std::optional<uint8_t>, kMaxConcentricHulls>
+												       *pairIndicesForConcentricHulls ) -> unsigned {
+	pairIndicesForKeyframedHulls->clear();
+	pairIndicesForConcentricHulls->clear();
+	pairIndicesForKeyframedHulls->insert( pairIndicesForKeyframedHulls->end(), kMaxKeyframedHulls, std::nullopt );
+	pairIndicesForConcentricHulls->insert( pairIndicesForConcentricHulls->end(), kMaxConcentricHulls, std::nullopt );
+
+	unsigned numMatchedPairs = 0;
+	// Try finding coupled hulls
+	for( unsigned concentricHullIndex = 0; concentricHullIndex < numFireHulls; ++concentricHullIndex ) {
+		const BaseConcentricSimulatedHull *concentricHull = fireHulls[concentricHullIndex];
+		if( concentricHull->compoundMeshKey != 0 ) {
+			for( unsigned keyframedHullIndex = 0; keyframedHullIndex < numToonHulls; ++keyframedHullIndex ) {
+				const BaseKeyframedHull *keyframedHull = toonHulls[keyframedHullIndex];
+				if( concentricHull->compoundMeshKey == keyframedHull->compoundMeshKey ) {
+					( *pairIndicesForConcentricHulls )[concentricHullIndex] = (uint8_t)numMatchedPairs;
+					( *pairIndicesForKeyframedHulls )[keyframedHullIndex]   = (uint8_t)numMatchedPairs;
+					++numMatchedPairs;
+					break;
+				}
+			}
+		}
+	}
+
+	assert( numMatchedPairs <= kMaxToonSmokeHulls && numMatchedPairs <= kMaxFireHulls );
+	return numMatchedPairs;
+}
+
 void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRequest *drawSceneRequest ) {
 	// Limit the time step
 	const float timeDeltaSeconds = 1e-3f * (float)wsw::min<int64_t>( 33, currTime - m_lastTime );
 
-	//constexpr unsigned numRegularHulls = kMaxSmokeHulls + kMaxWaveHulls;
-    constexpr unsigned numRegularHulls = kMaxWaveHulls;
-	wsw::StaticVector<BaseRegularSimulatedHull *, numRegularHulls> activeRegularHulls;
-
-	constexpr unsigned numConcentricHulls = kMaxFireHulls + kMaxFireClusterHulls + kMaxBlastHulls;
-	wsw::StaticVector<BaseConcentricSimulatedHull *, numConcentricHulls> activeConcentricHulls;
-
-	constexpr unsigned numKeyframedHulls = kMaxToonSmokeHulls;
-	wsw::StaticVector<BaseKeyframedHull *, numKeyframedHulls> activeKeyframedHulls;
+	wsw::StaticVector<BaseRegularSimulatedHull *, kMaxRegularHulls> activeRegularHulls;
+	wsw::StaticVector<BaseConcentricSimulatedHull *, kMaxConcentricHulls> activeConcentricHulls;
+	wsw::StaticVector<BaseKeyframedHull *, kMaxKeyframedHulls> activeKeyframedHulls;
 
 	for( FireHull *hull = m_fireHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
 		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
@@ -983,132 +1014,39 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		}
 	}
 
-	for( const BaseConcentricSimulatedHull *__restrict hull: activeConcentricHulls ) {
-		assert( hull->numLayers );
+	// TODO: Track bounds
+	wsw::StaticVector<std::optional<uint8_t>, kMaxKeyframedHulls> pairIndicesForKeyframedHulls;
+	wsw::StaticVector<std::optional<uint8_t>, kMaxConcentricHulls> pairIndicesForConcentricHulls;
+	buildMatchingHullPairs( (const BaseKeyframedHull **)activeKeyframedHulls.data(), activeKeyframedHulls.size(),
+							(const BaseConcentricSimulatedHull **)activeConcentricHulls.data(), activeConcentricHulls.size(),
+							&pairIndicesForKeyframedHulls, &pairIndicesForConcentricHulls );
 
-		unsigned numSubmittedSolidMeshes = 0, numSubmittedCloudMeshes = 0;
-		std::optional<uint8_t> drawOnTopSolidPartIndex, drawOnTopCloudPartIndex;
-		for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
-			BaseConcentricSimulatedHull::Layer *__restrict layer = &hull->layers[layerNum];
+	wsw::StaticVector<unsigned, kMaxKeyframedHulls> meshDataOffsetsForPairs;
+	wsw::StaticVector<uint8_t, kMaxKeyframedHulls> numAddedMeshesForPairs;
+	wsw::StaticVector<std::pair<Vec3, Vec3>, kMaxKeyframedHulls> boundsForPairs;
+	wsw::StaticVector<float, kMaxKeyframedHulls> topAddedLayersForPairs;
 
-			const AppearanceRules *appearanceRules = &hull->appearanceRules;
-			if( layer->overrideAppearanceRules ) {
-				appearanceRules = layer->overrideAppearanceRules;
-			}
+	// We multiply given layer orders by 2 to be able to make distinct orders for solid and cloud meshes
+	constexpr float solidLayerOrderBoost = 0.0f;
+	constexpr float cloudLayerOrderBoost = 1.0f;
 
-			const SolidAppearanceRules *solidAppearanceRules = nullptr;
-			const CloudAppearanceRules *cloudAppearanceRules = nullptr;
-			if( const auto *solidAndCloudRules = std::get_if<SolidAndCloudAppearanceRules>( appearanceRules ) ) {
-				solidAppearanceRules = &solidAndCloudRules->solidRules;
-				cloudAppearanceRules = &solidAndCloudRules->cloudRules;
-			} else {
-				solidAppearanceRules = std::get_if<SolidAppearanceRules>( appearanceRules );
-				cloudAppearanceRules = std::get_if<CloudAppearanceRules>( appearanceRules );
-			}
+	unsigned offsetOfMultilayerMeshData = 0;
 
-			assert( solidAppearanceRules || cloudAppearanceRules );
-			SharedMeshData *const __restrict sharedMeshData = layer->sharedMeshData;
-
-			sharedMeshData->simulatedPositions   = layer->vertexPositions;
-			sharedMeshData->simulatedNormals     = nullptr;
-			sharedMeshData->simulatedColors      = layer->vertexColors;
-
-			sharedMeshData->minZLastFrame        = 0.0f;
-			sharedMeshData->maxZLastFrame        = 0.0f;
-			sharedMeshData->minFadedOutAlpha     = layer->overrideMinFadedOutAlpha.value_or( hull->minFadedOutAlpha );
-			sharedMeshData->viewDotFade          = layer->overrideHullFade.value_or( hull->vertexViewDotFade );
-			sharedMeshData->zFade                = ZFade::NoFade;
-			sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
-			sharedMeshData->tesselateClosestLod  = true;
-			sharedMeshData->lerpNextLevelColors  = true;
-
-			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
-			sharedMeshData->cachedOverrideColorsSpanInBuffer = std::nullopt;
-			sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
-			sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
-
-			if( solidAppearanceRules ) [[likely]] {
-				HullSolidDynamicMesh *__restrict mesh = layer->submittedSolidMesh;
-
-				Vector4Copy( layer->mins, mesh->cullMins );
-				Vector4Copy( layer->maxs, mesh->cullMaxs );
-				
-				mesh->material            = nullptr;
-				mesh->applyVertexDynLight = hull->applyVertexDynLight;
-				mesh->m_shared            = sharedMeshData;
-				
-				if( layer->useDrawOnTopHack ) [[unlikely]] {
-					assert( drawOnTopSolidPartIndex == std::nullopt );
-					drawOnTopSolidPartIndex = (uint8_t)numSubmittedSolidMeshes;
-				}
-
-				hull->submittedSolidMeshesBuffer[numSubmittedSolidMeshes++] = mesh;
-			}
-
-			if( cloudAppearanceRules ) [[unlikely]] {
-				assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
-				assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
-
-				const float hullLifetimeFrac = (float)( currTime - hull->spawnTime ) * Q_Rcp( (float)hull->lifetime );
-
-				for( size_t meshNum = 0; meshNum < cloudAppearanceRules->spanOfMeshProps.size(); ++meshNum ) {
-					const CloudMeshProps &__restrict meshProps  = cloudAppearanceRules->spanOfMeshProps[meshNum];
-					HullCloudDynamicMesh *const __restrict mesh = layer->submittedCloudMeshes[meshNum];
-
-					mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
-					if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
-						mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
-						if( mesh->m_alphaScale >= ( 1.0f / 255.0f ) ) {
-							Vector4Copy( layer->mins, mesh->cullMins );
-							Vector4Copy( layer->maxs, mesh->cullMaxs );
-
-							Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
-
-							mesh->material            = meshProps.material;
-							mesh->applyVertexDynLight = hull->applyVertexDynLight;
-							mesh->m_shared            = sharedMeshData;
-							mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
-							mesh->m_applyRotation     = meshProps.applyRotation;
-
-							mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
-							mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
-							mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
-
-							if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
-								const auto randomWord          = (uint16_t)m_rng.next();
-								mesh->m_speedIndexShiftInTable = ( randomWord >> 0 ) & 0xFF;
-								mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
-							}
-
-							if( layer->useDrawOnTopHack ) [[unlikely]] {
-								assert( drawOnTopCloudPartIndex == std::nullopt );
-								drawOnTopCloudPartIndex = (uint8_t)numSubmittedCloudMeshes;
-							}
-
-							hull->submittedCloudMeshesBuffer[numSubmittedCloudMeshes++] = mesh;
-						}
-					}
-				}
-			}
-		}
-
-		if( numSubmittedSolidMeshes ) [[likely]] {
-			drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs,
-													  hull->submittedSolidMeshesBuffer, numSubmittedSolidMeshes,
-													  drawOnTopSolidPartIndex );
-		}
-		if( numSubmittedCloudMeshes ) [[unlikely]] {
-			drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs,
-													  hull->submittedCloudMeshesBuffer, numSubmittedCloudMeshes,
-													  drawOnTopCloudPartIndex );
-		}
-	}
-
+	// TODO: zipWithIndex?
+	unsigned keyframedHullIndex = 0;
 	for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls ) {
 		assert( hull->numLayers );
 
-		unsigned numSubmittedSolidMeshes = 0, numSubmittedCloudMeshes = 0;
-		std::optional<uint8_t> drawOnTopSolidPartIndex, drawOnTopCloudPartIndex;
+		const DynamicMesh **submittedMeshesBuffer = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
+		float *const submittedOrderDesignators    = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
+
+		const bool isCoupledWithConcentricHull = pairIndicesForKeyframedHulls[keyframedHullIndex] != std::nullopt;
+		if( isCoupledWithConcentricHull ) {
+			meshDataOffsetsForPairs.push_back( offsetOfMultilayerMeshData );
+			topAddedLayersForPairs.push_back( 0.0f );
+		}
+
+		unsigned numMeshesToSubmit = 0;
 		for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
 			BaseKeyframedHull::Layer *__restrict layer = &hull->layers[layerNum];
 
@@ -1166,12 +1104,16 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				// TODO: Restore this functionality if it could be useful for toon hull
 				//mesh->applyVertexDynLight = hull->applyVertexDynLight;
 
-				if( layer->useDrawOnTopHack ) [[unlikely]] {
-					assert( drawOnTopSolidPartIndex == std::nullopt );
-					drawOnTopSolidPartIndex = (uint8_t)numSubmittedSolidMeshes;
+				const float drawOrderDesignator = 2.0f * layer->drawOrderDesignator + solidLayerOrderBoost;
+
+				submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+
+				if( isCoupledWithConcentricHull ) {
+					topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
 				}
 
-				hull->submittedSolidMeshesBuffer[numSubmittedSolidMeshes++] = mesh;
+				numMeshesToSubmit++;
 			}
 
 			if( cloudAppearanceRules ) [[unlikely]] {
@@ -1209,28 +1151,212 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 								mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
 							}
 
-							if( layer->useDrawOnTopHack ) [[unlikely]] {
-								assert( drawOnTopCloudPartIndex == std::nullopt );
-								drawOnTopCloudPartIndex = (uint8_t)numSubmittedCloudMeshes;
+							const float drawOrderDesignator = 2.0f * layer->drawOrderDesignator + cloudLayerOrderBoost;
+
+							submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+							submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+
+							if( isCoupledWithConcentricHull ) {
+								topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
 							}
 
-							hull->submittedCloudMeshesBuffer[numSubmittedCloudMeshes++] = mesh;
+							numMeshesToSubmit++;
 						}
 					}
 				}
 			}
 		}
 
-		if( numSubmittedSolidMeshes ) [[likely]] {
-			drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs,
-													  hull->submittedSolidMeshesBuffer, numSubmittedSolidMeshes,
-													  drawOnTopSolidPartIndex );
+		if( numMeshesToSubmit ) [[likely]] {
+			assert( numMeshesToSubmit <= kMaxMeshesPerHull );
+			// Submit it right now, otherwise postpone submission to processing of concentric hulls
+			if( !isCoupledWithConcentricHull ) {
+				drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs, submittedMeshesBuffer,
+														  numMeshesToSubmit, submittedOrderDesignators );
+			}
 		}
-		if( numSubmittedCloudMeshes ) [[unlikely]] {
-			drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs,
-													  hull->submittedCloudMeshesBuffer, numSubmittedCloudMeshes,
-													  drawOnTopCloudPartIndex );
+
+		// Push the number of layers (even if we did not submit anything) to keep the addressing by pair index valid
+		if( isCoupledWithConcentricHull ) {
+			numAddedMeshesForPairs.push_back( numMeshesToSubmit );
+			boundsForPairs.push_back( std::make_pair( Vec3( hull->mins ), Vec3( hull->maxs ) ) );
 		}
+
+		keyframedHullIndex++;
+
+		if( isCoupledWithConcentricHull ) {
+			// This leaves a sufficient space for fire hull layers
+			offsetOfMultilayerMeshData += kMaxMeshesPerHull;
+		} else {
+			offsetOfMultilayerMeshData += numMeshesToSubmit;
+		}
+	}
+
+	assert( meshDataOffsetsForPairs.size() == numAddedMeshesForPairs.size() );
+	assert( meshDataOffsetsForPairs.size() == boundsForPairs.size() );
+	assert( meshDataOffsetsForPairs.size() == topAddedLayersForPairs.size() );
+
+	unsigned concentricHullIndex = 0;
+	for( const BaseConcentricSimulatedHull *__restrict hull: activeConcentricHulls ) {
+		assert( hull->numLayers );
+
+		float startFromOrder;
+		const DynamicMesh **submittedMeshesBuffer;
+		float *submittedOrderDesignators;
+		if( const std::optional<uint8_t> pairIndex = pairIndicesForKeyframedHulls[concentricHullIndex] ) {
+			const unsigned meshDataOffset     = meshDataOffsetsForPairs[*pairIndex];
+			const unsigned numAddedToonMeshes = numAddedMeshesForPairs[*pairIndex];
+			submittedMeshesBuffer             = m_storageOfSubmittedMeshPtrs.get( 0 ) + meshDataOffset + numAddedToonMeshes;
+			submittedOrderDesignators         = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + meshDataOffset + numAddedToonMeshes;
+			startFromOrder                    = topAddedLayersForPairs[*pairIndex];
+		} else {
+			submittedMeshesBuffer     = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
+			submittedOrderDesignators = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
+			startFromOrder            = 0.0f;
+		}
+
+		unsigned numMeshesToSubmit = 0;
+		for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
+			BaseConcentricSimulatedHull::Layer *__restrict layer = &hull->layers[layerNum];
+
+			const AppearanceRules *appearanceRules = &hull->appearanceRules;
+			if( layer->overrideAppearanceRules ) {
+				appearanceRules = layer->overrideAppearanceRules;
+			}
+
+			const SolidAppearanceRules *solidAppearanceRules = nullptr;
+			const CloudAppearanceRules *cloudAppearanceRules = nullptr;
+			if( const auto *solidAndCloudRules = std::get_if<SolidAndCloudAppearanceRules>( appearanceRules ) ) {
+				solidAppearanceRules = &solidAndCloudRules->solidRules;
+				cloudAppearanceRules = &solidAndCloudRules->cloudRules;
+			} else {
+				solidAppearanceRules = std::get_if<SolidAppearanceRules>( appearanceRules );
+				cloudAppearanceRules = std::get_if<CloudAppearanceRules>( appearanceRules );
+			}
+
+			assert( solidAppearanceRules || cloudAppearanceRules );
+			SharedMeshData *const __restrict sharedMeshData = layer->sharedMeshData;
+
+			sharedMeshData->simulatedPositions   = layer->vertexPositions;
+			sharedMeshData->simulatedNormals     = nullptr;
+			sharedMeshData->simulatedColors      = layer->vertexColors;
+
+			sharedMeshData->minZLastFrame        = 0.0f;
+			sharedMeshData->maxZLastFrame        = 0.0f;
+			sharedMeshData->minFadedOutAlpha     = layer->overrideMinFadedOutAlpha.value_or( hull->minFadedOutAlpha );
+			sharedMeshData->viewDotFade          = layer->overrideHullFade.value_or( hull->vertexViewDotFade );
+			sharedMeshData->zFade                = ZFade::NoFade;
+			sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
+			sharedMeshData->tesselateClosestLod  = true;
+			sharedMeshData->lerpNextLevelColors  = true;
+
+			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
+			sharedMeshData->cachedOverrideColorsSpanInBuffer = std::nullopt;
+			sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
+			sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
+
+			if( solidAppearanceRules ) [[likely]] {
+				HullSolidDynamicMesh *const __restrict mesh = layer->submittedSolidMesh;
+
+				Vector4Copy( layer->mins, mesh->cullMins );
+				Vector4Copy( layer->maxs, mesh->cullMaxs );
+				
+				mesh->material            = nullptr;
+				mesh->applyVertexDynLight = hull->applyVertexDynLight;
+				mesh->m_shared            = sharedMeshData;
+
+				const float drawOrderDesignator = 2.0f * layer->drawOrderDesignator + solidLayerOrderBoost + startFromOrder;
+
+				submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+				numMeshesToSubmit++;
+			}
+
+			if( cloudAppearanceRules ) [[unlikely]] {
+				assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
+				assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
+
+				const float hullLifetimeFrac = (float)( currTime - hull->spawnTime ) * Q_Rcp( (float)hull->lifetime );
+
+				for( size_t meshNum = 0; meshNum < cloudAppearanceRules->spanOfMeshProps.size(); ++meshNum ) {
+					const CloudMeshProps &__restrict meshProps  = cloudAppearanceRules->spanOfMeshProps[meshNum];
+					HullCloudDynamicMesh *const __restrict mesh = layer->submittedCloudMeshes[meshNum];
+
+					mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+					if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
+						mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+						if( mesh->m_alphaScale >= ( 1.0f / 255.0f ) ) {
+							Vector4Copy( layer->mins, mesh->cullMins );
+							Vector4Copy( layer->maxs, mesh->cullMaxs );
+
+							Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
+
+							mesh->material            = meshProps.material;
+							mesh->applyVertexDynLight = hull->applyVertexDynLight;
+							mesh->m_shared            = sharedMeshData;
+							mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
+							mesh->m_applyRotation     = meshProps.applyRotation;
+
+							mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
+							mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
+							mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
+
+							if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
+								const auto randomWord          = (uint16_t)m_rng.next();
+								mesh->m_speedIndexShiftInTable = ( randomWord >> 0 ) & 0xFF;
+								mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
+							}
+
+							const float drawOrderDesignator = 2.0f * layer->drawOrderDesignator + cloudLayerOrderBoost + startFromOrder;
+
+							submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+							submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+							numMeshesToSubmit++;
+						}
+					}
+				}
+			}
+		}
+
+		// If this concentric hull is coupled with a toon hull
+		if( const std::optional<uint8_t> pairIndex = pairIndicesForConcentricHulls[concentricHullIndex] ) {
+			// The number of meshes of the coupled toon hull
+			const unsigned numAddedToonMeshes = numAddedMeshesForPairs[*pairIndex];
+			// If we're going to submit something
+			if( numAddedToonMeshes | numMeshesToSubmit ) [[likely]] {
+				// TODO: Use some "combine bounds" subroutine
+				BoundsBuilder combinedBoundsBuilder;
+				combinedBoundsBuilder.addPoint( hull->mins );
+				combinedBoundsBuilder.addPoint( hull->maxs );
+
+				if( numAddedToonMeshes ) [[likely]] {
+					// Roll pointers back to the data of toon hull
+					submittedMeshesBuffer     -= numAddedToonMeshes;
+					submittedOrderDesignators -= numAddedToonMeshes;
+
+					combinedBoundsBuilder.addPoint( boundsForPairs[*pairIndex].first.Data() );
+					combinedBoundsBuilder.addPoint( boundsForPairs[*pairIndex].second.Data() );
+				}
+
+				vec4_t combinedMins, combinedMaxs;
+				combinedBoundsBuilder.storeToWithAddedEpsilon( combinedMins, combinedMaxs );
+				combinedMins[3] = 0.0f, combinedMaxs[3] = 1.0f;
+
+				const unsigned actualNumMeshesToSubmit = numAddedToonMeshes + numMeshesToSubmit;
+				assert( actualNumMeshesToSubmit <= kMaxMeshesPerHull );
+				drawSceneRequest->addCompoundDynamicMesh( combinedMins, combinedMaxs, submittedMeshesBuffer,
+														  actualNumMeshesToSubmit, submittedOrderDesignators );
+			}
+		} else {
+			// Just submit meshes of this concentric hull, if any
+			if( numMeshesToSubmit ) [[likely]] {
+				assert( numMeshesToSubmit <= kMaxMeshesPerHull );
+				drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs, submittedMeshesBuffer,
+														  numMeshesToSubmit, submittedOrderDesignators );
+			}
+		}
+
+		++concentricHullIndex;
 	}
 
 	m_lastTime = currTime;
@@ -1509,8 +1635,9 @@ void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTi
 
 	const float speedMultiplier = 1.0f - 1.5f * timeDeltaSeconds;
 
+
 	// Sanity check
-	assert( numLayers >= 1 && numLayers < 8 );
+	assert( numLayers >= 1 && numLayers <= kMaxHullLayers );
 	for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
 		BoundsBuilder layerBoundsBuilder;
 
@@ -1572,7 +1699,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 	const unsigned numVertices = basicHullsHolder.getIcosphereForLevel( subdivLevel ).vertices.size();
 
 	// Sanity check
-	assert( numLayers >= 1 && numLayers < 8 );
+	assert( numLayers >= 1 && numLayers < kMaxHullLayers );
 	for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
 		BoundsBuilder layerBoundsBuilder;
 

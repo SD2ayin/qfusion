@@ -273,15 +273,15 @@ void DrawSceneRequest::addDynamicMesh( const DynamicMesh *mesh ) {
 
 void DrawSceneRequest::addCompoundDynamicMesh( const float *mins, const float *maxs,
 											   const DynamicMesh **parts, unsigned numParts,
-											   std::optional<uint8_t> drawOnTopPartIndex ) {
+											   const float *meshOrderDesignators ) {
 	assert( numParts <= kMaxPartsInCompoundMesh );
 	if( !m_compoundDynamicMeshes.full() ) [[likely]] {
 		m_compoundDynamicMeshes.emplace_back( CompoundDynamicMesh {
-			.cullMins           = { mins[0], mins[1], mins[2], mins[3] },
-			.cullMaxs           = { maxs[0], maxs[1], maxs[2], maxs[3] },
-			.parts              = parts,
-			.numParts           = numParts,
-			.drawOnTopPartIndex = drawOnTopPartIndex
+			.cullMins             = { mins[0], mins[1], mins[2], mins[3] },
+			.cullMaxs             = { maxs[0], maxs[1], maxs[2], maxs[3] },
+			.parts                = parts,
+			.meshOrderDesignators = meshOrderDesignators,
+			.numParts             = numParts,
 		});
 	}
 }

@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "local.h"
 #include "frontend.h"
+#include "../common/wswsortbyfield.h"
 
 static unsigned R_PackOpaqueOrder( const mfog_t *fog, const shader_t *shader, int numLightmaps, bool dlight ) {
 	unsigned order = 0;
@@ -357,17 +358,21 @@ void Frontend::addCompoundDynamicMeshesToSortList( StateForCamera *stateForCamer
 	const float *const __restrict viewOrigin = stateForCamera->viewOrigin;
 
 	float distances[Scene::kMaxCompoundDynamicMeshes];
+	std::pair<unsigned, float> drawnBehindParts[Scene::CompoundDynamicMesh::kMaxParts];
+	std::pair<unsigned, float> drawnInFrontParts[Scene::CompoundDynamicMesh::kMaxParts];
 
 	for( const unsigned compoundMeshIndex: indicesOfMeshes ) {
 		const Scene::CompoundDynamicMesh *const __restrict compoundMesh = meshes + compoundMeshIndex;
+		const float *const __restrict meshOrderDesignators = compoundMesh->meshOrderDesignators;
 
-		float bestDistance    = std::numeric_limits<float>::max();
-		for( size_t partIndex = 0; partIndex < compoundMesh->numParts; ++partIndex ) {
+		[[maybe_unused]] float minDistance = std::numeric_limits<float>::max();
+		[[maybe_unused]] float maxDistance = std::numeric_limits<float>::lowest();
+		unsigned numDrawnBehindParts = 0, numDrawnInFrontParts = 0;
+		for( unsigned partIndex = 0; partIndex < compoundMesh->numParts; ++partIndex ) {
 			const DynamicMesh *const __restrict mesh = compoundMesh->parts[partIndex];
 			assert( mesh );
 
-			// This is very incorrect, but still produces satisfiable results
-			// with the .useDrawOnTopHack flag set appropriately and with the current appearance of hulls.
+			// This is very incorrect, but still produces satisfiable results.
 			// Order-independent transparency is the proper solution.
 			// Splitting the hull in two parts, front and back one is also more correct than the present code,
 			// but this would have huge performance impact with the current dynamic submission of vertices.
@@ -376,23 +381,46 @@ void Frontend::addCompoundDynamicMeshesToSortList( StateForCamera *stateForCamer
 			VectorAvg( mesh->cullMins, mesh->cullMaxs, meshCenter );
 			const float distance = DistanceFast( meshCenter, viewOrigin );
 			distances[partIndex] = distance;
-			bestDistance         = wsw::min( distance, bestDistance );
+			if( meshOrderDesignators ) {
+				minDistance = wsw::min( minDistance, distance );
+				maxDistance = wsw::max( maxDistance, distance );
+				const float drawOrderDesignator = meshOrderDesignators[partIndex];
+				if( drawOrderDesignator > 0.0f ) [[likely]] {
+					drawnInFrontParts[numDrawnInFrontParts++] = std::make_pair( partIndex, drawOrderDesignator );
+				} else if( drawOrderDesignator < 0.0f ) {
+					// Add it to the part list;
+					drawnBehindParts[numDrawnBehindParts++] = std::make_pair( partIndex, drawOrderDesignator );
+				}
+			}
 		}
 
-		for( size_t partIndex = 0; partIndex < compoundMesh->numParts; ++partIndex ) {
-			const DynamicMesh *const __restrict mesh = compoundMesh->parts[partIndex];
-			assert( mesh );
+		if( numDrawnBehindParts | numDrawnInFrontParts ) {
+			wsw::sortByField( drawnBehindParts, drawnBehindParts + numDrawnBehindParts, &std::pair<unsigned, float>::second );
+			wsw::sortByField( drawnInFrontParts, drawnInFrontParts + numDrawnInFrontParts, &std::pair<unsigned, float>::second );
+		}
 
-			float distance = distances[partIndex];
-			if( std::optional( (uint8_t)partIndex ) == compoundMesh->drawOnTopPartIndex ) [[unlikely]] {
-				distance = wsw::max( 0.0f, bestDistance - 1.0f );
-			}
-
+		const auto addMeshToSortList = [&]( const DynamicMesh *mesh, float distance ) {
 			// TODO: Account for fogs
 			const mfog_t *fog        = nullptr;
 			const void *drawSurf     = mesh;
 			const shader_s *material = mesh->material ? mesh->material : rsh.whiteShader;
 			addEntryToSortList( stateForCamera, meshEntity, fog, material, distance, 0, nullptr, drawSurf, ST_DYNAMIC_MESH );
+		};
+
+		for( unsigned partNum = 0; partNum < numDrawnBehindParts; ++partNum ) {
+			const float distance = maxDistance + (float)( numDrawnBehindParts + 1 - partNum );
+			addMeshToSortList( compoundMesh->parts[drawnBehindParts[partNum].first], distance );
+		}
+
+		for( unsigned partIndex = 0; partIndex < compoundMesh->numParts; ++partIndex ) {
+			if( !meshOrderDesignators || meshOrderDesignators[partIndex] == 0.0f ) {
+				addMeshToSortList( compoundMesh->parts[partIndex], distances[partIndex ] );
+			}
+		}
+
+		for( unsigned partNum = 0; partNum < numDrawnInFrontParts; ++partNum ) {
+			const float distance = wsw::max( 0.0f, minDistance - (float)( partNum + 1 ) );
+			addMeshToSortList( compoundMesh->parts[drawnInFrontParts[partNum].first], distance );
 		}
 	}
 }

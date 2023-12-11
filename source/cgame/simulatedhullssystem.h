@@ -6,6 +6,7 @@
 #include "../ref/ref.h"
 #include "../common/randomgenerator.h"
 #include "../common/freelistallocator.h"
+#include "../common/podbufferholder.h"
 #include "../common/wswvector.h"
 
 struct CMShapeList;
@@ -365,6 +366,8 @@ private:
 		}
 	};
 
+	static constexpr unsigned kMaxHullLayers = 5;
+
 	struct BaseConcentricSimulatedHull {
 		// Externally managed, should point to the unit mesh data
 		const vec4_t *vertexMoveDirections;
@@ -385,6 +388,7 @@ private:
 			// Subtracted from limitsAtDirections for this layer, must be non-negative.
 			// This offset is supposed to prevent hulls from ending at the same distance in the end position.
 			float finalOffset { 0 };
+			float drawOrderDesignator { 0 };
 
 			std::span<const ColorChangeTimelineNode> colorChangeTimeline;
 			ColorChangeState colorChangeState;
@@ -392,20 +396,18 @@ private:
 			const AppearanceRules *overrideAppearanceRules;
 			std::optional<ViewDotFade> overrideHullFade;
 			std::optional<float> overrideMinFadedOutAlpha;
-			bool useDrawOnTopHack { false };
 		};
 
 		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
 
 		Layer *layers { nullptr };
-		const DynamicMesh **submittedSolidMeshesBuffer;
-		const DynamicMesh **submittedCloudMeshesBuffer;
 
 		vec4_t mins, maxs;
 		vec3_t origin;
 
 		unsigned numLayers { 0 };
 		unsigned lifetime { 0 };
+		unsigned compoundMeshKey { 0 };
 
 		float minFadedOutAlpha { 0.0f };
 
@@ -432,16 +434,12 @@ private:
 		// TODO: Optimize the memory layout
 		HullSolidDynamicMesh storageOfSolidMeshes[NumLayers];
 		HullCloudDynamicMesh storageOfCloudMeshes[NumLayers];
-		const DynamicMesh *storageOfSolidMeshPointers[NumLayers];
-		const DynamicMesh *storageOfCloudMeshPointers[NumLayers];
 
 		ConcentricSimulatedHull() {
 			this->numLayers                  = NumLayers;
 			this->subdivLevel                = SubdivLevel;
 			this->layers                     = &storageOfLayers[0];
 			this->limitsAtDirections         = &storageOfLimits[0];
-			this->submittedSolidMeshesBuffer = storageOfSolidMeshPointers;
-			this->submittedCloudMeshesBuffer = storageOfCloudMeshPointers;
 			for( unsigned i = 0; i < NumLayers; ++i ) {
 				Layer *const layer              = &layers[i];
 				layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
@@ -472,6 +470,7 @@ private:
 			std::span<const OffsetKeyframe> offsetKeyframeSet;
 			unsigned lastKeyframeNum;
 			float lerpFrac { 0.0f };
+			float drawOrderDesignator { 0.0f };
 
 			vec4_t mins, maxs;
 			vec4_t *vertexPositions;
@@ -484,20 +483,18 @@ private:
 			float finalOffset { 0 };
 
 			const AppearanceRules *overrideAppearanceRules;
-			bool useDrawOnTopHack { false };
 		};
 
 		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
 
 		Layer *layers { nullptr };
-		const DynamicMesh **submittedSolidMeshesBuffer;
-		const DynamicMesh **submittedCloudMeshesBuffer;
 
 		vec4_t mins, maxs;
 		vec3_t origin;
 
 		unsigned numLayers { 0 };
 		unsigned lifetime { 0 };
+		unsigned compoundMeshKey { 0 };
 
 		uint8_t subdivLevel { 0 };
 		//bool applyVertexDynLight { false }; should be re-implemented, if useful
@@ -521,8 +518,6 @@ private:
 		// TODO: Optimize the memory layout
 		HullSolidDynamicMesh storageOfSolidMeshes[NumLayers];
 		HullCloudDynamicMesh storageOfCloudMeshes[NumLayers];
-		const DynamicMesh *storageOfSolidMeshPointers[NumLayers];
-		const DynamicMesh *storageOfCloudMeshPointers[NumLayers];
 
 		KeyframedHull() {
 			this->numLayers                  = NumLayers;
@@ -530,8 +525,6 @@ private:
 			this->layers                     = &storageOfLayers[0];
 			this->limitsAtDirections         = &storageOfLimits[0];
             this->vertexMoveDirections       = &storageOfMoveDirections[0];
-			this->submittedSolidMeshesBuffer = storageOfSolidMeshPointers;
-			this->submittedCloudMeshesBuffer = storageOfCloudMeshPointers;
 			for( unsigned i = 0; i < NumLayers; ++i ) {
 				Layer *const layer              = &layers[i];
 				layer->lastKeyframeNum          = 0;
@@ -546,12 +539,15 @@ private:
 		}
 	};
 
-	using FireHull        = ConcentricSimulatedHull<3, 5>;
+	static constexpr unsigned kNumFireHullLayers      = 5;
+	static constexpr unsigned kNumToonSmokeHullLayers = 1;
+
+	using FireHull        = ConcentricSimulatedHull<3, kNumFireHullLayers>;
 	using FireClusterHull = ConcentricSimulatedHull<1, 2>;
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
 	using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
-	using ToonSmokeHull   = KeyframedHull<4, 1>;
+	using ToonSmokeHull   = KeyframedHull<4, kNumToonSmokeHullLayers>;
 
 	void unlinkAndFreeFireHull( FireHull *hull );
 	void unlinkAndFreeFireClusterHull( FireClusterHull *hull );
@@ -613,19 +609,32 @@ private:
 										  int64_t spawnTime, unsigned effectDuration,
 										  std::span<const OffsetKeyframe> offsetKeyframeSet ) -> unsigned;
 
-	FireHull *m_fireHullsHead { nullptr };
-	FireClusterHull *m_fireClusterHullsHead { nullptr };
-	BlastHull *m_blastHullsHead { nullptr };
-	SmokeHull *m_smokeHullsHead { nullptr };
-	ToonSmokeHull *m_toonSmokeHullsHead { nullptr };
-	WaveHull *m_waveHullsHead { nullptr };
-
 	static constexpr unsigned kMaxFireHulls        = 32;
 	static constexpr unsigned kMaxFireClusterHulls = kMaxFireHulls * 2;
 	static constexpr unsigned kMaxBlastHulls       = 32;
 	static constexpr unsigned kMaxSmokeHulls       = kMaxFireHulls * 2;
 	static constexpr unsigned kMaxToonSmokeHulls   = kMaxFireHulls;
 	static constexpr unsigned kMaxWaveHulls        = kMaxFireHulls;
+
+	static constexpr unsigned kMaxConcentricHulls = kMaxFireHulls + kMaxFireClusterHulls + kMaxBlastHulls;
+	static constexpr unsigned kMaxKeyframedHulls  = kMaxToonSmokeHulls;
+	static constexpr unsigned kMaxRegularHulls    = kMaxWaveHulls;
+
+	static_assert( kMaxConcentricHulls <= std::numeric_limits<uint8_t>::max() );
+	static_assert( kMaxKeyframedHulls <= std::numeric_limits<uint8_t>::max() );
+
+	[[maybe_unused]]
+	auto buildMatchingHullPairs( const BaseKeyframedHull **keyframedHulls, unsigned numKeyframedHulls,
+								 const BaseConcentricSimulatedHull **concentricHulls, unsigned numConcentricHulls,
+								 wsw::StaticVector<std::optional<uint8_t>, kMaxKeyframedHulls> *pairIndicesForKeyframedHulls,
+								 wsw::StaticVector<std::optional<uint8_t>, kMaxConcentricHulls> *pairIndicesForConcentricHulls ) -> unsigned;
+
+	FireHull *m_fireHullsHead { nullptr };
+	FireClusterHull *m_fireClusterHullsHead { nullptr };
+	BlastHull *m_blastHullsHead { nullptr };
+	SmokeHull *m_smokeHullsHead { nullptr };
+	ToonSmokeHull *m_toonSmokeHullsHead { nullptr };
+	WaveHull *m_waveHullsHead { nullptr };
 
 	wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists;
 	CMShapeList *m_tmpShapeList { nullptr };
@@ -639,6 +648,20 @@ private:
 
 	// Can't specify byte_vec4_t as the template parameter
 	wsw::Vector<uint32_t> m_frameSharedOverrideColorsBuffer;
+
+	// We may submit solid and cloud meshes for each layer, so it's twice as much as the number of layers
+	static constexpr unsigned kMaxMeshesPerHullGeneral = ( 2 * kMaxHullLayers );
+
+	static_assert( kMaxFireHulls == kMaxToonSmokeHulls );
+	// We may submit solid and cloud meshes for each layer, so it's twice as much as the sum of numbers of layers
+	static constexpr unsigned kMaxMeshesPerHullForCombinedExplosion = 2 * ( kNumToonSmokeHullLayers + kNumFireHullLayers );
+
+	// Choose the biggest value for bins, this simplifies the code even if a bit overuse memory
+	static constexpr unsigned kMaxMeshesPerHull   = wsw::max( kMaxMeshesPerHullGeneral, kMaxMeshesPerHullForCombinedExplosion );
+	static constexpr unsigned kMaxHullsWithLayers = kMaxFireHulls + kMaxFireClusterHulls + kMaxBlastHulls + kMaxToonSmokeHulls;
+
+	PodBufferHolder<const DynamicMesh *> m_storageOfSubmittedMeshPtrs;
+	PodBufferHolder<float> m_storageOfSubmittedMeshOrderDesignators;
 
 	wsw::RandomGenerator m_rng;
 	int64_t m_lastTime { 0 };

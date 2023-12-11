@@ -242,22 +242,14 @@ static void makeRegularExplosionImpacts( const float *fireOrigin, float radius, 
 }
 
 
-static const RgbaLifespan kExplosionSparksColors[3] {
-	{
-		.initial  = { 1.0f, 1.0f, 1.0f, 0.0f },
-		.fadedIn  = { 1.0f, 0.6f, 0.3f, 1.0f },
-		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.3f },
-	},
-	{
-		.initial  = { 1.0f, 1.0f, 1.0f, 0.0f },
-		.fadedIn  = { 1.0f, 0.8f, 0.4f, 1.0f },
-		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.3f },
-	},
-	{
-		.initial  = { 1.0f, 1.0f, 1.0f, 0.0f },
-		.fadedIn  = { 1.0f, 0.7f, 0.5f, 1.0f },
-		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.3f },
-	},
+static const RgbaLifespan kExplosionSparksColors[1] {
+        {
+                .initial  = { 1.0f, 0.55f, 0.0f, 1.0f },
+                .fadedIn  = { 1.0f, 0.4f, 0.0f, 1.0f },
+                .fadedOut = { 1.0f, 0.28f, 0.0f, 1.0f },
+                .finishFadingInAtLifetimeFrac = 0.25f,
+                .startFadingOutAtLifetimeFrac = 0.50f,
+        }
 };
 
 static const LightLifespan kExplosionSparksFlareProps[1] {
@@ -362,22 +354,55 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 				.alphaScale                  = 0.08f,
 				.particleFrameAffinityModulo = 4,
 			},
-			.geometryRules = Particle::SpriteRules { .radius = { .mean = 1.25f, .spread = 0.25f } },
+			.geometryRules = Particle::SpriteRules {
+                .radius = { .mean = 14.5f, .spread = 3.0f },
+                .sizeBehaviour = Particle::Shrinking
+            },
 		};
 
 		EllipsoidalFlockParams flockParams {
 			.origin        = { origin[0], origin[1], origin[2] },
 			.offset        = { dir[0], dir[1], dir[2] },
-			.gravity       = 0.25f * GRAVITY,
-			.drag          = 0.025f,
+			.gravity       = 0.7f * GRAVITY,
+			.drag          = 0.04f,
 			.restitution   = 0.33f,
 			.speed         = { .min = 150.0f, .max = 400.0f },
 			.shiftSpeed    = { .min = 100.0f, .max = 200.0f },
-			.percentage    = { .min = 0.5f, .max = 0.8f },
-			.timeout       = { .min = 400, .max = 750 },
+			.percentage    = { .min = 0.15f, .max = 0.23f },
+			.timeout       = { .min = 500, .max = 820 },
 		};
 
-		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+        static Particle::AppearanceRules explosionFireTrailAppearanceRules {
+                .materials     = cgs.media.shaderExplosionSpriteParticle.getAddressOfHandle(),
+                .colors        = kExplosionSparksColors,
+                .geometryRules = Particle::SpriteRules {
+                        .radius        = { .mean = 7.0f, .spread = 2.0f },
+                },
+        };
+
+        static ConicalFlockParams explosionFireTrailFlockParams {
+                .origin        = { origin[0], origin[1], origin[2] },
+                .offset        = { dir[0], dir[1], dir[2] },
+                .speed      = { .min = 1.0f, .max = 5.0f },
+                .percentage = { .min = 0.5f, .max = 0.8f },
+                .timeout    = { .min = 350, .max = 400 },
+        };
+
+        static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
+                .props = {
+                        .width     = 3.0f,
+                        .fromColor = { 1.0f, 1.0f, 1.0f, 0.0f },
+                        .toColor   = { 0.7f, 0.4f, 0.3f, 0.2f },
+                }
+        };
+
+        static ParamsOfParticleTrailOfParticles explosionParamsOfTrails {
+                .appearanceRules = explosionFireTrailAppearanceRules,
+                .flockParamsTemplate = explosionFireTrailFlockParams,
+                .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 8.0f }
+        };
+
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails, &explosionPolyParamsOfTrails );
 
 		appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
 

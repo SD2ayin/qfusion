@@ -344,10 +344,18 @@ public:
 	};
 
 	struct CompoundDynamicMesh {
+		static constexpr unsigned kMaxParts = 16;
 		float cullMins[4], cullMaxs[4];
 		const DynamicMesh **parts;
+		// If this field is present, the baking array size must match the number of parts
+		// Values are interpreted as follows:
+		// Parts with negative values are drawn with respect of the order of values
+		// (values with greater absolute value get drawn first) prior to all other parts.
+		// Parts with zero values are drawn in order that is defined by their centers, on top of parts with negative values
+		// Parts with positive values are draw with respect of the order of values
+		// (values with lesser absolute value get drawn first) after all other parts.
+		const float *meshOrderDesignators { nullptr };
 		unsigned numParts;
-		std::optional<uint8_t> drawOnTopPartIndex;
 	};
 protected:
 	Scene();
@@ -401,7 +409,7 @@ public:
 
 	void addCompoundDynamicMesh( const float *mins, const float *maxs,
 								 const DynamicMesh **parts, unsigned numParts,
-								 std::optional<uint8_t> drawOnTopPartIndex = std::nullopt );
+								 const float *meshOrderDesignators = nullptr );
 
 	void addDynamicMesh( const DynamicMesh *mesh );
 
