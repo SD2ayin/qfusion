@@ -256,8 +256,8 @@ private:
 	// TODO: Vary by required trail length
 	static constexpr unsigned kMaxSmallTrailFlockSize  = 128;
 	// A ParticleAggregate cannot be larger
-	static constexpr unsigned kMaxMediumTrailFlockSize = 256;
-	static constexpr unsigned kMaxLargeTrailFlockSize  = 256;
+	static constexpr unsigned kMaxMediumTrailFlockSize = 255;
+	static constexpr unsigned kMaxLargeTrailFlockSize  = 255;
 
 	wsw::StaticVector<RegularFlocksBin, 5> m_regularFlockBins;
 	wsw::StaticVector<ParticleTrailBin, 3> m_trailsOfParticlesBins;

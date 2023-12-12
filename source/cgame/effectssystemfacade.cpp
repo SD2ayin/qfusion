@@ -377,15 +377,19 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
                 .colors        = kExplosionSparksColors,
                 .geometryRules = Particle::SpriteRules {
                         .radius        = { .mean = 7.0f, .spread = 2.0f },
+                        .sizeBehaviour = Particle::Shrinking
                 },
         };
 
         static ConicalFlockParams explosionFireTrailFlockParams {
-                .origin        = { origin[0], origin[1], origin[2] },
-                .offset        = { dir[0], dir[1], dir[2] },
-                .speed      = { .min = 1.0f, .max = 5.0f },
+                .origin     = { origin[0], origin[1], origin[2] },
+                .offset     = { dir[0], dir[1], dir[2] },
+                .gravity    = 0.0f,
+                //.drag       = 0.08f,
+                //.angle      = 40.0f,
+                .speed      = { .min = 60.0f, .max = 80.0f },
                 .percentage = { .min = 0.5f, .max = 0.8f },
-                .timeout    = { .min = 350, .max = 400 },
+                .timeout    = { .min = 220, .max = 320 },
         };
 
         static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
@@ -399,7 +403,7 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
         static ParamsOfParticleTrailOfParticles explosionParamsOfTrails {
                 .appearanceRules = explosionFireTrailAppearanceRules,
                 .flockParamsTemplate = explosionFireTrailFlockParams,
-                .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 8.0f }
+                .updateParams = { .maxParticlesPerDrop = 3, .dropDistance = 10.0f }
         };
 
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails, &explosionPolyParamsOfTrails );

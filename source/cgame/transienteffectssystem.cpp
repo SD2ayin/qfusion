@@ -256,7 +256,7 @@ static const FireHullLayerParamsHolder kFireHullParams;
 struct ToonSmokeOffsetKeyframeHolder {
 	static constexpr int kNumVertices           = 2562;
 	static constexpr int kNumKeyframes          = 20;
-	static constexpr unsigned kMinLifetime      = 2100; //850;
+	static constexpr unsigned kMinLifetime      = 850; //850;
 	static constexpr unsigned kNumShadingLayers = 3;
 	// Looks like a variable and not a constant, even it's technicall is the latter thing
 	static constexpr float maxOffset            = 1.0f;
@@ -310,7 +310,7 @@ struct ToonSmokeOffsetKeyframeHolder {
 		for( unsigned frameNum = 0; frameNum < kNumKeyframes; frameNum++ ) {
 			const float keyframeFrac     = (float)(frameNum) / (float)( kNumKeyframes - 1 ); // -1 so the final value is 1.0f
 			const float fireLifetime     = 0.54f; // 0.47
-			const float fireStartFrac    = 0.9f;
+			const float fireStartFrac    = 0.98f;
 			const float fireLifetimeFrac = wsw::min( 1.0f, keyframeFrac * ( 1.0f / fireLifetime ) );
 			const float fireFrac         = fireLifetimeFrac * fireStartFrac + ( 1.0f - fireStartFrac );
 
@@ -590,9 +590,6 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         const float randomAngle = m_rng.nextFloat(0, 2 * M_PI);
         const quat_t rotation = { 0.f, 0.f,std::sin(randomAngle/2), std::cos(randomAngle/2) };
 
-        auto* firstShadingLayer = std::get_if<SimulatedHullsSystem::MaskedShadingLayer>( &chosenToonSmokeKeyframes->setOfKeyframes[0].shadingLayers[0] );
-        Com_Printf("idx:%i, color:%i", randomIdx, firstShadingLayer->colors[1][2]);
-
         std::span<const SimulatedHullsSystem::OffsetKeyframe> toonSmokeKeyframeSet = chosenToonSmokeKeyframes->setOfKeyframes;
 
 		const float randomFactor  = 0.4f;
@@ -606,7 +603,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
                                             ToonSmokeOffsetKeyframeHolder::maxOffset, rotation );
 			hull->compoundMeshKey = compoundMeshKey;
 		}
-        Com_Printf("rotation quaternion:%f %f %f %f", rotation[0], rotation[1], rotation[2], rotation[3]);
+        cgNotice() << "rotation" << randomAngle;
 
 
 #if 0
