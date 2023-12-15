@@ -362,7 +362,7 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 
 		assert( !trailFlock->numActivatedParticles && !trailFlock->numDelayedParticles );
 		trailFlock->timeoutAt = std::numeric_limits<int64_t>::max();
-		setupFlockFieldsFromParams( flock, *trailFlock->flockParamsTemplate );
+		setupFlockFieldsFromParams( trailFlock, *trailFlock->flockParamsTemplate );
 	}
 
 	if( paramsOfPolyTrail ) {

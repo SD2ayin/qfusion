@@ -93,9 +93,9 @@ public:
 	void spawnWaterImpactRing( unsigned delay, const float *origin );
 
 	[[nodiscard]]
-	auto spawnBulletTracer( int owner, const float *from, const float *to ) -> unsigned;
+	auto spawnBulletTracer( int owner, const float *to ) -> unsigned;
 
-	void spawnPelletTracers( int owner, const float *from, std::span<const vec3_t> to, unsigned *timeoutsBuffer );
+	void spawnPelletTracers( int owner, std::span<const vec3_t> to, unsigned *timeoutsBuffer );
 
 	void spawnLandingDustImpactEffect( const float *origin, const float *dir ) {
 		spawnDustImpactEffect( origin, dir, 50.0f );

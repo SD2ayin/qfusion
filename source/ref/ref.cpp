@@ -509,6 +509,8 @@ void R_BeginFrame( bool forceClear, int swapInterval ) {
 	rf.frameTime.time = time;
 	if( rf.frameTime.time - rf.frameTime.oldTime >= 50 ) {
 		rf.frameTime.average = time - rf.frameTime.oldTime;
+
+        Com_Printf("fps:%f\n", (float)( rf.frameTime.count - rf.frameTime.oldCount ) / (float)(time - rf.frameTime.oldTime)  * 1000.0f);
 		rf.frameTime.average = ((float)rf.frameTime.average / ( rf.frameTime.count - rf.frameTime.oldCount )) + 0.5f;
 		rf.frameTime.oldTime = time;
 		rf.frameTime.oldCount = rf.frameTime.count;

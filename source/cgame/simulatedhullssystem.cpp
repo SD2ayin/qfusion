@@ -1353,6 +1353,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				assert( numMeshesToSubmit <= kMaxMeshesPerHull );
 				drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs, submittedMeshesBuffer,
 														  numMeshesToSubmit, submittedOrderDesignators );
+                offsetOfMultilayerMeshData += numMeshesToSubmit;
 			}
 		}
 

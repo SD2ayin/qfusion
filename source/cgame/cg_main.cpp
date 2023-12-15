@@ -1534,7 +1534,7 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 	[[maybe_unused]]
 	const trace_t *waterTrace = GS_TraceBullet( &trace, origin, dir, r, u, (int)fireDef->timeout, owner, 0 );
 	if( waterTrace ) {
-		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, origin, waterTrace->endpos );
+		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, waterTrace->endpos );
 
 		if( canShowBulletImpactForDirAndTrace( dir, trace ) ) {
 			cg.effectsSystem.spawnUnderwaterBulletImpactEffect( delay, trace.endpos, trace.plane.normal );
@@ -1548,7 +1548,7 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 			});
 		}
 	} else {
-		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, origin, trace.endpos );
+		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, trace.endpos );
 		if( canShowBulletImpactForDirAndTrace( dir, trace ) ) {
 			cg.effectsSystem.spawnBulletImpactEffect( delay, SolidImpact {
 				.origin      = { trace.endpos[0], trace.endpos[1], trace.endpos[2] },
@@ -1639,7 +1639,7 @@ static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int o
 	auto *const solidImpactDelays  = (unsigned *)alloca( sizeof( unsigned ) * count );
 
 	// TODO: Pass the origin stride plus impacts?
-	cg.effectsSystem.spawnPelletTracers( owner, start, { tracerTargets, numTracerTargets }, tracerDelaysBuffer );
+	cg.effectsSystem.spawnPelletTracers( owner, { tracerTargets, numTracerTargets }, tracerDelaysBuffer );
 
 	for( unsigned i = 0; i < numSolidImpacts; ++i ) {
 		solidImpactDelays[i] = tracerDelaysBuffer[solidImpactTracerIndices[i]];

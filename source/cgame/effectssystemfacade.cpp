@@ -26,6 +26,30 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../client/snd_public.h"
 #include "../common/configvars.h"
 
+using wsw::operator""_asView;
+
+FloatConfigVar v_flockShiftSpeedMin("flockShiftSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_flockShiftSpeedMax("flockShiftSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_flockSpeedMin("flockSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_trailSpeedMin("trailSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_flockSpeedMax("flockSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_trailSpeedMax("trailSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_flockSpeedMultiplier("flockSpeedMultiplier"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_trailSpeedMultiplier("trailSpeedMultiplier"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+UnsignedConfigVar v_flockLifetimeMin("flockLifetimeMin"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_trailLifetimeMin("trailLifetimeMin"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_flockLifetimeMax("flockLifetimeMax"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_trailLifetimeMax("trailLifetimeMax"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_flockDrag("flockDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_trailDrag("trailDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_flockGravity("flockGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_trailGravity("trailGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
 void EffectsSystemFacade::startSound( const SoundSet *sound, const float *origin, float attenuation ) {
 	SoundSystem::instance()->startFixedSound( sound, origin, CHAN_AUTO, v_volumeEffects.get(), attenuation );
 }
@@ -360,6 +384,8 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
             },
 		};
 
+        // polytrail effect
+        /*
 		EllipsoidalFlockParams flockParams {
 			.origin        = { origin[0], origin[1], origin[2] },
 			.offset        = { dir[0], dir[1], dir[2] },
@@ -372,7 +398,33 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 			.timeout       = { .min = 500, .max = 820 },
 		};
 
-        static Particle::AppearanceRules explosionFireTrailAppearanceRules {
+        static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
+                //.material = cgs.media.shader
+                .props = {
+                        .width     = 3.0f,
+                        .fromColor = { 1.0f, 1.0f, 1.0f, 0.0f },
+                        .toColor   = { 0.7f, 0.4f, 0.3f, 0.2f },
+                }
+        };
+
+         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, nullptr, &explosionPolyParamsOfTrails );*/
+
+        // particle trail effect
+        //const float speedMultiplier = 1.5f;
+
+        EllipsoidalFlockParams flockParams {
+                .origin        = { origin[0], origin[1], origin[2] },
+                .offset        = { dir[0], dir[1], dir[2] },
+                .gravity       = v_flockGravity.get() * GRAVITY,
+                .drag          = v_flockDrag.get(),
+                .restitution   = 0.33f,
+                .speed         = { .min = v_flockSpeedMin.get() * v_flockSpeedMultiplier.get(), .max = v_flockSpeedMax.get() * v_flockSpeedMultiplier.get() },
+                .shiftSpeed    = { .min = v_flockShiftSpeedMin.get() * v_flockSpeedMultiplier.get(), .max = v_flockShiftSpeedMax.get() * v_flockSpeedMultiplier.get() },
+                .percentage    = { .min = 0.10f, .max = 0.17f },
+                .timeout       = { .min = v_flockLifetimeMin.get(), .max = v_flockLifetimeMax.get() },
+        };
+
+        Particle::AppearanceRules explosionFireTrailAppearanceRules {
                 .materials     = cgs.media.shaderExplosionSpriteParticle.getAddressOfHandle(),
                 .colors        = kExplosionSparksColors,
                 .geometryRules = Particle::SpriteRules {
@@ -381,32 +433,24 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
                 },
         };
 
-        static ConicalFlockParams explosionFireTrailFlockParams {
+        ConicalFlockParams explosionFireTrailFlockParams {
                 .origin     = { origin[0], origin[1], origin[2] },
                 .offset     = { dir[0], dir[1], dir[2] },
-                .gravity    = 0.0f,
-                //.drag       = 0.08f,
+                .gravity    = v_trailGravity.get() * GRAVITY,
+                .drag       = v_trailDrag.get(),
                 //.angle      = 40.0f,
-                .speed      = { .min = 60.0f, .max = 80.0f },
+                .speed      = { .min = v_trailSpeedMin.get() * v_trailSpeedMultiplier.get(), .max = v_trailSpeedMax.get() * v_trailSpeedMultiplier.get() },
                 .percentage = { .min = 0.5f, .max = 0.8f },
-                .timeout    = { .min = 220, .max = 320 },
+                .timeout    = { .min = v_trailLifetimeMin.get(), .max = v_trailLifetimeMax.get() },
         };
 
-        static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
-                .props = {
-                        .width     = 3.0f,
-                        .fromColor = { 1.0f, 1.0f, 1.0f, 0.0f },
-                        .toColor   = { 0.7f, 0.4f, 0.3f, 0.2f },
-                }
-        };
-
-        static ParamsOfParticleTrailOfParticles explosionParamsOfTrails {
+        ParamsOfParticleTrailOfParticles explosionParamsOfTrails {
                 .appearanceRules = explosionFireTrailAppearanceRules,
                 .flockParamsTemplate = explosionFireTrailFlockParams,
                 .updateParams = { .maxParticlesPerDrop = 3, .dropDistance = 10.0f }
         };
 
-		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails, &explosionPolyParamsOfTrails );
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails );
 
 		appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
 
@@ -2398,46 +2442,13 @@ bool EffectsSystemFacade::MultiGroupEventRateLimiter::acquirePermission( int64_t
 	return chosenLimiter->acquirePermission( timestamp, origin, params );
 }
 
-[[maybe_unused]]
-static auto adjustTracerOriginForOwner( int owner, const float *givenOrigin, float *adjustedOrigin ) -> std::pair<float, float> {
-	// This produces satisfactory results, assuming a reasonable prestep.
+auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> unsigned {
 
-	VectorCopy( givenOrigin, adjustedOrigin );
-	if( owner == (int)cg.predictedPlayerState.POVnum ) {
-		const int handValue     = cgs.demoPlaying ? v_hand.get() : cgs.clientInfo[owner - 1].hand;
-		const float handScale   = ( handValue >= 0 && handValue <= 1 ) ? ( handValue ? -1.0f : +1.0f ) : 0.0f;
-		const float rightOffset = wsw::clamp( handScale * v_handOffset.get() + v_gunX.get(), -16.0f, +16.0f );
-		const float zOffset     = -playerbox_stand_viewheight;
+    orientation_t projection;
+    CG_PModel_GetProjectionSource(owner, &projection);
 
-		vec3_t right;
-		AngleVectors( cg.predictedPlayerState.viewangles, nullptr, right, nullptr );
-		VectorMA( adjustedOrigin, rightOffset, right, adjustedOrigin );
-
-		adjustedOrigin[2] += zOffset;
-
-		return { rightOffset, zOffset };
-	}
-
-	return { 0, 0 };
-}
-
-auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *from, const float *to ) -> unsigned {
-	vec3_t adjustedFrom;
-	const auto [rightOffset, zOffset] = adjustTracerOriginForOwner( owner, from, adjustedFrom );
-
-	std::optional<PolyEffectsSystem::TracerParams::AlignForPovParams> alignForPovParams;
-	if( owner == (int)cg.predictedPlayerState.POVnum ) {
-		constexpr float magicRightOffsetScale = 2.0f, magicZOffsetScale = 0.5f;
-		alignForPovParams = PolyEffectsSystem::TracerParams::AlignForPovParams {
-			.originRightOffset = magicRightOffsetScale * rightOffset,
-			.originZOffset     = magicZOffsetScale * zOffset,
-			.povNum            = cg.predictedPlayerState.POVnum,
-		};
-	}
-
-	const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( adjustedFrom, to, {
+	const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to, {
 		.material           = cgs.media.shaderBulletTracer,
-		.alignForPovParams  = alignForPovParams,
 		.duration           = 200,
 		.prestepDistance    = m_rng.nextFloat( 72.0f, 96.0f ),
 		.smoothEdgeDistance = 172.0f,
@@ -2452,13 +2463,14 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *from, const
 	return maybeTimeout.value_or( 0 );
 }
 
-void EffectsSystemFacade::spawnPelletTracers( int owner, const float *from, std::span<const vec3_t> to,
+void EffectsSystemFacade::spawnPelletTracers( int owner, std::span<const vec3_t> to,
 											  unsigned *timeoutsBuffer ) {
-	vec3_t adjustedFrom;
-	adjustTracerOriginForOwner( owner, from, adjustedFrom );
+
+    orientation_t projection;
+    CG_PModel_GetProjectionSource(owner, &projection);
 
 	for( size_t i = 0; i < to.size(); ++i ) {
-		const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( adjustedFrom, to[i], {
+		const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to[i], {
 			.material                 = cgs.media.shaderPelletTracer,
 			.duration                 = 125,
 			.prestepDistance          = m_rng.nextFloat( 32.0f, 72.0f ),
