@@ -50,6 +50,21 @@ FloatConfigVar v_trailDrag("trailDrag"_asView, { .byDefault = 1.0f, .flags = CVA
 FloatConfigVar v_flockGravity("flockGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_trailGravity("trailGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 
+FloatConfigVar v_turbulence( "turbulence"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_turbulenceScale( "turbulenceScale"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_percentageMin( "percentageMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_percentageMax( "percentageMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_tracerOffset( "tracerOffset"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+IntConfigVar v_tracerOffsetMode( "tracerOffsetMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(1), .flags = CVAR_ARCHIVE } );
+
+IntConfigVar v_flockSizeMode( "sizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
+IntConfigVar v_trailSizeMode( "trailSizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_tracerPrestepMin( "tracerPrestepMin"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_tracerPrestepMax( "tracerPrestepMax"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
 void EffectsSystemFacade::startSound( const SoundSet *sound, const float *origin, float attenuation ) {
 	SoundSystem::instance()->startFixedSound( sound, origin, CHAN_AUTO, v_volumeEffects.get(), attenuation );
 }
@@ -287,6 +302,23 @@ static const LightLifespan kExplosionSparksFlareProps[1] {
 	}
 };
 
+static const RgbaLifespan kExplosionMultipleColors[2] {
+        {
+                .initial  = { 1.0f, 0.48f, 0.0f, 1.0f },
+                .fadedIn  = { 1.0f, 0.33f, 0.0f, 1.0f },
+                .fadedOut = { 1.0f, 0.21f, 0.0f, 1.0f },
+                .finishFadingInAtLifetimeFrac = 0.25f,
+                .startFadingOutAtLifetimeFrac = 0.50f,
+        },
+        {
+                .initial  = { 1.0f, 0.28f, 0.0f, 1.0f },
+                .fadedIn  = { 1.0f, 0.24f, 0.0f, 1.0f },
+                .fadedOut = { 1.0f, 0.20f, 0.0f, 1.0f },
+                .finishFadingInAtLifetimeFrac = 0.25f,
+                .startFadingOutAtLifetimeFrac = 0.50f,
+        },
+};
+
 void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float *dir, const SoundSet *sound,
 												float radius, bool addSoundLfe ) {
 	vec3_t fireOrigin, almostExactOrigin;
@@ -370,6 +402,12 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 	}
 
 	if( v_particles.get() && !liquidContentsAtFireOrigin ) {
+        vec3_t particleDir;
+        VectorCopy( dir, particleDir );
+        if( VectorLengthSquared( dir ) < 1e-2 ){ //if the dir vector is a zero vector (happens at times at direct hits), set the particleDir to an up vector
+            particleDir[2] = 1.0f;
+        }
+
 		Particle::AppearanceRules appearanceRules {
 			.materials     = cgs.media.shaderExplosionSpriteParticle.getAddressOfHandle(),
 			.colors        = kExplosionSparksColors,
@@ -384,33 +422,43 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
             },
 		};
 
-        // polytrail effect
-        /*
-		EllipsoidalFlockParams flockParams {
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        /// explosion smoke trail effect
+        ///////////////////////////////////////////////////////////////////////////////////////////
+
+		ConicalFlockParams flockParams {
 			.origin        = { origin[0], origin[1], origin[2] },
 			.offset        = { dir[0], dir[1], dir[2] },
+            .dir           = { -particleDir[0], -particleDir[1], particleDir[2] },
 			.gravity       = 0.7f * GRAVITY,
-			.drag          = 0.04f,
-			.restitution   = 0.33f,
-			.speed         = { .min = 150.0f, .max = 400.0f },
-			.shiftSpeed    = { .min = 100.0f, .max = 200.0f },
+			.restitution   = 0.8f,
+            .angle         = 85.0f,
+            .speed         = { .min = 225.f , .max = 400.f },
+            .shiftSpeed    = { .min = 100.f, .max = 200.f },
+            //.speed         = { .min = 150.0f, .max = 400.0f },
+            //.shiftSpeed    = { .min = 100.0f, .max = 200.0f },
 			.percentage    = { .min = 0.15f, .max = 0.23f },
+            //.percentage    = { .min = 0.11f, .max = 0.19f },
 			.timeout       = { .min = 500, .max = 820 },
 		};
 
         static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
-                //.material = cgs.media.shader
                 .props = {
-                        .width     = 3.0f,
+                        //.width     = 3.0f,
+                        .width     = 20.0f,
                         .fromColor = { 1.0f, 1.0f, 1.0f, 0.0f },
-                        .toColor   = { 0.7f, 0.4f, 0.3f, 0.2f },
-                }
+                        //.toColor   = { 0.7f, 0.4f, 0.3f, 1.0f },
+                        .toColor   = { 0.7f, 0.4f, 0.3f, 0.5f },
+                },
+                .material = cgs.media.shaderSmokePolytrail
         };
 
-         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, nullptr, &explosionPolyParamsOfTrails );*/
+         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, nullptr, &explosionPolyParamsOfTrails );
 
-        // particle trail effect
-        //const float speedMultiplier = 1.5f;
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        /// explosion particle trail effect
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        /*
 
         EllipsoidalFlockParams flockParams {
                 .origin        = { origin[0], origin[1], origin[2] },
@@ -450,38 +498,58 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
                 .updateParams = { .maxParticlesPerDrop = 3, .dropDistance = 10.0f }
         };
 
-		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails );
+
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, *explosionParamsOfTrails );*/
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        /// explosion spikes effect
+        ///////////////////////////////////////////////////////////////////////////////////////////
 
 		appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
+        appearanceRules.colors    = kExplosionMultipleColors;
 
 		appearanceRules.geometryRules = Particle::SparkRules {
 			.length        = { .mean = 25.0f, .spread = 7.5f },
 			.width         = { .mean = 4.0f, .spread = 1.0f },
-			.sizeBehaviour = Particle::Shrinking,
+			.sizeBehaviour = Particle::SizeNotChanging,
 		};
 
-		// Suppress the flare for spikes
-		appearanceRules.flareProps = std::nullopt;
+		// !Suppress the flare for spikes
+		// appearanceRules.flareProps = std::nullopt;
 
-		flockParams.speed      = { .min = 550, .max = 650 };
-		flockParams.drag       = 0.01f;
-		flockParams.timeout    = { .min = 100, .max = 150 };
-		flockParams.percentage = { .min = 0.5f, .max = 1.0f };
-		flockParams.shiftSpeed = { .min = 50.0f, .max = 65.0f };
-
-		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
-
-		if( v_explosionSmoke.get() ) {
-			flockParams.speed = { .min = 125.0f, .max = 175.0f };
-		} else {
-			flockParams.speed = { .min = 150.0f, .max = 225.0f };
-		}
-
-		flockParams.angularVelocity = { .min = 360.0f, .max = 2 * 360.0f };
-		flockParams.timeout         = { .min = 350, .max = 450 };
-		flockParams.percentage      = { .min = 1.0f, .max = 1.0f };
+        //flockParams.speed       = { .min = 300, .max = 700 };
+		flockParams.speed       = { .min = 200.f, .max = 600.f };
+        flockParams.angle       = 180.0f;
+        flockParams.gravity     = 0.0f;
+		flockParams.drag        = 0.01f;
+        flockParams.bounceCount = { .minInclusive = 0, .maxInclusive = 0 };
+		flockParams.timeout     = { .min = 150, .max = 200 };
+		flockParams.percentage  = { .min = 0.8f, .max = 1.0f };
+		flockParams.shiftSpeed  = { .min = 0.0f, .max = 0.0f };
 
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        /// explosion embers effect
+        ///////////////////////////////////////////////////////////////////////////////////////////
+
+        appearanceRules.materials = cgs.media.shaderExplosionSpriteParticle.getAddressOfHandle();
+
+        appearanceRules.geometryRules = Particle::SpriteRules {
+                .radius        = { .mean = 7.5f, .spread = 1.0f },
+                .sizeBehaviour = Particle::Shrinking,
+        };
+
+        flockParams.speed           = { .min = v_flockSpeedMin.get(), .max = v_flockSpeedMax.get() };
+        flockParams.drag            = 0.03f;
+        flockParams.gravity         = -0.4f * GRAVITY;
+        flockParams.turbulenceSpeed = 60.0f;
+        flockParams.turbulenceScale = 80.0f;
+        flockParams.timeout         = { .min = 500, .max = 1200 };
+        //        flockParams.percentage      = { .min = 0.38f, .max = 0.5f };
+        flockParams.percentage      = { .min = 0.38, .max = 0.5 };
+
+        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 	}
 
 	m_transientEffectsSystem.spawnExplosionHulls( fireOrigin, smokeOrigin );
@@ -495,9 +563,9 @@ void EffectsSystemFacade::spawnShockwaveExplosionEffect( const float *origin, co
 
 static const RgbaLifespan kPlasmaParticlesColors[1] {
 	{
-		.initial  = { 0.0f, 1.0f, 0.0f, 0.0f },
-		.fadedIn  = { 0.3f, 1.0f, 0.5f, 1.0f },
-		.fadedOut = { 0.7f, 1.0f, 0.7f, 0.0f },
+		.initial  = { 0.0f, 1.0f, 1.0f, 1.0f },
+		.fadedIn  = { 0.0f, 1.0f, 0.5f, 1.0f },
+		.fadedOut = { 0.0f, 0.8, 0.0f, 1.0f },
 	}
 };
 
@@ -517,13 +585,32 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 	const SoundSet *sound = ( mode == FIRE_MODE_STRONG ) ? cgs.media.sndPlasmaStrongHit : cgs.media.sndPlasmaWeakHit;
 	startSound( sound, soundOrigin, ATTN_IDLE );
 
-	if( v_particles.get() ) {
-		EllipsoidalFlockParams flockParams {
-			.origin     = { origin[0], origin[1], origin[2] },
-			.offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
-			.gravity    = 250.0f,
-			.percentage = { .min = 0.5f, .max = 0.8f },
-			.timeout    = { .min = 125, .max = 150 },
+    if( VectorLengthSquared(impactNormal) < 1e-2 ){
+        cgNotice() << "DIR IS 0";
+    }
+    else if( impactNormal[2] < 1e-2 ){
+        cgNotice() << "AA";
+    }
+
+    //////////////////////////////////////////////////
+    /// plasma particle trail effect
+    //////////////////////////////////////////////////
+
+    if( v_particles.get() ) {
+		ConicalFlockParams flockParams {
+			.origin          = { origin[0], origin[1], origin[2] },
+			.offset          = { impactNormal[0], impactNormal[1], impactNormal[2] },
+            .dir             = { -impactNormal[0], -impactNormal[1], impactNormal[2] },
+			.gravity         = 0.0f,
+            .drag            = 0.03f,
+            .turbulenceSpeed = 80.0f,
+            .turbulenceScale = 100.0f,
+            .angle           = 65.0f,
+            .innerAngle      = 10.0f,
+            .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
+            .speed           = { .min = 400.0f, .max = 500.0f },
+			.percentage      = { .min = 0.03f, .max = 0.042f },
+			.timeout         = { .min = 300, .max = 500 },
 		};
 		Particle::AppearanceRules appearanceRules {
 			.materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
@@ -534,11 +621,98 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 				.particleFrameAffinityModulo = 2,
 			},
 			.geometryRules = Particle::SpriteRules {
-				.radius        = { .mean = 1.5f, .spread = 0.5f },
-				.sizeBehaviour = Particle::ExpandingAndShrinking
+				.radius        = { .mean = 11.5f, .spread = 1.5f },
+				.sizeBehaviour = Particle::SizeBehaviour::Shrinking
 			},
 		};
-		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+        Particle::AppearanceRules plasmaExplosionTrailAppearanceRules {
+                .materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
+                .colors        = kPlasmaParticlesColors,
+                .geometryRules = Particle::SpriteRules {
+                        .radius        = { .mean = 7.0f, .spread = 2.0f },
+                        .sizeBehaviour = Particle::SizeBehaviour::ExpandingAndShrinking
+                },
+        };
+
+        ConicalFlockParams plasmaExplosionTrailFlockParams {
+                .origin     = { origin[0], origin[1], origin[2] },
+                .offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
+                .gravity    = 0.0f,
+                .drag       = 0.05f,
+                .speed      = { .min = 50.f, .max = 100.f },
+                .percentage = { .min = 0.5f, .max = 0.8f },
+                .timeout    = { .min = 200, .max = 400 },
+        };
+
+        ParamsOfParticleTrailOfParticles explosionParamsOfTrails {
+                .appearanceRules = plasmaExplosionTrailAppearanceRules,
+                .flockParamsTemplate = plasmaExplosionTrailFlockParams,
+                .updateParams = { .maxParticlesPerDrop = 3, .dropDistance = 10.0f }
+        };
+
+
+        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails );
+
+        //////////////////////////////////////////////////
+        /// plasma explosion spikes effect
+        //////////////////////////////////////////////////
+
+        appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
+        appearanceRules.colors    = kPlasmaParticlesColors;
+
+        appearanceRules.geometryRules = Particle::SparkRules {
+                .length        = { .mean = 8.0f, .spread = 2.5f },
+                .width         = { .mean = 3.3f, .spread = 0.7f },
+                .sizeBehaviour = Particle::SizeNotChanging,
+        };
+
+        flockParams.speed           = { .min = 400.f, .max = 900.f };
+        flockParams.angle           = 180.0f;
+        flockParams.turbulenceSpeed = 0.0f;
+        flockParams.innerAngle      = 0.0f;
+        flockParams.gravity         = 0.0f;
+        flockParams.drag            = 0.01f;
+        flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
+        flockParams.timeout         = { .min = 60, .max = 100 };
+        flockParams.percentage      = { .min = 0.13f, .max = 0.2f };
+        flockParams.shiftSpeed      = { .min = 0.0f, .max = 0.0f };
+
+        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+
+        //////////////////////////////////////////////////
+        /// plasma embers effect
+        //////////////////////////////////////////////////
+
+        /*
+        ConicalFlockParams flockParams {
+                .origin          = { origin[0], origin[1], origin[2] },
+                .offset          = { impactNormal[0], impactNormal[1], impactNormal[2] },
+                .gravity         = -0.4f * GRAVITY,
+                .drag            = 0.03f,
+                .turbulenceSpeed = 80.0f,
+                .turbulenceScale = 80.0f,
+                .angle           = 65.0f,
+                .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
+                .percentage      = { .min = 0.38f, .max = 0.5f },
+                .timeout         = { .min = 400, .max = 500 },
+        };
+        Particle::AppearanceRules appearanceRules {
+                .materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
+                .colors        = kPlasmaParticlesColors,
+                .flareProps    = Particle::FlareProps {
+                        .lightProps                  = kPlasmaParticlesFlareProps,
+                        .alphaScale                  = 0.08f,
+                        .particleFrameAffinityModulo = 2,
+                },
+                .geometryRules = Particle::SpriteRules {
+                        .radius        = { .mean = 1.5f, .spread = 0.5f },
+                        .sizeBehaviour = Particle::Shrinking
+                },
+        };
+
+        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );*/
+
+
 	}
 
 	m_transientEffectsSystem.spawnPlasmaImpactEffect( origin, impactNormal );
@@ -2447,10 +2621,17 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> uns
     orientation_t projection;
     CG_PModel_GetProjectionSource(owner, &projection);
 
+    if( v_tracerOffsetMode.get() == 0 ){
+        projection.origin[2] -= v_tracerOffset.get();
+    } else {
+        VectorMA(projection.origin, -v_tracerOffset.get(), &projection.axis[AXIS_UP], projection.origin);
+    }
+
 	const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to, {
 		.material           = cgs.media.shaderBulletTracer,
 		.duration           = 200,
-		.prestepDistance    = m_rng.nextFloat( 72.0f, 96.0f ),
+		//.prestepDistance    = m_rng.nextFloat( 72.0f, 96.0f ),
+        .prestepDistance    = m_rng.nextFloat( v_tracerPrestepMin.get(), v_tracerPrestepMax.get() ),
 		.smoothEdgeDistance = 172.0f,
 		.width              = m_rng.nextFloat( 2.0f, 2.5f ),
 		.minLength          = m_rng.nextFloat( 80.0f, 108.0f ),

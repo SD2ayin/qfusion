@@ -870,11 +870,9 @@ void TransientEffectsSystem::spawnPlasmaImpactEffect( const float *origin, const
 		.radiusLifespan = { .fadedIn = 96.0f, },
 	});
 
-	if( v_explosionWave.get() ) {
-		if( auto *hull = cg.simulatedHullsSystem.allocWaveHull( m_lastTime, 175 ) ) {
-			const vec4_t hullColor { colorGreen[0], colorGreen[1], colorGreen[2], 0.05f };
-			cg.simulatedHullsSystem.setupHullVertices( hull, origin, hullColor, 300.0f, 75.0f );
-		}
+    if( auto *hull = cg.simulatedHullsSystem.allocWaveHull( m_lastTime, 120 ) ) {
+        const vec4_t hullColor { colorGreen[0], colorGreen[1], colorGreen[2], 0.1f };
+        cg.simulatedHullsSystem.setupHullVertices( hull, origin, hullColor, 250.0f, 60.0f );
 	}
 }
 

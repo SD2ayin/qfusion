@@ -219,6 +219,8 @@ public:
 	CachedMaterial shaderExplosionSpikeParticle { this, wsw::StringView( "gfx/effects/explosion_spike_particle" ) };
 	CachedMaterial shaderExplosionSpriteParticle { this, wsw::StringView( "gfx/effects/explosion_sprite_particle" ) };
 
+    CachedMaterial shaderSmokePolytrail { this, wsw::StringView( "gfx/effects/smokePolytrail/smoketrail0001" ) };
+
 	CachedMaterial shaderBulletTracer { this, wsw::StringView( "gfx/effects/bullet_tracer" ) };
 	CachedMaterial shaderPelletTracer { this, wsw::StringView( "gfx/effects/pellet_tracer" ) };
 

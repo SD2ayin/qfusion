@@ -446,11 +446,13 @@ void TrackedEffectsSystem::touchRocketTrail( int entNum, const float *origin, in
 		[[maybe_unused]] const StraightPolyTrailProps *straightPolyTrailProps;
 		[[maybe_unused]] const CurvedPolyTrailProps *CurvedPolyTrailProps;
 		if( v_projectileFireTrail.get() || v_projectileSmokeTrail.get() ) {
-			material               = cgs.media.shaderRocketPolyTrailCombined;
+			//material               = cgs.media.shaderRocketPolyTrailCombined;
+            material               = cgs.media.shaderSmokePolytrail;
 			straightPolyTrailProps = &kRocketCombinedStraightPolyTrailProps;
 			CurvedPolyTrailProps   = &kRocketCombinedCurvedPolyTrailProps;
 		} else {
-			material               = cgs.media.shaderRocketPolyTrailStandalone;
+			//material               = cgs.media.shaderRocketPolyTrailStandalone;
+            material               = cgs.media.shaderSmokePolytrail;
 			straightPolyTrailProps = &kRocketStandaloneStraightPolyTrailProps;
 			CurvedPolyTrailProps   = &kRocketStandaloneCurvedPolyTrailProps;
 		}
