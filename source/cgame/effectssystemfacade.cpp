@@ -62,8 +62,17 @@ IntConfigVar v_tracerOffsetMode( "tracerOffsetMode"_asView, { .byDefault = 0, .m
 IntConfigVar v_flockSizeMode( "sizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
 IntConfigVar v_trailSizeMode( "trailSizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
 
+FloatConfigVar v_flockAngle( "angle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_numPlasmaSpikes( "numSpikes"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+
 FloatConfigVar v_tracerPrestepMin( "tracerPrestepMin"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_tracerPrestepMax( "tracerPrestepMax"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_spikeLength( "spikeLength"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_spikeLengthSpread( "spikeLengthSpread"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_spikeWidth( "spikeWidth"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_spikeWidthSpread( "spikeWidthSpread"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 void EffectsSystemFacade::startSound( const SoundSet *sound, const float *origin, float attenuation ) {
 	SoundSystem::instance()->startFixedSound( sound, origin, CHAN_AUTO, v_volumeEffects.get(), attenuation );
@@ -588,9 +597,6 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
     if( VectorLengthSquared(impactNormal) < 1e-2 ){
         cgNotice() << "DIR IS 0";
     }
-    else if( impactNormal[2] < 1e-2 ){
-        cgNotice() << "AA";
-    }
 
     //////////////////////////////////////////////////
     /// plasma particle trail effect
@@ -600,17 +606,23 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 		ConicalFlockParams flockParams {
 			.origin          = { origin[0], origin[1], origin[2] },
 			.offset          = { impactNormal[0], impactNormal[1], impactNormal[2] },
-            .dir             = { -impactNormal[0], -impactNormal[1], impactNormal[2] },
-			.gravity         = 0.0f,
-            .drag            = 0.03f,
-            .turbulenceSpeed = 80.0f,
+            .gravity         = 0.0f,
+            .drag            = 0.005f,
+            .turbulenceSpeed = 60.0f,
             .turbulenceScale = 100.0f,
-            .angle           = 65.0f,
-            .innerAngle      = 10.0f,
+            .angle           = 5.0f,
+			/*.gravity         = v_flockGravity.get(),
+            .drag            = v_flockDrag.get(),
+            .turbulenceSpeed = v_turbulence.get(),
+            .turbulenceScale = v_turbulenceScale.get(),
+            .angle           = v_flockAngle.get(),*/
             .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
-            .speed           = { .min = 400.0f, .max = 500.0f },
-			.percentage      = { .min = 0.03f, .max = 0.042f },
-			.timeout         = { .min = 300, .max = 500 },
+            .speed           = { .min = 0.0f, .max = 400.0f },
+			.percentage      = { .min = 0.1f, .max = 0.15f },
+			.timeout         = { .min = 250, .max = 260 },
+            /*.speed           = { .min = v_flockSpeedMin.get(), .max = v_flockSpeedMax.get() },
+            .percentage      = { .min = v_percentageMin.get(), .max = v_percentageMax.get() },
+            .timeout         = { .min = v_flockLifetimeMin.get(), .max = v_flockLifetimeMax.get() },*/
 		};
 		Particle::AppearanceRules appearanceRules {
 			.materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
@@ -625,7 +637,26 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 				.sizeBehaviour = Particle::SizeBehaviour::Shrinking
 			},
 		};
-        Particle::AppearanceRules plasmaExplosionTrailAppearanceRules {
+
+        vec3_t dir;
+
+        float maxZ = 1.0f;
+        static float minZ = std::cos((float) DEG2RAD(70.0f));
+        mat3_t transformMatrix;
+        Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], impactNormal, transformMatrix);
+
+        // https://math.stackexchange.com/a/205589
+        const float z = m_rng.nextFloat(minZ, maxZ);
+        const float r = Q_Sqrt(1.0f - z * z);
+        const float phi = m_rng.nextFloat(0.0f, 2.0f * (float) M_PI);
+        const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
+        Matrix3_TransformVector(transformMatrix, untransformed, dir);
+
+        VectorCopy( dir, flockParams.dir );
+
+        cg.particleSystem.addMediumParticleFlock(appearanceRules, flockParams);
+
+        /*Particle::AppearanceRules plasmaExplosionTrailAppearanceRules {
                 .materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
                 .colors        = kPlasmaParticlesColors,
                 .geometryRules = Particle::SpriteRules {
@@ -648,10 +679,7 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
                 .appearanceRules = plasmaExplosionTrailAppearanceRules,
                 .flockParamsTemplate = plasmaExplosionTrailFlockParams,
                 .updateParams = { .maxParticlesPerDrop = 3, .dropDistance = 10.0f }
-        };
-
-
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &explosionParamsOfTrails );
+        };*/
 
         //////////////////////////////////////////////////
         /// plasma explosion spikes effect
@@ -660,21 +688,31 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
         appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
         appearanceRules.colors    = kPlasmaParticlesColors;
 
-        appearanceRules.geometryRules = Particle::SparkRules {
+        /*appearanceRules.geometryRules = Particle::SparkRules {
                 .length        = { .mean = 8.0f, .spread = 2.5f },
                 .width         = { .mean = 3.3f, .spread = 0.7f },
                 .sizeBehaviour = Particle::SizeNotChanging,
+        };*/
+
+        appearanceRules.geometryRules = Particle::SparkRules {
+                .length        = { .mean = v_spikeLength.get(), .spread = v_spikeLengthSpread.get() },
+                .width         = { .mean = v_spikeWidth.get(), .spread = v_spikeWidthSpread.get() },
+                .sizeBehaviour = Particle::SizeNotChanging,
         };
 
-        flockParams.speed           = { .min = 400.f, .max = 900.f };
+        //flockParams.speed           = { .min = 400.f, .max = 900.f };
+        flockParams.speed           = { .min = v_flockSpeedMin.get(), .max = v_flockSpeedMax.get() };
         flockParams.angle           = 180.0f;
         flockParams.turbulenceSpeed = 0.0f;
         flockParams.innerAngle      = 0.0f;
         flockParams.gravity         = 0.0f;
-        flockParams.drag            = 0.01f;
+        //flockParams.drag            = 0.01f;
+        flockParams.drag            = v_flockDrag.get();
         flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
-        flockParams.timeout         = { .min = 60, .max = 100 };
-        flockParams.percentage      = { .min = 0.13f, .max = 0.2f };
+        //flockParams.timeout         = { .min = 60, .max = 100 };
+        //flockParams.percentage      = { .min = 0.13f, .max = 0.2f };
+        flockParams.timeout         = { .min = v_flockLifetimeMin.get(), .max = v_flockLifetimeMax.get() };
+        flockParams.percentage      = { .min = v_percentageMin.get(), .max = v_percentageMax.get() };
         flockParams.shiftSpeed      = { .min = 0.0f, .max = 0.0f };
 
         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
@@ -2746,8 +2784,36 @@ void EffectsSystemFacade::spawnElectroboltBeam( const vec3_t start, const vec3_t
 		},
 		.width      = wsw::clamp( v_ebBeamWidth.get(), 0.0f, 128.0f ),
 		.tileLength = 128.0f,
-		.timeout    = timeoutMillis,
+		.timeout    = (unsigned) ( timeoutMillis * 0.7f ),
 	});
+    cg.polyEffectsSystem.spawnTransientBeamEffect( start, end, {
+            .material          = material,
+            .beamColorLifespan = RgbaLifespan {
+                    .initial  = { 1.0f, 1.0f, 1.0f, color[3] },
+                    .fadedIn  = { color[0], color[1], color[2], color[3] },
+                    .fadedOut = { 0.0f, 0.0f, 0.0f, 0.0f },
+                    .finishFadingInAtLifetimeFrac = 0.2f,
+                    .startFadingOutAtLifetimeFrac = 0.5f,
+            },
+            .lightProps        = std::pair<unsigned, LightLifespan> {
+                    lightTimeout, LightLifespan {
+                            .colorLifespan = {
+                                    .initial  = { 1.0f, 1.0f, 1.0f },
+                                    .fadedIn  = { color[0], color[1], color[2] },
+                                    .fadedOut = { color[0], color[1], color[2] },
+                            },
+                            .radiusLifespan = {
+                                    .initial  = 100.0f,
+                                    .fadedIn  = 250.0f,
+                                    .fadedOut = 100.0f,
+                            },
+                    }
+            },
+            .width      = wsw::clamp( v_ebBeamWidth.get() * 0.5f, 0.0f, 128.0f ),
+            .tileLength = 128.0f,
+            .timeout    = timeoutMillis,
+    });
+
 }
 
 bool getInstagunTeamColor( int team, float *color ) {

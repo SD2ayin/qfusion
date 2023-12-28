@@ -1444,11 +1444,41 @@ auto ParticleSystem::activateDelayedParticles( ParticleFlock *flock, int64_t cur
 	return timeoutOfDelayedParticles ? std::optional( timeoutOfDelayedParticles ) : std::nullopt;
 }
 
+////////////////
+[[nodiscard]]
+static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour ) {
+    assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
+    // Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
+    assert( sizeBehaviour != Particle::SizeNotChanging );
+
+    float result;
+    if( sizeBehaviour == Particle::Expanding ) {
+        // Grow faster than the linear growth
+        result = Q_Sqrt( lifetimeFrac );
+    } else if( sizeBehaviour == Particle::Shrinking ) {
+        // Shrink faster than the linear growth
+        result = ( 1.0f - lifetimeFrac );
+        result *= result;
+    } else {
+        assert( sizeBehaviour == Particle::ExpandingAndShrinking );
+        if( lifetimeFrac < 0.5f ) {
+            result = 2.0f * lifetimeFrac;
+        } else {
+            result = 2.0f * ( 1.0f - lifetimeFrac );
+        }
+    }
+    assert( result >= 0.0f && result <= 1.0f );
+    return result;
+}
+////////////////
+
 void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock, wsw::RandomGenerator *rng,
 													   int64_t currTime, float deltaSeconds ) {
 	ParticleFlock *const __restrict trailFlock               = baseFlock->trailFlockOfParticles;
 	ConicalFlockParams *const __restrict flockParamsTemplate = trailFlock->flockParamsTemplate;
 	const ParticleTrailUpdateParams &__restrict updateParams = *trailFlock->particleTrailUpdateParams;
+
+    cgNotice() << "running simulateParticleTrailOfParticles";
 
 	// First, activate delayed particles
 	// TODO: We do not need the return result
@@ -1465,10 +1495,30 @@ void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock,
 		}
 	}
 
+    Particle::SizeBehaviour sizeBehaviour;
+    const auto *const spriteRules = std::get_if<Particle::SpriteRules>( &baseFlock->appearanceRules.geometryRules );
+    if( spriteRules ){
+        sizeBehaviour = spriteRules->sizeBehaviour;
+    } else {
+        const auto *const sparkRules = std::get_if<Particle::SparkRules>( &baseFlock->appearanceRules.geometryRules );
+        sizeBehaviour = sparkRules->sizeBehaviour;
+    }
+
 	// Second, spawn particles if needed
 	for( unsigned i = 0; i < baseFlock->numActivatedParticles; ++i ) {
 		const Particle *const p     = &baseFlock->particles[i];
 		float *const lastDropOrigin = trailFlock->lastParticleTrailDropOrigins[p->originalIndex];
+
+        /*
+        float signedFrac = Particle::kByteParamNormalizer * (float)p->instanceRadiusSpreadFraction;
+        float radius     = wsw::max( 0.0f, spriteRules->radius.mean + signedFrac * spriteRules->radius.spread );
+
+        radius *= (float)p->instanceRadiusExtraScale;
+
+        if( spriteRules->sizeBehaviour != Particle::SizeNotChanging ) {
+            radius *= calcSizeFracForLifetimeFrac( p->lifetimeFrac, spriteRules->sizeBehaviour );
+        }*/
+
 		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, updateParams );
 	}
 
