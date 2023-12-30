@@ -808,9 +808,12 @@ void Matrix3_ForRotationOfDirs( const float *fromDir, const float *toDir, mat3_t
 	CrossProduct( fromDir, toDir, axis );
 
 	const float c	 = dot;
-	const float sqrS = 1.0f - dot * dot;
+	const float sqrS =  1.0f - dot * dot ;
 	const float rcpS = Q_RSqrt( sqrS );
-	const float s    = sqrS * rcpS;
+    // as cos2(x)+sin2(x)=1, sin2(x)=1-cos2(x), yielding two solutions:
+    // sin(x)=sqrt(1-cos2(x)) V sin(x)=-sqrt
+    // where the second one is the correct one
+	const float s    = - sqrS * rcpS;
 
 	VectorScale( axis, rcpS, axis );
 
