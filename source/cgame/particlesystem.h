@@ -100,7 +100,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 				        unsigned maxParticles,
 				        const Particle::AppearanceRules *__restrict appearanceRules,
 				        wsw::RandomGenerator *__restrict rng,
-				        int64_t currTime, signed signedStride = 1 ) -> FillFlockResult;
+				        int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
 
 [[nodiscard]]
 auto fillParticleFlock( const ConicalFlockParams *__restrict params,
@@ -108,17 +108,19 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 				        unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 				  		wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride = 1 ) -> FillFlockResult;
+						int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
 
 struct ParticleTrailUpdateParams {
 	unsigned maxParticlesPerDrop { 1 };
 	float dropDistance { 8.0f };
+	float particleSizeMultiplier { 1.0f };
 };
 
 struct ParamsOfParticleTrailOfParticles {
 	const Particle::AppearanceRules appearanceRules;
 	ConicalFlockParams flockParamsTemplate;
 	const ParticleTrailUpdateParams updateParams;
+    const bool modulateByParentSize;
 };
 
 struct ParamsOfPolyTrailOfParticles {
@@ -183,6 +185,7 @@ struct alignas( 16 ) ParticleFlock {
 	float outflowOrigin[3]; //
 	// Axis of the outflow, should be a unit vector
 	float outflowAxis[3] { 0.0f, 0.0f, 1.0f };
+    bool modulateByParentSize;
 };
 
 void updateParticleTrail( ParticleFlock *flock, ConicalFlockParams *flockParamsTemplate,
@@ -255,7 +258,8 @@ private:
 
 	// TODO: Vary by required trail length
 	static constexpr unsigned kMaxSmallTrailFlockSize  = 128;
-	// A ParticleAggregate cannot be larger
+	// A ParticleAggregate cannot be larger than 256 elements,
+	// and also we store the growth limit for a flock in an uint8_t variable, so let's limit it by 255.
 	static constexpr unsigned kMaxMediumTrailFlockSize = 255;
 	static constexpr unsigned kMaxLargeTrailFlockSize  = 255;
 

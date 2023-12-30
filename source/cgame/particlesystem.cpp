@@ -3,6 +3,11 @@
 #include "../client/client.h"
 #include "../common/noise.h"
 #include "cg_local.h"
+#include "../common/configvars.h"
+
+using wsw::operator""_asView;
+
+FloatConfigVar v_debugImpact("debugImpact"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 struct PolyTrailOfParticles {
 	int64_t spawnedAt { 0 };
@@ -93,6 +98,7 @@ ParticleSystem::ParticleSystem() {
 
 	for( unsigned i = 0; i < 5; ++i ) {
 		const auto [flockSize, maxFlocks] = regularBinProps[i];
+		assert( flockSize <= std::numeric_limits<uint8_t>::max() );
 		auto *const bin      = new( m_regularFlockBins.unsafe_grow_back() )RegularFlocksBin( flockSize, maxFlocks );
 		bin->indexOfTrailBin = i < 3 ? i : ~0u;
 		bin->needsClipping   = i < 4;
@@ -104,6 +110,7 @@ ParticleSystem::ParticleSystem() {
 	};
 
 	for( const auto &[flockSize, maxFlocks] : trailsOfParticlesProps ) {
+		assert( flockSize <= std::numeric_limits<uint8_t>::max() );
 		// Allocate few extra slots for lingering trails
 		new( m_trailsOfParticlesBins.unsafe_grow_back() )ParticleTrailBin( flockSize, maxFlocks + 8 );
 		new( m_polyTrailBins.unsafe_grow_back() )PolyTrailBin( flockSize, maxFlocks + 8 );
@@ -363,6 +370,8 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 		assert( !trailFlock->numActivatedParticles && !trailFlock->numDelayedParticles );
 		trailFlock->timeoutAt = std::numeric_limits<int64_t>::max();
 		setupFlockFieldsFromParams( trailFlock, *trailFlock->flockParamsTemplate );
+
+        trailFlock->modulateByParentSize = paramsOfParticleTrail->modulateByParentSize;
 	}
 
 	if( paramsOfPolyTrail ) {
@@ -475,7 +484,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 						unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 						wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride )
+						int64_t currTime, signed signedStride, float extraScale )
 	-> FillFlockResult {
 	const vec3_t initialOrigin {
 		params->origin[0] + params->offset[0],
@@ -540,6 +549,11 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 	}
 
 	assert( std::fabs( VectorLength( params->stretchDir ) - 1.0f ) < 1e-3f );
+
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
 	for( unsigned i = 0; i < numParticles; ++i ) {
 		Particle *const __restrict p = particles + signedStride * (signed)i;
@@ -606,7 +620,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
 		p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
 
-		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = 1;
+		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
 
 		if( hasMultipleMaterials ) {
 			if( materialsIndexMask ) {
@@ -636,7 +650,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 						unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 						wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride )
+						int64_t currTime, signed signedStride, float extraScale )
 	-> FillFlockResult {
 	const vec3_t initialOrigin {
 		params->origin[0] + params->offset[0],
@@ -714,6 +728,11 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		}
 	}
 
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
+
 	// TODO: Make cached conical samples for various angles?
 	for( unsigned i = 0; i < numParticles; ++i ) {
 		Particle *const __restrict p = particles + signedStride * (signed)i;
@@ -766,7 +785,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
 		p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
 
-		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = 1;
+		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
 
 		if( hasMultipleMaterials ) {
 			if( materialsIndexMask ) {
@@ -856,7 +875,8 @@ void updateParticleTrail( ParticleFlock *__restrict flock,
 																	  flock->particles + initialOffset,
 																	  updateParams.maxParticlesPerDrop,
 																	  std::addressof( flock->appearanceRules ),
-																	  rng, currTime, fillStride );
+																	  rng, currTime, fillStride,
+																	  updateParams.particleSizeMultiplier );
 				assert( fillResult.numParticles && fillResult.numParticles <= updateParams.maxParticlesPerDrop );
 
 				if( flockParamsTemplate->activationDelay.max == 0 ) {
@@ -1077,7 +1097,9 @@ void ParticleSystem::tryAddingFlares( ParticleFlock *flock, DrawSceneRequest *dr
 		assert( flareProps.radiusScale > 0.0f );
 		lightRadius *= flareProps.radiusScale;
 
-		if( lightRadius >= 1.0f ) {
+		static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+		const auto lightRadiusAsByte = wsw::clamp<uint8_t>( (uint8_t)( lightRadius * Particle::kUnitExtraScaleAsByte ), 0, 255 );
+		if( lightRadiusAsByte > 0 ) {
 			auto *const addedParticle = new( m_frameFlareParticles.unsafe_grow_back() )Particle( baseParticle );
 
 			addedParticle->lifetimeFrac          = 0.0f;
@@ -1085,7 +1107,7 @@ void ParticleSystem::tryAddingFlares( ParticleFlock *flock, DrawSceneRequest *dr
 			addedParticle->instanceMaterialIndex = 0;
 
 			// Keep radius in the appearance rules the same (the thing we have to do), modify instance radius scale
-			addedParticle->instanceRadiusExtraScale = (int8_t)lightRadius;
+			addedParticle->instanceRadiusExtraScale = lightRadiusAsByte;
 
 			// TODO: This kind of sucks, can't we just supply inline colors?
 			m_frameFlareColorLifespans.push_back( RgbaLifespan {
@@ -1325,6 +1347,14 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 								// This is not really correct but is OK.
 								VectorAdd( trace.endpos, reflectedVelocityDir, p->oldOrigin );
 
+                                float debugBeamScale = v_debugImpact.get();
+                                if (debugBeamScale > 0.0f) {
+                                    vec3_t to;
+                                    VectorMA(p->oldOrigin, debugBeamScale, p->dynamicsVelocity, to);
+                                    vec3_t color = {0.0f, 1.0f, 0.0f};
+                                    cg.effectsSystem.spawnGameDebugBeam(p->oldOrigin, to, color, 0);
+                                }
+
 								keepTheParticleInGeneral = true;
 							}
 						}
@@ -1444,7 +1474,6 @@ auto ParticleSystem::activateDelayedParticles( ParticleFlock *flock, int64_t cur
 	return timeoutOfDelayedParticles ? std::optional( timeoutOfDelayedParticles ) : std::nullopt;
 }
 
-////////////////
 [[nodiscard]]
 static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour ) {
     assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
@@ -1470,15 +1499,12 @@ static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Pa
     assert( result >= 0.0f && result <= 1.0f );
     return result;
 }
-////////////////
 
 void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock, wsw::RandomGenerator *rng,
 													   int64_t currTime, float deltaSeconds ) {
 	ParticleFlock *const __restrict trailFlock               = baseFlock->trailFlockOfParticles;
 	ConicalFlockParams *const __restrict flockParamsTemplate = trailFlock->flockParamsTemplate;
 	const ParticleTrailUpdateParams &__restrict updateParams = *trailFlock->particleTrailUpdateParams;
-
-    cgNotice() << "running simulateParticleTrailOfParticles";
 
 	// First, activate delayed particles
 	// TODO: We do not need the return result
@@ -1495,31 +1521,25 @@ void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock,
 		}
 	}
 
-    Particle::SizeBehaviour sizeBehaviour;
-    const auto *const spriteRules = std::get_if<Particle::SpriteRules>( &baseFlock->appearanceRules.geometryRules );
-    if( spriteRules ){
-        sizeBehaviour = spriteRules->sizeBehaviour;
-    } else {
-        const auto *const sparkRules = std::get_if<Particle::SparkRules>( &baseFlock->appearanceRules.geometryRules );
-        sizeBehaviour = sparkRules->sizeBehaviour;
-    }
+    Particle::SpriteRules *spriteRules = std::get_if<Particle::SpriteRules>( &baseFlock->appearanceRules.geometryRules );
+    Particle::SparkRules *sparkRules   = std::get_if<Particle::SparkRules>( &baseFlock->appearanceRules.geometryRules );
+
+    const Particle::SizeBehaviour sizeBehaviour = spriteRules ? spriteRules->sizeBehaviour : sparkRules->sizeBehaviour;
+
+    const bool modulateSize = trailFlock->modulateByParentSize;
 
 	// Second, spawn particles if needed
 	for( unsigned i = 0; i < baseFlock->numActivatedParticles; ++i ) {
 		const Particle *const p     = &baseFlock->particles[i];
 		float *const lastDropOrigin = trailFlock->lastParticleTrailDropOrigins[p->originalIndex];
+        const float sizeFrac        = modulateSize ? calcSizeFracForLifetimeFrac( p->lifetimeFrac, sizeBehaviour ) : 1.0f;
 
-        /*
-        float signedFrac = Particle::kByteParamNormalizer * (float)p->instanceRadiusSpreadFraction;
-        float radius     = wsw::max( 0.0f, spriteRules->radius.mean + signedFrac * spriteRules->radius.spread );
-
-        radius *= (float)p->instanceRadiusExtraScale;
-
-        if( spriteRules->sizeBehaviour != Particle::SizeNotChanging ) {
-            radius *= calcSizeFracForLifetimeFrac( p->lifetimeFrac, spriteRules->sizeBehaviour );
-        }*/
-
-		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, updateParams );
+		const ParticleTrailUpdateParams instanceUpdateParams {
+			.maxParticlesPerDrop    = updateParams.maxParticlesPerDrop,
+			.dropDistance           = updateParams.dropDistance,
+			.particleSizeMultiplier = updateParams.particleSizeMultiplier * sizeFrac, // Modify here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+		};
+		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, instanceUpdateParams );
 	}
 
 	if( trailFlock->numActivatedParticles ) [[likely]] {
