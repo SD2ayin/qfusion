@@ -63,7 +63,7 @@ IntConfigVar v_flockSizeMode( "sizeMode"_asView, { .byDefault = 0, .min = inclus
 IntConfigVar v_trailSizeMode( "trailSizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
 
 FloatConfigVar v_flockAngle( "angle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_numPlasmaSpikes( "numSpikes"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_trailAngle( "trailAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 FloatConfigVar v_tracerPrestepMin( "tracerPrestepMin"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_tracerPrestepMax( "tracerPrestepMax"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
@@ -73,6 +73,13 @@ FloatConfigVar v_spikeLengthSpread( "spikeLengthSpread"_asView,  { .byDefault = 
 
 FloatConfigVar v_spikeWidth( "spikeWidth"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_spikeWidthSpread( "spikeWidthSpread"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_radius( "radius"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_radiusSpread( "radiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_trailRadiusSpread( "trailRadiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_dropDistance( "dropDistance"_asView, { .byDefault = 10.0f, .flags = CVAR_ARCHIVE } );
 
 void EffectsSystemFacade::startSound( const SoundSet *sound, const float *origin, float attenuation ) {
 	SoundSystem::instance()->startFixedSound( sound, origin, CHAN_AUTO, v_volumeEffects.get(), attenuation );
@@ -438,7 +445,8 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 		ConicalFlockParams flockParams {
 			.origin        = { origin[0], origin[1], origin[2] },
 			.offset        = { dir[0], dir[1], dir[2] },
-            .dir           = { -particleDir[0], -particleDir[1], particleDir[2] },
+            //.dir           = { -particleDir[0], -particleDir[1], particleDir[2] },
+            .dir           = { particleDir[0], particleDir[1], particleDir[2] },
 			.gravity       = 0.7f * GRAVITY,
 			.restitution   = 0.8f,
             .angle         = 85.0f,
@@ -695,24 +703,20 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
         };*/
 
         appearanceRules.geometryRules = Particle::SparkRules {
-                .length        = { .mean = v_spikeLength.get(), .spread = v_spikeLengthSpread.get() },
-                .width         = { .mean = v_spikeWidth.get(), .spread = v_spikeWidthSpread.get() },
+                .length        = { .mean = 8.0f, .spread = 2.5f },
+                .width         = { .mean = 4.0f, .spread = 1.0f },
                 .sizeBehaviour = Particle::SizeNotChanging,
         };
 
-        //flockParams.speed           = { .min = 400.f, .max = 900.f };
-        flockParams.speed           = { .min = v_flockSpeedMin.get(), .max = v_flockSpeedMax.get() };
+        flockParams.speed           = { .min = 400.0f, .max = 600.0f };
         flockParams.angle           = 180.0f;
         flockParams.turbulenceSpeed = 0.0f;
         flockParams.innerAngle      = 0.0f;
         flockParams.gravity         = 0.0f;
-        //flockParams.drag            = 0.01f;
-        flockParams.drag            = v_flockDrag.get();
+        flockParams.drag            = 0.02f;
         flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
-        //flockParams.timeout         = { .min = 60, .max = 100 };
-        //flockParams.percentage      = { .min = 0.13f, .max = 0.2f };
-        flockParams.timeout         = { .min = v_flockLifetimeMin.get(), .max = v_flockLifetimeMax.get() };
-        flockParams.percentage      = { .min = v_percentageMin.get(), .max = v_percentageMax.get() };
+        flockParams.timeout         = { .min = 60, .max = 100 };
+        flockParams.percentage      = { .min = 0.15, .max = 0.2 };
         flockParams.shiftSpeed      = { .min = 0.0f, .max = 0.0f };
 
         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
@@ -1139,9 +1143,10 @@ static auto makeRicochetFlockOrientation( const SolidImpact &impact, wsw::Random
 	assert( std::fabs( VectorLengthSquared( impact.normal ) - 1.0f ) < 0.1f );
 	assert( DotProduct( impact.incidentDir, impact.normal ) <= 0 );
 
-	vec3_t oppositeDir, flockDir;
-	VectorNegate( impact.incidentDir, oppositeDir );
-	VectorReflect( oppositeDir, impact.normal, 0.0f, flockDir );
+	//vec3_t oppositeDir, flockDir;
+	//VectorNegate( impact.incidentDir, oppositeDir );
+    vec3_t flockDir;
+	VectorReflect( impact.incidentDir, impact.normal, 0.0f, flockDir );
 
 	const float coneAngleCosine = Q_Sqrt( rng->nextFloat( angleCosineRange.first, angleCosineRange.second ) );
 	addRandomRotationToDir( flockDir, rng, coneAngleCosine );
@@ -1182,9 +1187,9 @@ static inline void assignUpShiftAndModifyBaseSpeed( FlockParams *flockParams, fl
 	flockParams->shiftSpeed.min = minShiftSpeed * upShiftScale;
 	flockParams->shiftSpeed.max = maxShiftSpeed * upShiftScale;
 	const float baseSpeedScale = 1.0f + upShiftScale;
-	// Apply the upper bound to avoid triggering an assertion on speed feasibility
-	flockParams->speed.min = wsw::min( 999.9f, flockParams->speed.min * baseSpeedScale );
-	flockParams->speed.max = wsw::min( 999.9f, flockParams->speed.max * baseSpeedScale );
+        // Apply the upper bound to avoid triggering an assertion on speed feasibility
+        flockParams->speed.min = wsw::min( 999.9f, flockParams->speed.min * baseSpeedScale );
+        flockParams->speed.max = wsw::min( 999.9f, flockParams->speed.max * baseSpeedScale );
 }
 
 static const RgbaLifespan kBulletRosetteSpikeColorLifespan {
@@ -1223,7 +1228,7 @@ void EffectsSystemFacade::spawnBulletGenericImpactRosette( unsigned delay, const
 		.flareMaterial      = cgs.media.shaderBulletImpactFlare,
 		.origin             = { orientation.origin[0], orientation.origin[1], orientation.origin[2] },
 		.offset             = { orientation.offset[0], orientation.offset[1], orientation.offset[2] },
-		.dir                = { -orientation.dir[0], -orientation.dir[1], -orientation.dir[2] },
+		.dir                = { orientation.dir[0], orientation.dir[1], orientation.dir[2] },
 		.innerConeAngle     = 5.0f,
 		.outerConeAngle     = 10.0f + 50.0f * maxPercentage,
 		.spawnRingRadius    = 0.0f,
@@ -1264,7 +1269,7 @@ void EffectsSystemFacade::spawnBulletImpactDoubleRosette( unsigned delay, const 
 		.flareMaterial      = cgs.media.shaderBulletImpactFlare,
 		.origin             = { orientation.origin[0], orientation.origin[1], orientation.origin[2] },
 		.offset             = { orientation.offset[0], orientation.offset[1], orientation.offset[2] },
-		.dir                = { -orientation.dir[0], -orientation.dir[1], -orientation.dir[2] },
+		.dir                = { orientation.dir[0], orientation.dir[1], orientation.dir[2] },
 		.innerConeAngle     = 5.0f,
 		.outerConeAngle     = 15.0f,
 		.spawnRingRadius    = 0.0f,
@@ -1286,7 +1291,7 @@ void EffectsSystemFacade::spawnBulletImpactDoubleRosette( unsigned delay, const 
 		.flareMaterial      = cgs.media.shaderBulletImpactFlare,
 		.origin             = { orientation.origin[0], orientation.origin[1], orientation.origin[2] },
 		.offset             = { orientation.offset[0], orientation.offset[1], orientation.offset[2] },
-		.dir                = { -orientation.dir[0], -orientation.dir[1], -orientation.dir[2] },
+		.dir                = { orientation.dir[0], orientation.dir[1], orientation.dir[2] },
 		.innerConeAngle     = 45.0f,
 		.outerConeAngle     = 75.0f,
 		.spawnRingRadius    = 1.0f,
@@ -1380,9 +1385,11 @@ void EffectsSystemFacade::spawnBulletMetalRicochetParticles( unsigned delay, con
 		.gravity     = GRAVITY,
 		.drag        = 0.008f,
 		.restitution = 0.5f,
-		.angle       = 18.0f,
-		.speed       = { .min = 700.0f, .max = 950.0f },
-		.percentage  = { .min = minPercentage, .max = maxPercentage },
+        //.angle       = 18.0f,
+		.angle       = v_flockAngle.get(),
+        .speed       = { .min = v_flockSpeedMin.get(), .max = v_flockSpeedMax.get() },
+		//.speed       = { .min = 700.0f, .max = 950.0f },
+		.percentage  = { .min = minPercentage * v_percentageMin.get(), .max = maxPercentage * v_percentageMax.get() },
 		.timeout     = { .min = 300, .max = 350 },
 	};
 
@@ -1469,47 +1476,144 @@ void EffectsSystemFacade::spawnBulletMetalDebrisParticles( unsigned delay, const
 	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
 }
 
-static const RgbaLifespan kGreyDustColors[1] {
+/*static const RgbaLifespan kGreyDustColors[1] {
 	{
 		.initial  = { 0.5f, 0.5f, 0.5f, 0.1f },
 		.fadedIn  = { 0.5f, 0.5f, 0.5f, 0.1f },
 		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.0f },
 		.startFadingOutAtLifetimeFrac = 0.67f
 	}
+};*/
+
+static const RgbaLifespan kGreyDustColors[1] {
+        {
+                .initial  = { 0.75f, 0.75f, 0.75f, 1.0f },
+                .fadedIn  = { 0.75f, 0.75f, 0.75f, 0.9f },
+                .fadedOut = { 0.75f, 0.75f, 0.75f, 0.8f },
+        }
 };
 
-static shader_s *g_stoneDustMaterialsStorage[2];
+static const RgbaLifespan kSoftDustColors[1] {
+        {
+                .initial  = { 0.5f, 0.5f, 0.5f, 0.1f },
+                .fadedIn  = { 0.5f, 0.5f, 0.5f, 0.1f },
+                .fadedOut = { 0.5f, 0.5f, 0.5f, 0.0f },
+                .startFadingOutAtLifetimeFrac = 0.67f
+        }
+};
+
+//static shader_s *g_stoneDustMaterialsStorage[2];
 
 void EffectsSystemFacade::spawnStoneDustParticles( unsigned delay, const FlockOrientation &orientation,
 												   float upShiftScale, unsigned materialParam,
 												   float dustPercentageScale ) {
-	g_stoneDustMaterialsStorage[0] = cgs.media.shaderStoneDustHard;
-	g_stoneDustMaterialsStorage[1] = cgs.media.shaderStoneDustSoft;
+	//g_stoneDustMaterialsStorage[0] = cgs.media.shaderStoneDustHard;
+	//g_stoneDustMaterialsStorage[1] = cgs.media.shaderStoneDustSoft;
 
-	const Particle::AppearanceRules appearanceRules {
-		.materials           = g_stoneDustMaterialsStorage,
+    const float radius = 25.0f;
+    const float radiusSpread = 5.0f;
+
+	Particle::AppearanceRules appearanceRules {
+		.materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
 		.colors              = kGreyDustColors,
-		.numMaterials        = std::size( g_stoneDustMaterialsStorage ),
 		.geometryRules       = Particle::SpriteRules {
-			.radius = { .mean = 25.0f, .spread = 7.5f }, .sizeBehaviour = Particle::Expanding
+			.radius = { .mean = radius, .spread = radiusSpread },
+            .sizeBehaviour = Particle::Shrinking
 		},
 		.applyVertexDynLight = true
 	};
 
 	ConicalFlockParams flockParams {
-		.gravity         = 50.0f,
-		.drag            = 0.03f,
-		.restitution     = 1.0f,
-		.angle           = 30.0f,
-		.speed           = { .min = 100.0f, .max = 500.0f },
-		.angularVelocity = { .min = -180.0f, .max = +180.0f },
-		.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
-		.timeout         = { .min = 750, .max = 1000 },
+		.gravity         = 0.8f * GRAVITY,
+        .drag            = 0.04f,
+		.restitution     = 0.8f,
+		.angle           = 90.0f,
+		.speed           = { .min = 800.0f, .max = 990.0f },
+		//.angularVelocity = { .min = -180.0f, .max = +180.0f },
+        .percentage      = { .min = 0.15f, .max = 0.2f },
+		//.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
+		.timeout         = { .min = 400, .max = 500},
 	};
 
-	orientation.copyToFlockParams( &flockParams );
-	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
-	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
+    orientation.copyToFlockParams( &flockParams );
+
+    Particle::AppearanceRules SmokeTrailAppearanceRules {
+            .materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
+            .colors              = kGreyDustColors,
+            .geometryRules       = Particle::SpriteRules {
+                    .radius = { .mean = radius - radiusSpread, .spread = 5.0f },
+                    .sizeBehaviour = Particle::Shrinking
+            },
+            .applyVertexDynLight = true
+    };
+
+    ConicalFlockParams SmokeTrailFlockParams {
+            .gravity    = -0.025f * GRAVITY,
+            .drag       = 0.0f,
+            .speed      = { .min = 0.f, .max = 1.f },
+            .percentage = { .min = 0.5f, .max = 0.8f },
+            .timeout    = { .min = 600, .max = 800 },
+    };
+
+    ParamsOfParticleTrailOfParticles SmokeParamsOfTrails {
+            .appearanceRules = SmokeTrailAppearanceRules,
+            .flockParamsTemplate = SmokeTrailFlockParams,
+            .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 10.0f },
+            .modulateByParentSize = true
+    };
+
+    orientation.copyToFlockParams( &SmokeTrailFlockParams );
+
+	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 900.0f, 950.0f );
+	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules, TransientEffectsSystem::ParticleFlockBin::Small, &SmokeParamsOfTrails );
+
+    appearanceRules.materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle();
+    appearanceRules.colors              = kSoftDustColors;
+    appearanceRules.geometryRules       = Particle::SpriteRules {
+                    .radius = { .mean = 25.0f, .spread = 7.5f },
+                    .sizeBehaviour = Particle::Expanding
+    };
+
+    flockParams.gravity         = 0.059f * GRAVITY;
+    flockParams.drag            = 0.03f;
+    flockParams.restitution     = 1.0f;
+    flockParams.angle           = 30.0f;
+    flockParams.speed           = { .min = 100.0f, .max = 500.0f };
+    flockParams.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale };
+    flockParams.timeout         = { .min = 750, .max = 1000 };
+
+    orientation.copyToFlockParams( &flockParams );
+    assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
+    spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
+}
+
+void EffectsSystemFacade::spawnStoneSmokeParticles( unsigned delay, const FlockOrientation &orientation,
+                                                   float upShiftScale, unsigned materialParam,
+                                                   float dustPercentageScale ) {
+
+    Particle::AppearanceRules appearanceRules;
+
+    ConicalFlockParams flockParams;
+
+    appearanceRules.materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle();
+    appearanceRules.colors              = kSoftDustColors;
+    appearanceRules.geometryRules       = Particle::SpriteRules {
+            .radius = { .mean = 25.0f, .spread = 7.5f },
+            .sizeBehaviour = Particle::Expanding
+    };
+    appearanceRules.applyVertexDynLight = true;
+
+    flockParams.gravity         = 0.059f * GRAVITY;
+    flockParams.drag            = 0.03f;
+    flockParams.restitution     = 1.0f;
+    flockParams.angle           = 30.0f;
+    flockParams.speed           = { .min = 100.0f, .max = 500.0f };
+    flockParams.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale };
+    flockParams.timeout         = { .min = 750, .max = 1000 };
+
+    orientation.copyToFlockParams( &flockParams );
+    assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
+    spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
 }
 
 static shader_s *g_stuccoDustMaterialsStorage[3];
@@ -1803,7 +1907,7 @@ void EffectsSystemFacade::spawnSandImpactParticles( unsigned delay, const FlockO
 	dustFlockParams.speed           = { .min = 30 * dustSpeedScale, .max = 50 * dustSpeedScale };
 	dustFlockParams.timeout         = { .min = (unsigned)( 200 * timeoutScale ), .max = (unsigned)( 450 * timeoutScale ) };
 	dustFlockParams.angularVelocity = { .min = -180.0f, .max = +180.0f };
-	assignUpShiftAndModifyBaseSpeed( &dustFlockParams, upShiftScale, 50.0f, 75.0f );
+	//assignUpShiftAndModifyBaseSpeed( &dustFlockParams, upShiftScale, 50.0f, 75.0f );
 	spawnOrPostponeImpactParticleEffect( delay, dustFlockParams, dustAppearanceRules );
 }
 
@@ -2078,7 +2182,7 @@ void EffectsSystemFacade::spawnExplosionImpactParticleEffectForMaterial( const F
 			break;
 		case SurfImpactMaterial::Stone:
 			delay = 100 + m_rng.nextBoundedFast( 100 );
-			spawnStoneDustParticles( delay, flockOrientation, upShiftScale, materialParam );
+			spawnStoneSmokeParticles( delay, flockOrientation, upShiftScale, materialParam );
 			break;
 		case SurfImpactMaterial::Stucco:
 			delay = 100 + m_rng.nextBoundedFast( 100 );
@@ -2665,13 +2769,19 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> uns
         VectorMA(projection.origin, -v_tracerOffset.get(), &projection.axis[AXIS_UP], projection.origin);
     }
 
+    const float width = v_spikeWidth.get();
+    const float widthSpread = v_spikeWidthSpread.get();
+
+    const float length = v_spikeLength.get();
+    const float lengthSpread = v_spikeLengthSpread.get();
+
 	const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to, {
 		.material           = cgs.media.shaderBulletTracer,
 		.duration           = 200,
 		//.prestepDistance    = m_rng.nextFloat( 72.0f, 96.0f ),
         .prestepDistance    = m_rng.nextFloat( v_tracerPrestepMin.get(), v_tracerPrestepMax.get() ),
 		.smoothEdgeDistance = 172.0f,
-		.width              = m_rng.nextFloat( 2.0f, 2.5f ),
+		.width              = m_rng.nextFloat( 4.0f, 8.0f ),
 		.minLength          = m_rng.nextFloat( 80.0f, 108.0f ),
 		.distancePercentage = ( owner == (int)cg.predictedPlayerState.POVnum ) ? 0.24f : 0.18f,
 		.programLightRadius = 72.0f,
@@ -2688,13 +2798,22 @@ void EffectsSystemFacade::spawnPelletTracers( int owner, std::span<const vec3_t>
     orientation_t projection;
     CG_PModel_GetProjectionSource(owner, &projection);
 
+    if( v_tracerOffsetMode.get() == 0 ){
+        projection.origin[2] -= v_tracerOffset.get();
+    } else {
+        VectorMA(projection.origin, -v_tracerOffset.get(), &projection.axis[AXIS_UP], projection.origin);
+    }
+
+    const float length = v_spikeLength.get();
+    const float lengthSpread = v_spikeLengthSpread.get();
+
 	for( size_t i = 0; i < to.size(); ++i ) {
 		const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to[i], {
 			.material                 = cgs.media.shaderPelletTracer,
 			.duration                 = 125,
-			.prestepDistance          = m_rng.nextFloat( 32.0f, 72.0f ),
-			.width                    = m_rng.nextFloat( 0.9f, 1.0f ),
-			.minLength                = m_rng.nextFloat( 72.0f, 108.0f ),
+			.prestepDistance          = m_rng.nextFloat( 0.0f, 1.0f ),
+			.width                    = m_rng.nextFloat( 3.0f, 5.0f ),
+            .minLength                = m_rng.nextFloat( 150.0f, 250.0f ),
 			.distancePercentage       = 0.18f,
 			.color                    = { 1.0f, 0.9f, 0.8f, 1.0f },
 			.programLightRadius       = 96.0f,

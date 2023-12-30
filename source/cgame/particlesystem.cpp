@@ -1537,7 +1537,7 @@ void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock,
 		const ParticleTrailUpdateParams instanceUpdateParams {
 			.maxParticlesPerDrop    = updateParams.maxParticlesPerDrop,
 			.dropDistance           = updateParams.dropDistance,
-			.particleSizeMultiplier = updateParams.particleSizeMultiplier * sizeFrac, // Modify here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+			.particleSizeMultiplier = updateParams.particleSizeMultiplier * sizeFrac
 		};
 		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, instanceUpdateParams );
 	}

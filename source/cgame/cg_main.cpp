@@ -172,6 +172,8 @@ static BoolConfigVar v_pickupFlash( "cg_pickupFlash"_asView, { .byDefault = fals
 IntConfigVar v_damageIndicator( "cg_damageIndicator"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
 IntConfigVar v_damageIndicatorTime( "cg_damageIndicatorTime"_asView, { .byDefault = 25, .min = inclusive( 0 ), .flags = CVAR_ARCHIVE } );
 
+
+
 cg_static_t cgs;
 cg_state_t cg;
 
@@ -1131,6 +1133,8 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					}
 				}
 
+
+
 				const RgbaLifespan *singleColorAddress;
 				ParticleColorsForTeamHolder *holder = &::laserImpactParticleColorsHolder;
 				if( useTeamColors ) {
@@ -1142,25 +1146,34 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					singleColorAddress = &holder->defaultColors;
 				}
 
-				EllipsoidalFlockParams flockParams {
-					.origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
-					.offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.stretchDir   = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.stretchScale = 0.5f,
-					.gravity      = 2.0f * GRAVITY,
-					.speed        = { .min = 150, .max = 200 },
-					.shiftSpeed   = { .min = 100, .max = 125 },
-					.percentage   = { .min = 1.0f, .max = 1.0f },
-					.timeout      = { .min = 150, .max = 300 },
-				};
-				Particle::AppearanceRules appearanceRules {
-					.materials      = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
-					.colors         = { singleColorAddress, singleColorAddress + 1 },
-					.geometryRules  = Particle::SpriteRules {
-						.radius = { .mean = 1.25f, .spread = 0.25f }, .sizeBehaviour = Particle::Shrinking
-					},
-				};
-				cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+                Particle::AppearanceRules appearanceRules{
+                        .materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle(),
+                        .colors    = { singleColorAddress, singleColorAddress + 1 },
+                        .geometryRules = Particle::SparkRules {
+                            .length = {.mean = 8.0f, .spread = 2.5f},
+                            .width = {.mean = 4.0f, .spread = 1.0f},
+                            .sizeBehaviour = Particle::SizeNotChanging,
+                        }
+                };
+
+                ConicalFlockParams flockParams {
+                    .origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
+                    .offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                    //.dir          = { -trace->plane.normal[0], -trace->plane.normal[1], trace->plane.normal[2] },
+                    .dir          = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                    .gravity      = 0.0f,
+                    .drag         = 0.02f,
+                    .angle        = 48.0f,
+                    .innerAngle   = 30.0f,
+                    .bounceCount  = { .minInclusive = 0, .maxInclusive = 0 },
+                    .speed        = { .min = 400.0f, .max = 600.0f },
+                    .shiftSpeed   = { .min = 0.0f, .max = 0.0f },
+                    .percentage   = { .min = 0.15, .max = 0.2 },
+                    .timeout      = { .min = 60, .max = 100 },
+                };
+
+                cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+
 			}
 
 			SoundSystem::instance()->startFixedSound( cgs.media.sndLasergunHit, trace->endpos, CHAN_AUTO,

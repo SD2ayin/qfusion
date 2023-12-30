@@ -211,6 +211,9 @@ private:
 	void spawnStoneDustParticles( unsigned delay, const FlockOrientation &orientation, float upShiftScale,
 								  unsigned materialParam, float dustPercentageScale = 1.0f );
 
+    void spawnStoneSmokeParticles( unsigned delay, const FlockOrientation &orientation, float upShiftScale,
+                                   unsigned materialParam, float dustPercentageScale = 1.0f );
+
 	void spawnStuccoDustParticles( unsigned delay, const FlockOrientation &orientation,
 								   float upShiftScale, unsigned materialParam );
 
