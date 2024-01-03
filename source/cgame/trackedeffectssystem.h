@@ -68,7 +68,7 @@ public:
 		touchGrenadeTrail( entNum, origin, currTime );
 	}
 
-	void touchBlastTrail( int entNum, const float *origin, int64_t currTime );
+	void touchBlastTrail( int entNum, const float *origin, const float *velocity, int64_t currTime );
 	void touchElectroTrail( int entNum, int ownerNum, const float *origin, int64_t currTime );
 
 	void touchStrongPlasmaTrail( int entNum, const float *origin, int64_t currTime );

@@ -627,11 +627,12 @@ static ConicalFlockParams g_blastSmokeParticlesFlockParams {
 };
 
 static ConicalFlockParams g_blastIonsParticlesFlockParams {
-	.gravity     = -75,
-	.angle       = 30,
-	.bounceCount = { .minInclusive = 0, .maxInclusive = 0 },
-	.speed       = { .min = 200, .max = 300 },
-	.timeout     = { .min = 300, .max = 400 },
+        .gravity     = -0.09f * GRAVITY,
+        .angle       = 30,
+        .bounceCount = { .minInclusive = 0, .maxInclusive = 0 },
+        .speed       = { .min = 0.0f, .max = 0.0f },
+        .shiftSpeed  = { .min = 100, .max = 150 },
+        .timeout     = { .min = 300, .max = 400 },
 };
 
 static const StraightPolyTrailProps kBlastCombinedTrailProps {
@@ -644,7 +645,7 @@ static const StraightPolyTrailProps kBlastStandaloneTrailProps {
 	.width     = 12,
 };
 
-void TrackedEffectsSystem::touchBlastTrail( int entNum, const float *origin, int64_t currTime ) {
+void TrackedEffectsSystem::touchBlastTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
 	AttachedEntityEffects *const __restrict effects = &m_attachedEntityEffects[entNum];
 
 	if( v_projectileSmokeTrail.get() ) {
@@ -666,8 +667,10 @@ void TrackedEffectsSystem::touchBlastTrail( int entNum, const float *origin, int
 
 	if( v_projectileFireTrail.get() ) {
 		if( !effects->particleTrails[1] ) [[unlikely]] {
-			effects->particleTrails[1] = allocParticleTrail( entNum, 1, origin, kClippedTrailsBin,
-															 &::g_blastIonsParticlesFlockParams, {
+
+			effects->particleTrails[1] = allocParticleTrail( entNum, 1, origin, kNonClippedTrailsBin,
+                                                             &::g_blastIonsParticlesFlockParams,
+                                                             {
 				.materials     = cgs.media.shaderBlastFireTrailParticle.getAddressOfHandle(),
 				.colors        = kBlastIonsTrailColors,
 				.geometryRules = Particle::SpriteRules {

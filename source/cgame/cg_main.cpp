@@ -35,6 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cg_local.h"
 #include "../ui/uisystem.h"
 #include "../ui/huddatamodel.h"
+#include "../common/noise.h"
 
 using wsw::operator""_asView;
 
@@ -1087,9 +1088,11 @@ static vec_t *_LaserColor( vec4_t color ) {
 
 static ParticleColorsForTeamHolder laserImpactParticleColorsHolder {
 	.defaultColors = {
-		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-		.fadedIn  = { 1.0f, 1.0f, 1.0f, 1.0f },
-		.fadedOut = { 1.0f, 0.9f, 0.0f, 0.0f },
+		.initial  = { 1.0f, 1.0f, 0.88f, 1.0f },
+		.fadedIn  = { 1.0f, 1.0f, 0.39f, 1.0f },
+		.fadedOut = { 0.88f, 0.25f, 0.07f, 1.0f },
+        .finishFadingInAtLifetimeFrac = 0.1f,
+        .startFadingOutAtLifetimeFrac = 0.35f
 	}
 };
 
@@ -1115,6 +1118,27 @@ static void CG_LaserGunImpact( const vec3_t pos, const vec3_t dir, float radius,
 	drawSceneRequest->addEntity( &ent );
 }
 
+FloatConfigVar v_flockSpeedMin("flockSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_flockSpeedMax("flockSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_flockLifetimeMin("flockLifetimeMin"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_flockLifetimeMax("flockLifetimeMax"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_flockDrag("flockDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_turbulence( "turbulence"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_turbulenceScale( "turbulenceScale"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_percentageMin( "percentageMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_percentageMax( "percentageMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_flockAngle( "angle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_radius( "radius"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_radiusSpread( "radiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_lgAngle( "lgAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_lgInnerAngle( "lgInnerAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_spikeSpeed( "spikeSpeed"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+
+UnsignedConfigVar v_numSpikes( "numSpikes"_asView, { .byDefault = 3, .flags = CVAR_ARCHIVE } );
+BoolConfigVar v_useImpactNormal( "useImpactNormal"_asView, { .byDefault = false, .flags = CVAR_ARCHIVE } );
+
 static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 	if( !trace || trace->ent < 0 ) {
 		return;
@@ -1133,8 +1157,6 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					}
 				}
 
-
-
 				const RgbaLifespan *singleColorAddress;
 				ParticleColorsForTeamHolder *holder = &::laserImpactParticleColorsHolder;
 				if( useTeamColors ) {
@@ -1147,32 +1169,61 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 				}
 
                 Particle::AppearanceRules appearanceRules{
-                        .materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle(),
+                        .materials = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
                         .colors    = { singleColorAddress, singleColorAddress + 1 },
-                        .geometryRules = Particle::SparkRules {
-                            .length = {.mean = 8.0f, .spread = 2.5f},
-                            .width = {.mean = 4.0f, .spread = 1.0f},
-                            .sizeBehaviour = Particle::SizeNotChanging,
+                        .geometryRules = Particle::SpriteRules {
+                            .radius = {.mean = 5.0f, .spread = 2.5f },
+                            .sizeBehaviour = Particle::Shrinking,
                         }
                 };
 
                 ConicalFlockParams flockParams {
                     .origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
                     .offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-                    //.dir          = { -trace->plane.normal[0], -trace->plane.normal[1], trace->plane.normal[2] },
-                    .dir          = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
                     .gravity      = 0.0f,
                     .drag         = 0.02f,
-                    .angle        = 48.0f,
-                    .innerAngle   = 30.0f,
-                    .bounceCount  = { .minInclusive = 0, .maxInclusive = 0 },
-                    .speed        = { .min = 400.0f, .max = 600.0f },
-                    .shiftSpeed   = { .min = 0.0f, .max = 0.0f },
-                    .percentage   = { .min = 0.15, .max = 0.2 },
-                    .timeout      = { .min = 60, .max = 100 },
+                    .angle        = 12.0f,
+                    .bounceCount  = { .minInclusive = 1, .maxInclusive = 1 },
+                    //.speed        = { .min = 400.0f, .max = 600.0f },
+                    //.percentage   = { .min = 0.15, .max = 0.2 },
+                    //.timeout      = { .min = 60, .max = 100 },
+                    .speed        = { .min = 0.0f, .max = 400.0f },
+                    .percentage   = { .min = 0.0f, .max = 1.0f },
+                    .timeout      = { .min = 180, .max = 240 },
                 };
 
-                cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+                vec3_t particleDir;
+
+                // https://math.stackexchange.com/a/205589 for creation of the cone
+                constexpr float innerAngle = 30.0f;
+                constexpr float angle = 85.0f;
+                static float maxZ = std::cos((float) DEG2RAD(innerAngle));
+                static float minZ = std::cos((float) DEG2RAD(angle));
+                static float zRange = maxZ - minZ;
+
+                constexpr unsigned numSpikes = 4;
+                constexpr float spikeFraction = 1 / numSpikes;
+                constexpr float laserShotTime = 1.0f / 20.0f;
+
+                const unsigned i = (unsigned)( cg.time * laserShotTime ) % numSpikes;
+                const float coord = cg.time * 5e-4f + i * 10.0f;
+
+                mat3_t transformMatrix;
+                Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], trace->plane.normal, transformMatrix );
+
+                const float z = minZ + calcSimplexNoise2D(-coord, 0.0f ) * zRange;
+                const float r = Q_Sqrt(1.0f - z * z);
+                const float phi = DEG2RAD(
+                                          AngleNormalize360(
+                                                  360.0f * ( (float)(i) * spikeFraction + calcSimplexNoise2D(coord, 0.0f) )
+                                          )
+                                  );
+                const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
+                Matrix3_TransformVector( transformMatrix, untransformed, particleDir );
+
+                VectorCopy( particleDir, flockParams.dir );
+
+                cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
 
 			}
 
@@ -1505,6 +1556,9 @@ static bool canShowBulletImpactForDirAndTrace( const float *incidentDir, const t
 	return true;
 }
 
+FloatConfigVar v_checkBehind("checkBehind"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+FloatConfigVar v_checkInfront("checkInfront"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
 auto getSurfFlagsForImpact( const trace_t &trace, const float *impactDir ) -> int {
 	// Hacks
 	// TODO: Trace against brush submodels as well
@@ -1513,14 +1567,14 @@ auto getSurfFlagsForImpact( const trace_t &trace, const float *impactDir ) -> in
 		vec3_t testPoint;
 
 		// Check behind
-		VectorMA( trace.endpos, +4.0f, impactDir, testPoint );
+		VectorMA( trace.endpos, v_checkBehind.get(), impactDir, testPoint );
 		wsw::ref::traceAgainstBspWorld( &visualTrace, trace.endpos, testPoint );
 		if( visualTrace.fraction != 1.0f ) {
 			return visualTrace.surfFlags;
 		}
 
 		// Check in front
-		VectorMA( trace.endpos, -4.0f, impactDir, testPoint );
+		VectorMA( trace.endpos, -v_checkInfront.get(), impactDir, testPoint );
 		wsw::ref::traceAgainstBspWorld( &visualTrace, testPoint, trace.endpos );
 		if( visualTrace.fraction != 1.0f ) {
 			return visualTrace.surfFlags;
@@ -3902,7 +3956,7 @@ void CG_AddEntities( DrawSceneRequest *drawSceneRequest ) {
 				break;
 			case ET_BLASTER:
 				CG_AddGenericEnt( cent, drawSceneRequest );
-				cg.effectsSystem.touchBlastTrail( cent->current.number, cent->ent.origin, cg.time );
+				cg.effectsSystem.touchBlastTrail( cent->current.number, cent->ent.origin, cent->velocity, cg.time );
 				CG_EntityLoopSound( state, ATTN_STATIC );
 				// We use relatively large light radius because this projectile moves very fast, so make it noticeable
 				drawSceneRequest->addLight( cent->ent.origin, 192.0f, 144.0f, 0.9f, 0.7f, 0.0f );
@@ -4065,6 +4119,7 @@ void CG_AddEntities( DrawSceneRequest *drawSceneRequest ) {
 		CG_EntityLoopSound( state, ATTN_STATIC );
 
 		if( state->effects & EF_STRONG_WEAPON ) {
+            cgNotice() << "touch";
 			cg.effectsSystem.touchStrongPlasmaTrail( cent->current.number, cent->current.origin, cg.time );
 		} else {
 			cg.effectsSystem.touchWeakPlasmaTrail( cent->current.number, cent->current.origin, cg.time );

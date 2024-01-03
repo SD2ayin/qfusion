@@ -119,8 +119,8 @@ public:
 	void touchWeakGrenadeTrail( int entNum, const float *origin, int64_t currTime ) {
 		m_trackedEffectsSystem.touchWeakGrenadeTrail( entNum, origin, currTime );
 	}
-	void touchBlastTrail( int entNum, const float *origin, int64_t currTime ) {
-		m_trackedEffectsSystem.touchBlastTrail( entNum, origin, currTime );
+	void touchBlastTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
+		m_trackedEffectsSystem.touchBlastTrail( entNum, origin, velocity, currTime );
 	}
 	void touchElectroTrail( int entNum, int ownerNum, const float *origin, int64_t currTime ) {
 		m_trackedEffectsSystem.touchElectroTrail( entNum, ownerNum, origin, currTime );
@@ -216,6 +216,9 @@ private:
 
 	void spawnStuccoDustParticles( unsigned delay, const FlockOrientation &orientation,
 								   float upShiftScale, unsigned materialParam );
+
+    void spawnStuccoSmokeParticles( unsigned delay, const FlockOrientation &orientation, float upShiftScale,
+                                   unsigned materialParam, float dustPercentageScale = 1.0f );
 
 	void spawnWoodBulletImpactParticles( unsigned delay, const FlockOrientation &orientation,
 										 float upShiftScale, unsigned materialParam,

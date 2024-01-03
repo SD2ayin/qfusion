@@ -1481,15 +1481,15 @@ static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Pa
     assert( sizeBehaviour != Particle::SizeNotChanging );
 
     float result;
-    if( sizeBehaviour == Particle::Expanding ) {
+    if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
         // Grow faster than the linear growth
         result = Q_Sqrt( lifetimeFrac );
-    } else if( sizeBehaviour == Particle::Shrinking ) {
+    } else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
         // Shrink faster than the linear growth
         result = ( 1.0f - lifetimeFrac );
         result *= result;
     } else {
-        assert( sizeBehaviour == Particle::ExpandingAndShrinking );
+        assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
         if( lifetimeFrac < 0.5f ) {
             result = 2.0f * lifetimeFrac;
         } else {
