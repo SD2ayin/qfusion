@@ -956,9 +956,12 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
         // calculate the tri normal
         vec3_t normal;
         CrossProduct( vecToSecondVert, vecToThirdVert, normal );
+        const float normalLengthSquared = VectorLengthSquared( normal );
+
         const float speed = rng->nextFloat( params->speed.min, params->speed.max );
+        const float speedScalingFactor = Q_RSqrt( normalLengthSquared ) * speed;
         vec3_t velocity;
-        VectorScale( normal, speed, velocity );
+        VectorScale( normal, speedScalingFactor, velocity );
         // transform the velocity according to dir and rotation and assign it to velocity
         Matrix3_TransformVector( transformMatrix, velocity, p->dynamicsVelocity );
 
