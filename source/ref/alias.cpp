@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "local.h"
 #include "frontend.h"
 #include "../common/common.h"
+#include "../common/geometry.h"
+#include "../cgame/cg_local.h"
 
 /*
 * Mod_AliasBuildStaticVBOForMesh
@@ -137,6 +139,7 @@ MD3 MODELS
 * Mod_LoadAliasMD3Model
 */
 void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspFormatDesc_t *unused ) {
+
 	int version, i, j, l;
 	int bufsize, numverts;
 	uint8_t *buf;
@@ -165,6 +168,14 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 		Com_Error( ERR_DROP, "%s has wrong version number (%i should be %i)",
 					  mod->name, version, MD3_ALIAS_VERSION );
 	}
+
+    bool print;
+    if( !strcmp(mod->name, "models/cube/cube.md3") ){
+        Com_Printf("got the %s!\n", mod->name);
+        print = true;
+    } else {
+        print = false;
+    }
 
 	mod->type = mod_alias;
 	mod->extradata = poutmodel = ( maliasmodel_t * )Q_malloc( sizeof( maliasmodel_t ) );
@@ -327,6 +338,10 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 			poutcoord[j][1] = LittleFloat( poutcoord[j][1] );
 		}
 
+        if(print){
+            Com_Printf("numverts:%i\n", poutmesh->numverts);
+        }
+
 		//
 		// load the vertexes and normals
 		//
@@ -344,6 +359,10 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 				poutvert[j].point[0] = LittleShort( invert.point[0] );
 				poutvert[j].point[1] = LittleShort( invert.point[1] );
 				poutvert[j].point[2] = LittleShort( invert.point[2] );
+
+                if(print){
+                    Com_Printf("coords:%f %f %f \n", (float)poutvert[j].point[0], (float)poutvert[j].point[1], (float)poutvert[j].point[2]);
+                }
 
 				poutvert[j].latlong[0] = invert.norm[0];
 				poutvert[j].latlong[1] = invert.norm[1];
@@ -366,6 +385,10 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 			poutelem[0] = (elem_t)LittleLong( inelem[0] );
 			poutelem[1] = (elem_t)LittleLong( inelem[1] );
 			poutelem[2] = (elem_t)LittleLong( inelem[2] );
+
+            if(print){
+                Com_Printf("elem:%u %u %u \n", poutelem[0], poutelem[1], poutelem[2] );
+            }
 		}
 
 		pinmesh = ( dmd3mesh_t * )( ( uint8_t * )pinmesh + LittleLong( inmesh.meshsize ) );
@@ -398,6 +421,110 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 		AddPointToBounds( poutframe->maxs, mod->mins, mod->maxs );
 		mod->radius = wsw::max( mod->radius, poutframe->radius );
 	}
+}
+/*
+void Mod_GetAliasMD3Geometry(const char *fileName, const char *meshName, const unsigned frame, Geometry *outGeometry ) {
+    unsigned *fileBuffer;
+    (void)R_LoadFile( fileName, (void **)&fileBuffer );
+    auto fileNameAsView = wsw::StringView( fileName );
+    if( !fileBuffer ) {
+        cgError() << "WARNING" << fileNameAsView << "not found";
+        return;
+    }
+
+    const dmd3header_t *pInModel = ( dmd3header_t * )fileBuffer;
+    const int version   = LittleLong(pInModel->version );
+    const int numFrames = LittleLong(pInModel->num_frames );
+    const int numMeshes = LittleLong(pInModel->num_meshes );
+    const int numTags   = LittleLong(pInModel->num_tags );
+
+    if( version != MD3_ALIAS_VERSION ) {
+        cgError() << fileNameAsView << "has wrong version number" << version << "should be" << MD3_ALIAS_VERSION;
+        return;
+    }
+    if( numFrames <= 0 ) {
+        cgError() << fileNameAsView << "has no frames";
+        return;
+    }
+    if( numMeshes < 0 ) {
+        cgError() << fileNameAsView << "has invalid number of meshes";
+        return;
+    }
+    if( numMeshes <= 0 && numTags <= 0 ) {
+        cgError() << fileNameAsView << "has no tags or meshes";
+        return;
+    }
+
+    int bufSize;
+    uint8_t *buf;
+
+    bufSize = numFrames * ( sizeof( maliasframe_t ) + sizeof( maliastag_t ) * numTags ) +
+              numMeshes * sizeof( maliasmesh_t ) +
+              numMeshes * sizeof( drawSurfaceAlias_t );
+    buf = ( uint8_t * )Q_malloc( bufSize );
+
+    //
+    // load meshes
+    //
+    dmd3mesh_t *pInMesh;
+    pInMesh = (dmd3mesh_t * )(( uint8_t * )pInModel + LittleLong(pInModel->ofs_meshes ) );
+    for( int i = 0; i < numMeshes; i++ ) {
+        dmd3mesh_t inMesh;
+
+        memcpy( &inMesh, pInMesh, sizeof( dmd3mesh_t ) );
+
+        if( strncmp( (const char *)inMesh.id, IDMD3HEADER, 4 ) ) {
+            cgError() << "mesh" << wsw::StringView(inMesh.name) << "in model" << fileNameAsView << "has wrong id (" <<
+            wsw::StringView(inMesh.id) << "should be " << wsw::StringView(IDMD3HEADER) << ")";
+        }
+
+        const unsigned numTris = LittleLong( inMesh.num_tris );
+        const unsigned numVerts = LittleLong( inMesh.num_verts );
+
+        if( !strcmp( inMesh.name, meshName ) ) {
+
+        }
+
+        pInMesh = ( dmd3mesh_t * )( ( uint8_t * )pInMesh + LittleLong( inMesh.meshsize ) );
+    }
+    R_FreeFile(fileBuffer );
+}*/
+
+Geometry GetGeometryFromAliasMD3( model_t *model, const char *meshName ){
+    Geometry geometry;
+
+    const auto before = Sys_Microseconds();
+    const auto *aliasModel = ( const maliasmodel_t * )model->extradata;
+    for( int meshNum = 0; meshNum < aliasModel->nummeshes; meshNum++ ) {
+        maliasmesh_s mesh = aliasModel->meshes[meshNum];
+        if( !strcmp( mesh.name, meshName ) ){
+            cgNotice() << wsw::StringView( mesh.name ) << wsw::StringView( meshName );
+            const unsigned numVerts = mesh.numverts;
+            const unsigned numTris  = mesh.numtris;
+            auto *const vertexPositions = new float[numVerts][3];
+            auto *const triIndices      = new tri[numTris];
+            std::span<vec3_t> verticesSpan(vertexPositions, numVerts);
+            std::span<tri> triSpan(triIndices, numTris);
+            for( int vertNum = 0; vertNum < mesh.numverts; vertNum++ ) {
+                vertexPositions[vertNum][0] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[0]);
+                vertexPositions[vertNum][1] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[1]);
+                vertexPositions[vertNum][2] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[2]);
+                cgNotice() << "vertex positions " << vertexPositions[vertNum][0] << vertexPositions[vertNum][1] << vertexPositions[vertNum][2];
+            }
+            for( int triNum = 0; triNum < mesh.numtris; triNum++ ){
+                triIndices[triNum][0] = mesh.elems[3*triNum+0];
+                triIndices[triNum][1] = mesh.elems[3*triNum+1];
+                triIndices[triNum][2] = mesh.elems[3*triNum+2];
+                cgNotice() << "triangle indices " << triIndices[triNum][0] << triIndices[triNum][1] << triIndices[triNum][2];
+            }
+
+            geometry.vertexPositions = verticesSpan;
+            geometry.triIndices      = triSpan;
+        }
+    }
+    Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
+
+    return geometry;
 }
 
 model_t *R_AliasModelLOD( const entity_t *e, const float *viewOrigin, float fovDotScale ) {
