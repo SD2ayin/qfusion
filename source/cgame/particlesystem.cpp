@@ -555,6 +555,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 	const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
 	const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
 	const bool isSpherical                = params->stretchScale == 1.0f;
+    const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
 	const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
 	const bool hasVariableDelay           = params->activationDelay.min < params->activationDelay.max;
 
@@ -616,6 +617,9 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		p->dynamicsVelocity[3] = 0.0f;
 
 		p->rotationAngle = 0.0f;
+        if( hasRandomInitialRotation ) {
+            p->rotationAngle += AngleNormalize360( rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max ) );
+        }
 		if( hasVariableAngularVelocity ) {
 			p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
 			p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
@@ -735,6 +739,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 	const bool hasMultipleMaterials       = appearanceRules->numMaterials > 1;
 	const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
 	const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
+    const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
 	const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
 	const bool hasVariableDelay           = params->activationDelay.min != params->activationDelay.max;
 
@@ -780,7 +785,10 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 
 		p->dynamicsVelocity[3] = 0.0f;
 
-		p->rotationAngle = 0.0f;
+        p->rotationAngle = 0.0f;
+        if( hasRandomInitialRotation ) {
+            p->rotationAngle += rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max );
+        }
 		if( hasVariableAngularVelocity ) {
 			p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
 			p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
@@ -897,6 +905,7 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
     const bool hasMultipleMaterials       = appearanceRules->numMaterials > 1;
     const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
     const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
+    const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
     const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
     const bool hasVariableDelay           = params->activationDelay.min != params->activationDelay.max;
 
@@ -955,7 +964,7 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
 
         // calculate the tri normal
         vec3_t normal;
-        CrossProduct( vecToSecondVert, vecToThirdVert, normal );
+        CrossProduct( vecToThirdVert, vecToSecondVert, normal );
         const float normalLengthSquared = VectorLengthSquared( normal );
 
         const float speed = rng->nextFloat( params->speed.min, params->speed.max );
@@ -975,6 +984,9 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
         p->dynamicsVelocity[3] = 0.0f;
 
         p->rotationAngle = 0.0f;
+        if( hasRandomInitialRotation ) {
+            p->rotationAngle += rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max );
+        }
         if( hasVariableAngularVelocity ) {
             p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
             p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );

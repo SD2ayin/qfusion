@@ -156,6 +156,8 @@ public:
 	CachedModel modInstagunWallHit { this, wsw::StringView( PATH_INSTABLAST_IMPACT_MODEL ) };
 	CachedModel modLasergunWallExplo { this, wsw::StringView( PATH_LASERGUN_IMPACT_MODEL ) };
 
+    CachedModel modCube { this, wsw::StringView( "models/cube/cube.md3" ) };
+
     CachedMaterial shaderLaserSpikeParticle { this, wsw::StringView( "gfx/effects/laser_spike_particle" ) };
 	CachedMaterial shaderLaserImpactParticle { this, wsw::StringView( "gfx/effects/laser_impact_particle" ) };
 	CachedMaterial shaderPlasmaImpactParticle { this, wsw::StringView( "gfx/effects/plasma_impact_particle" ) };
@@ -184,6 +186,11 @@ public:
 	CachedMaterial shaderElectroIonsTrailParticle { this, wsw::StringView( "gfx/effects/electro_ions_trail_particle" ) };
 	CachedMaterial shaderElectroPolyTrail { this, wsw::StringView( "gfx/effects/electro_poly_trail" ) };
 
+    CachedMaterial shaderPlasmaTrailParticle1 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle1" ) };
+    CachedMaterial shaderPlasmaTrailParticle2 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle2" ) };
+    CachedMaterial shaderPlasmaTrailParticle3 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle3" ) };
+    CachedMaterial shaderPlasmaTrailParticle4 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle4" ) };
+    CachedMaterial shaderPlasmaTrailParticle5 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle5" ) };
 	CachedMaterial shaderPlasmaPolyTrail { this, wsw::StringView( "gfx/effects/plasma_poly_trail" ) };
 
 	CachedMaterial shaderSmokeHullSoftParticle { this, wsw::StringView( "gfx/effects/smoke_hull_soft_particle" ) };

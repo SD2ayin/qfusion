@@ -182,6 +182,9 @@ struct alignas( 16 ) Particle {
 		Expanding,
 		Shrinking,
 		ExpandingAndShrinking,
+        Thickening,
+        Thinning,
+        ThickeningAndThinning,
 	};
 
 	// Few notes on these value ranges:

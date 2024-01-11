@@ -36,6 +36,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../ui/uisystem.h"
 #include "../ui/huddatamodel.h"
 #include "../common/noise.h"
+#include "../common/geometry.h"
+#include "../ref/local.h"
 
 using wsw::operator""_asView;
 
@@ -1118,17 +1120,12 @@ static void CG_LaserGunImpact( const vec3_t pos, const vec3_t dir, float radius,
 	drawSceneRequest->addEntity( &ent );
 }
 
-FloatConfigVar v_flockSpeedMin("flockSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_flockSpeedMax("flockSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_flockLifetimeMin("flockLifetimeMin"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_flockLifetimeMax("flockLifetimeMax"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_flockDrag("flockDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_turbulence( "turbulence"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_turbulenceScale( "turbulenceScale"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_percentageMin( "percentageMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_percentageMax( "percentageMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_flockAngle( "angle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_radius( "radius"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 FloatConfigVar v_radiusSpread( "radiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 FloatConfigVar v_lgAngle( "lgAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
@@ -1138,6 +1135,11 @@ FloatConfigVar v_spikeSpeed( "spikeSpeed"_asView, { .byDefault = 0.0f, .flags = 
 
 UnsignedConfigVar v_numSpikes( "numSpikes"_asView, { .byDefault = 3, .flags = CVAR_ARCHIVE } );
 BoolConfigVar v_useImpactNormal( "useImpactNormal"_asView, { .byDefault = false, .flags = CVAR_ARCHIVE } );
+
+FloatConfigVar v_flockGravity("flockGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
+UnsignedConfigVar v_monkeyLifetimeMin(wsw::StringView("monkeyLifetimeMin"), { .byDefault = 1, .flags = CVAR_ARCHIVE } );
+UnsignedConfigVar v_monkeyLifetimeMax(wsw::StringView("monkeyLifetimeMax"), { .byDefault = 1, .flags = CVAR_ARCHIVE } );
 
 static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 	if( !trace || trace->ent < 0 ) {
@@ -1177,7 +1179,25 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                         }
                 };
 
-                ConicalFlockParams flockParams {
+                MeshFlockParams flockParams {
+                        .origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
+                        .offset       = { 40.0f * trace->plane.normal[0], 40.0f * trace->plane.normal[1], 40.0f * trace->plane.normal[2] },
+                        .dir          = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
+                        .geometry = &cgs.cube,
+                        .geometryScale = 50.0f,
+                        .geometryRotation = 0.0f,
+                        .gravity      = v_flockGravity.get() * GRAVITY,
+                        .drag         = v_flockDrag.get(),
+                        .bounceCount  = { .minInclusive = 3, .maxInclusive = 4 },
+                        //.speed        = { .min = 400.0f, .max = 600.0f },
+                        //.percentage   = { .min = 0.15, .max = 0.2 },
+                        //.timeout      = { .min = 60, .max = 100 },
+                        .speed        = { .min = 0.0f, .max = 0.0f },
+                        .percentage   = { .min = 0.9f, .max = 1.0f },
+                        .timeout      = { .min = v_monkeyLifetimeMin.get(), .max = v_monkeyLifetimeMax.get() },
+                };
+
+                /*ConicalFlockParams flockParams {
                     .origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
                     .offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
                     .gravity      = 0.0f,
@@ -1221,9 +1241,10 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                 const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
                 Matrix3_TransformVector( transformMatrix, untransformed, particleDir );
 
-                VectorCopy( particleDir, flockParams.dir );
-
-                cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+                VectorCopy( particleDir, flockParams.dir );*/
+                for( int i = 0; i < 20; i++ ) {
+                    cg.particleSystem.addLargeParticleFlock(appearanceRules, flockParams);
+                }
 
 			}
 
@@ -1556,9 +1577,6 @@ static bool canShowBulletImpactForDirAndTrace( const float *incidentDir, const t
 	return true;
 }
 
-FloatConfigVar v_checkBehind("checkBehind"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_checkInfront("checkInfront"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
 auto getSurfFlagsForImpact( const trace_t &trace, const float *impactDir ) -> int {
 	// Hacks
 	// TODO: Trace against brush submodels as well
@@ -1567,14 +1585,14 @@ auto getSurfFlagsForImpact( const trace_t &trace, const float *impactDir ) -> in
 		vec3_t testPoint;
 
 		// Check behind
-		VectorMA( trace.endpos, v_checkBehind.get(), impactDir, testPoint );
+		VectorMA( trace.endpos, 30.0f, impactDir, testPoint );
 		wsw::ref::traceAgainstBspWorld( &visualTrace, trace.endpos, testPoint );
 		if( visualTrace.fraction != 1.0f ) {
 			return visualTrace.surfFlags;
 		}
 
 		// Check in front
-		VectorMA( trace.endpos, -v_checkInfront.get(), impactDir, testPoint );
+		VectorMA( trace.endpos, -4.0f, impactDir, testPoint );
 		wsw::ref::traceAgainstBspWorld( &visualTrace, testPoint, trace.endpos );
 		if( visualTrace.fraction != 1.0f ) {
 			return visualTrace.surfFlags;
@@ -3079,8 +3097,9 @@ void CG_ExtrapolateLinearProjectile( centity_t *cent ) {
 
 	cent->ent.backlerp = 1.0f;
 
-	for( i = 0; i < 3; i++ )
-		cent->ent.origin[i] = cent->ent.origin2[i] = cent->ent.lightingOrigin[i] = cent->current.origin[i];
+	for( i = 0; i < 3; i++ ) {
+        cent->ent.origin[i] = cent->ent.origin2[i] = cent->ent.lightingOrigin[i] = cent->current.origin[i];
+    }
 
 	AnglesToAxis( cent->current.angles, cent->ent.axis );
 }
@@ -4119,13 +4138,13 @@ void CG_AddEntities( DrawSceneRequest *drawSceneRequest ) {
 		CG_EntityLoopSound( state, ATTN_STATIC );
 
 		if( state->effects & EF_STRONG_WEAPON ) {
-            cgNotice() << "touch";
-			cg.effectsSystem.touchStrongPlasmaTrail( cent->current.number, cent->current.origin, cg.time );
+			cg.effectsSystem.touchStrongPlasmaTrail( cent->current.number, cent->current.origin, cent->velocity, cg.time );
 		} else {
-			cg.effectsSystem.touchWeakPlasmaTrail( cent->current.number, cent->current.origin, cg.time );
+			cg.effectsSystem.touchWeakPlasmaTrail( cent->current.number, cent->current.origin, cent->velocity, cg.time );
 		}
 
-		constexpr float desiredProgramLightRadius = 128.0f;
+		//constexpr float desiredProgramLightRadius = 128.0f;
+        constexpr float desiredProgramLightRadius = 128.0f;
 		float programLightRadius = 0.0f;
 
 		// TODO: This should be handled at rendering layer during culling/light prioritization
@@ -4165,12 +4184,22 @@ void CG_LerpEntities( void ) {
 		spatialize = true;
 
 		switch( cent->type ) {
+            case ET_PLASMA: {
+                vec3_t zeroVector = {0.0f, 0.0f, 0.0f};
+                VectorCopy(zeroVector, cent->current.angles);
+                VectorCopy(zeroVector, cent->prev.angles);
+                if( state->linearMovement ) {
+                    CG_ExtrapolateLinearProjectile( cent );
+                } else {
+                    CG_LerpGenericEnt( cent );
+                }
+                break;
+            }
 			case ET_GENERIC:
 			case ET_GIB:
 			case ET_BLASTER:
 			case ET_ELECTRO_WEAK:
 			case ET_ROCKET:
-			case ET_PLASMA:
 			case ET_GRENADE:
 			case ET_WAVE:
 			case ET_ITEM:
@@ -5160,7 +5189,13 @@ static void CG_RegisterWeaponModels( void ) {
 	if( !cgs.weaponInfos[0] ) {
 		cgs.weaponInfos[0] = CG_CreateWeaponZeroModel( cgs.weaponModels[0] );
 	}
+
+    //cgNotice() << "register weapon models finished";
+    //Mod_ForName( "models/cube/cube.md3", true );
+
 }
+
+Geometry GetGeometryFromAliasMD3( model_t *model, const char *meshName );
 
 static void CG_RegisterModels( void ) {
 	if( cgs.precacheModelsStart == MAX_MODELS ) {
@@ -5228,6 +5263,8 @@ static void CG_RegisterModels( void ) {
 	}
 
 	cgs.media.registerModels();
+
+    cgs.cube = GetGeometryFromAliasMD3( cgs.media.modCube, "Cube" );
 
 	CG_RegisterBasePModel(); // never before registering the weapon models
 	CG_RegisterWeaponModels();
@@ -5624,6 +5661,8 @@ void CG_InitPersistentState() {
 	CG_InitTemporaryBoneposesCache();
 }
 
+
+
 void CG_Init( const char *serverName, unsigned int playerNum,
 			  int vidWidth, int vidHeight, float pixelRatio,
 			  bool demoplaying, const char *demoName, bool pure,
@@ -5711,6 +5750,8 @@ void CG_Init( const char *serverName, unsigned int playerNum,
 	CG_ConfigString( CS_AUTORECORDSTATE, cgs.configStrings.get( CS_AUTORECORDSTATE ).value_or( wsw::StringView() ) );
 
 	CG_DemocamInit();
+
+
 }
 
 void CG_Shutdown( void ) {

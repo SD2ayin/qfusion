@@ -410,6 +410,7 @@ typedef struct {
 } cg_viewdef_t;
 
 #include "../common/configstringstorage.h"
+#include "../common/geometry.h"
 
 // this is not exactly "static" but still...
 typedef struct {
@@ -420,6 +421,9 @@ typedef struct {
 	// shaders
 	struct shader_s *shaderWhite;
 	struct shader_s *shaderMiniMap;
+
+    // geometry
+    Geometry cube;
 
 	int fullclipShaderNum;
 
@@ -980,6 +984,12 @@ struct FlockOrientation {
 		VectorCopy( this->offset, params->offset );
 		VectorCopy( this->dir, params->stretchDir );
 	}
+
+    void copyToFlockParams( MeshFlockParams *params ) const {
+        VectorCopy( this->origin, params->origin );
+        VectorCopy( this->offset, params->offset );
+        VectorCopy( this->dir, params->dir );
+    }
 };
 
 void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float minConeAngleCosine, float maxConeAngleCosine );

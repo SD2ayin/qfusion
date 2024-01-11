@@ -53,6 +53,7 @@ struct EllipsoidalFlockParams {
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
 	struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+    struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
 	struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
 	struct { float min { 0.0f }, max { 1.0f }; } percentage;
 	struct { unsigned min { 300u }, max { 700u }; } timeout;
@@ -83,6 +84,7 @@ struct ConicalFlockParams {
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
 	struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+    struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
 	struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
 	struct { float min { 0.0f }, max { 1.0f }; } percentage;
 	struct { unsigned min { 300u }, max { 700u }; } timeout;
@@ -114,6 +116,7 @@ struct MeshFlockParams {
     struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
     struct { float min { 300 }, max { 300 }; } speed;
     struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+    struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
     struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
     struct { float min { 0.0f }, max { 1.0f }; } percentage;
     struct { unsigned min { 300u }, max { 700u }; } timeout;
@@ -290,7 +293,7 @@ private:
 	static constexpr unsigned kMaxLargeFlocks  = 24;
 
 	static constexpr unsigned kMaxClippedTrailFlocks    = 32;
-	static constexpr unsigned kMaxNonClippedTrailFlocks = 16;
+	static constexpr unsigned kMaxNonClippedTrailFlocks = 48;
 
 	static constexpr unsigned kMaxSmallFlockSize  = 8;
 	static constexpr unsigned kMaxMediumFlockSize = 48;

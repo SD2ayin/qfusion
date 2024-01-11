@@ -42,7 +42,7 @@ UnsignedConfigVar v_trailLifetimeMax("trailLifetimeMax"_asView, { .byDefault = 1
 
 FloatConfigVar v_trailDrag("trailDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 
-FloatConfigVar v_flockGravity("flockGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
+
 FloatConfigVar v_trailGravity("trailGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
 
 
@@ -66,8 +66,6 @@ FloatConfigVar v_spikeWidthSpread( "spikeWidthSpread"_asView,  { .byDefault = 0.
 
 
 FloatConfigVar v_trailRadiusSpread( "trailRadiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_dropDistance( "dropDistance"_asView, { .byDefault = 10.0f, .flags = CVAR_ARCHIVE } );
 
 void EffectsSystemFacade::startSound( const SoundSet *sound, const float *origin, float attenuation ) {
 	SoundSystem::instance()->startFixedSound( sound, origin, CHAN_AUTO, v_volumeEffects.get(), attenuation );

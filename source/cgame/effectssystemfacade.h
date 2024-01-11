@@ -125,11 +125,11 @@ public:
 	void touchElectroTrail( int entNum, int ownerNum, const float *origin, int64_t currTime ) {
 		m_trackedEffectsSystem.touchElectroTrail( entNum, ownerNum, origin, currTime );
 	}
-	void touchStrongPlasmaTrail( int entNum, const float *origin, int64_t currTime ) {
-		m_trackedEffectsSystem.touchStrongPlasmaTrail( entNum, origin, currTime );
+	void touchStrongPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
+		m_trackedEffectsSystem.touchStrongPlasmaTrail( entNum, origin, velocity, currTime );
 	}
-	void touchWeakPlasmaTrail( int entNum, const float *origin, int64_t currTime ) {
-		m_trackedEffectsSystem.touchWeakPlasmaTrail( entNum, origin, currTime );
+	void touchWeakPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
+		m_trackedEffectsSystem.touchWeakPlasmaTrail( entNum, origin, velocity, currTime );
 	}
 
 	void detachPlayerTrail( int entNum ) {

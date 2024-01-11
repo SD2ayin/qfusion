@@ -588,7 +588,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
         chosenToonSmokeKeyframes = &toonSmokeKeyframesVariants[randomIdx];
 
         const float randomAngle = m_rng.nextFloat(0, 2 * M_PI);
-        const quat_t rotation = { 0.f, 0.f,std::sin(randomAngle/2), std::cos(randomAngle/2) };
+        const quat_t rotation = { 0.f, 0.f, std::sin(randomAngle/2), std::cos(randomAngle/2) };
 
         std::span<const SimulatedHullsSystem::OffsetKeyframe> toonSmokeKeyframeSet = chosenToonSmokeKeyframes->setOfKeyframes;
 

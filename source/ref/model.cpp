@@ -1209,6 +1209,13 @@ static model_t *Mod_FindSlot( const char *name ) {
 
 model_t *Mod_ForName( const char *name, bool crash ) {
 
+    bool print;
+    if( !strcmp(name, "models/cube/cube.md3") ){
+        print = true;
+    } else {
+        print = false;
+    }
+
 	if( !name[0] ) {
 		Com_Error( ERR_DROP, "Mod_ForName: empty name" );
 	}
@@ -1262,6 +1269,10 @@ model_t *Mod_ForName( const char *name, bool crash ) {
 		Com_DPrintf( S_COLOR_YELLOW "Mod_NumForName: unknown fileid for %s", mod->name );
 		return nullptr;
 	}
+
+    if( descr == &mod_supportedformats[0] && print ){
+        Com_Printf("found md3 descr\n");
+    }
 
 	if( mod_isworldmodel ) {
 		// we only init map config when loading the map from disk
