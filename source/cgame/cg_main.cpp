@@ -1120,27 +1120,6 @@ static void CG_LaserGunImpact( const vec3_t pos, const vec3_t dir, float radius,
 	drawSceneRequest->addEntity( &ent );
 }
 
-FloatConfigVar v_flockDrag("flockDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_turbulence( "turbulence"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_turbulenceScale( "turbulenceScale"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_percentageMin( "percentageMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_percentageMax( "percentageMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_flockAngle( "angle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_radiusSpread( "radiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_lgAngle( "lgAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_lgInnerAngle( "lgInnerAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_spikeSpeed( "spikeSpeed"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-UnsignedConfigVar v_numSpikes( "numSpikes"_asView, { .byDefault = 3, .flags = CVAR_ARCHIVE } );
-BoolConfigVar v_useImpactNormal( "useImpactNormal"_asView, { .byDefault = false, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_flockGravity("flockGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-UnsignedConfigVar v_monkeyLifetimeMin(wsw::StringView("monkeyLifetimeMin"), { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_monkeyLifetimeMax(wsw::StringView("monkeyLifetimeMax"), { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-
 static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 	if( !trace || trace->ent < 0 ) {
 		return;
@@ -1152,64 +1131,46 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 			laserOwner->localEffects[LOCALEFFECT_LASERBEAM_SMOKE_TRAIL] = cg.time;
 
 			if( v_particles.get() ) {
-				bool useTeamColors = false;
-				if( v_teamColoredBeams.get() ) {
-					if( const int team = laserOwner->current.team; team == TEAM_ALPHA || team == TEAM_BETA ) {
-						useTeamColors = true;
-					}
-				}
+                bool useTeamColors = false;
+                if (v_teamColoredBeams.get()) {
+                    if (const int team = laserOwner->current.team; team == TEAM_ALPHA || team == TEAM_BETA) {
+                        useTeamColors = true;
+                    }
+                }
 
-				const RgbaLifespan *singleColorAddress;
-				ParticleColorsForTeamHolder *holder = &::laserImpactParticleColorsHolder;
-				if( useTeamColors ) {
-					vec4_t teamColor;
-					const int team = laserOwner->current.team;
-					CG_TeamColor( team, teamColor );
-					singleColorAddress = holder->getColorsForTeam( team, teamColor );
-				} else {
-					singleColorAddress = &holder->defaultColors;
-				}
+                const RgbaLifespan *singleColorAddress;
+                ParticleColorsForTeamHolder *holder = &::laserImpactParticleColorsHolder;
+                if (useTeamColors) {
+                    vec4_t teamColor;
+                    const int team = laserOwner->current.team;
+                    CG_TeamColor(team, teamColor);
+                    singleColorAddress = holder->getColorsForTeam(team, teamColor);
+                } else {
+                    singleColorAddress = &holder->defaultColors;
+                }
 
                 Particle::AppearanceRules appearanceRules{
                         .materials = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
-                        .colors    = { singleColorAddress, singleColorAddress + 1 },
-                        .geometryRules = Particle::SpriteRules {
-                            .radius = {.mean = 5.0f, .spread = 2.5f },
-                            .sizeBehaviour = Particle::Shrinking,
+                        .colors    = {singleColorAddress, singleColorAddress + 1},
+                        .geometryRules = Particle::SpriteRules{
+                                .radius = {.mean = 5.0f, .spread = 2.5f},
+                                .sizeBehaviour = Particle::Shrinking,
                         }
                 };
 
-                MeshFlockParams flockParams {
-                        .origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
-                        .offset       = { 40.0f * trace->plane.normal[0], 40.0f * trace->plane.normal[1], 40.0f * trace->plane.normal[2] },
-                        .dir          = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-                        .geometry = &cgs.cube,
-                        .geometryScale = 50.0f,
-                        .geometryRotation = 0.0f,
-                        .gravity      = v_flockGravity.get() * GRAVITY,
-                        .drag         = v_flockDrag.get(),
-                        .bounceCount  = { .minInclusive = 3, .maxInclusive = 4 },
+                ConicalFlockParams flockParams{
+                        .origin       = {trace->endpos[0], trace->endpos[1], trace->endpos[2]},
+                        .offset       = {trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2]},
+                        .gravity      = 0.0f,
+                        .drag         = 0.02f,
+                        .angle        = 12.0f,
+                        .bounceCount  = {.minInclusive = 1, .maxInclusive = 1},
                         //.speed        = { .min = 400.0f, .max = 600.0f },
                         //.percentage   = { .min = 0.15, .max = 0.2 },
                         //.timeout      = { .min = 60, .max = 100 },
-                        .speed        = { .min = 0.0f, .max = 0.0f },
-                        .percentage   = { .min = 0.9f, .max = 1.0f },
-                        .timeout      = { .min = v_monkeyLifetimeMin.get(), .max = v_monkeyLifetimeMax.get() },
-                };
-
-                /*ConicalFlockParams flockParams {
-                    .origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
-                    .offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-                    .gravity      = 0.0f,
-                    .drag         = 0.02f,
-                    .angle        = 12.0f,
-                    .bounceCount  = { .minInclusive = 1, .maxInclusive = 1 },
-                    //.speed        = { .min = 400.0f, .max = 600.0f },
-                    //.percentage   = { .min = 0.15, .max = 0.2 },
-                    //.timeout      = { .min = 60, .max = 100 },
-                    .speed        = { .min = 0.0f, .max = 400.0f },
-                    .percentage   = { .min = 0.0f, .max = 1.0f },
-                    .timeout      = { .min = 180, .max = 240 },
+                        .speed        = {.min = 0.0f, .max = 400.0f},
+                        .percentage   = {.min = 0.0f, .max = 1.0f},
+                        .timeout      = {.min = 180, .max = 240},
                 };
 
                 vec3_t particleDir;
@@ -1225,28 +1186,28 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                 constexpr float spikeFraction = 1 / numSpikes;
                 constexpr float laserShotTime = 1.0f / 20.0f;
 
-                const unsigned i = (unsigned)( cg.time * laserShotTime ) % numSpikes;
+                const unsigned i = (unsigned) (cg.time * laserShotTime) % numSpikes;
                 const float coord = cg.time * 5e-4f + i * 10.0f;
 
                 mat3_t transformMatrix;
-                Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], trace->plane.normal, transformMatrix );
+                Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], trace->plane.normal, transformMatrix);
 
-                const float z = minZ + calcSimplexNoise2D(-coord, 0.0f ) * zRange;
+                const float z = minZ + calcSimplexNoise2D(-coord, 0.0f) * zRange;
                 const float r = Q_Sqrt(1.0f - z * z);
                 const float phi = DEG2RAD(
                                           AngleNormalize360(
-                                                  360.0f * ( (float)(i) * spikeFraction + calcSimplexNoise2D(coord, 0.0f) )
+                                                  360.0f *
+                                                  ((float) (i) * spikeFraction + calcSimplexNoise2D(coord, 0.0f))
                                           )
                                   );
                 const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
-                Matrix3_TransformVector( transformMatrix, untransformed, particleDir );
+                Matrix3_TransformVector(transformMatrix, untransformed, particleDir);
 
-                VectorCopy( particleDir, flockParams.dir );*/
-                for( int i = 0; i < 20; i++ ) {
-                    cg.particleSystem.addLargeParticleFlock(appearanceRules, flockParams);
-                }
+                VectorCopy(particleDir, flockParams.dir);
 
-			}
+                cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+
+            }
 
 			SoundSystem::instance()->startFixedSound( cgs.media.sndLasergunHit, trace->endpos, CHAN_AUTO,
 													  v_volumeEffects.get(), ATTN_STATIC );
@@ -4138,8 +4099,10 @@ void CG_AddEntities( DrawSceneRequest *drawSceneRequest ) {
 		CG_EntityLoopSound( state, ATTN_STATIC );
 
 		if( state->effects & EF_STRONG_WEAPON ) {
+            //cgNotice() << "velocity" << cent->velocity[0] << cent->velocity[1] << cent->velocity[2];
 			cg.effectsSystem.touchStrongPlasmaTrail( cent->current.number, cent->current.origin, cent->velocity, cg.time );
 		} else {
+            //cgNotice() << "velocity" << cent->velocity[0] << cent->velocity[1] << cent->velocity[2];
 			cg.effectsSystem.touchWeakPlasmaTrail( cent->current.number, cent->current.origin, cent->velocity, cg.time );
 		}
 

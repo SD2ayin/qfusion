@@ -24,48 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cg_local.h"
 #include "../common/common.h"
 #include "../client/snd_public.h"
-#include "../common/configvars.h"
-
-using wsw::operator""_asView;
-
-FloatConfigVar v_flockShiftSpeedMin("flockShiftSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_flockShiftSpeedMax("flockShiftSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_trailSpeedMin("trailSpeedMin"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_trailSpeedMax("trailSpeedMax"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_flockSpeedMultiplier("flockSpeedMultiplier"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_trailSpeedMultiplier("trailSpeedMultiplier"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-UnsignedConfigVar v_trailLifetimeMin("trailLifetimeMin"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_trailLifetimeMax("trailLifetimeMax"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_trailDrag("trailDrag"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-
-FloatConfigVar v_trailGravity("trailGravity"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-
-
-FloatConfigVar v_tracerOffset( "tracerOffset"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-IntConfigVar v_tracerOffsetMode( "tracerOffsetMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(1), .flags = CVAR_ARCHIVE } );
-
-IntConfigVar v_flockSizeMode( "sizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
-IntConfigVar v_trailSizeMode( "trailSizeMode"_asView, { .byDefault = 0, .min = inclusive(0), .max = inclusive(3), .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_trailAngle( "trailAngle"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_tracerPrestepMin( "tracerPrestepMin"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_tracerPrestepMax( "tracerPrestepMax"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_spikeLength( "spikeLength"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_spikeLengthSpread( "spikeLengthSpread"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_spikeWidth( "spikeWidth"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_spikeWidthSpread( "spikeWidthSpread"_asView,  { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-
-FloatConfigVar v_trailRadiusSpread( "trailRadiusSpread"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 void EffectsSystemFacade::startSound( const SoundSet *sound, const float *origin, float attenuation ) {
 	SoundSystem::instance()->startFixedSound( sound, origin, CHAN_AUTO, v_volumeEffects.get(), attenuation );
@@ -646,43 +604,10 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 
         cg.particleSystem.addSmallParticleFlock(appearanceRules, flockParams);
 
-        /*Particle::AppearanceRules plasmaExplosionTrailAppearanceRules {
-                .materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
-                .colors        = kPlasmaParticlesColors,
-                .geometryRules = Particle::SpriteRules {
-                        .radius        = { .mean = 7.0f, .spread = 2.0f },
-                        .sizeBehaviour = Particle::SizeBehaviour::ExpandingAndShrinking
-                },
-        };
-
-        ConicalFlockParams plasmaExplosionTrailFlockParams {
-                .origin     = { origin[0], origin[1], origin[2] },
-                .offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
-                .gravity    = 0.0f,
-                .drag       = 0.05f,
-                .speed      = { .min = 50.f, .max = 100.f },
-                .percentage = { .min = 0.5f, .max = 0.8f },
-                .timeout    = { .min = 200, .max = 400 },
-        };
-
-        ParamsOfParticleTrailOfParticles explosionParamsOfTrails {
-                .appearanceRules = plasmaExplosionTrailAppearanceRules,
-                .flockParamsTemplate = plasmaExplosionTrailFlockParams,
-                .updateParams = { .maxParticlesPerDrop = 3, .dropDistance = 10.0f }
-        };*/
-
-        //////////////////////////////////////////////////
-        /// plasma explosion spikes effect
-        //////////////////////////////////////////////////
+        // plasma explosion spikes effect
 
         appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
         appearanceRules.colors    = kPlasmaParticlesColors;
-
-        /*appearanceRules.geometryRules = Particle::SparkRules {
-                .length        = { .mean = 8.0f, .spread = 2.5f },
-                .width         = { .mean = 3.3f, .spread = 0.7f },
-                .sizeBehaviour = Particle::SizeNotChanging,
-        };*/
 
         appearanceRules.geometryRules = Particle::SparkRules {
                 .length        = { .mean = 8.0f, .spread = 2.5f },
@@ -702,40 +627,6 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
         flockParams.shiftSpeed      = { .min = 0.0f, .max = 0.0f };
 
         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
-
-        //////////////////////////////////////////////////
-        /// plasma embers effect
-        //////////////////////////////////////////////////
-
-        /*
-        ConicalFlockParams flockParams {
-                .origin          = { origin[0], origin[1], origin[2] },
-                .offset          = { impactNormal[0], impactNormal[1], impactNormal[2] },
-                .gravity         = -0.4f * GRAVITY,
-                .drag            = 0.03f,
-                .turbulenceSpeed = 80.0f,
-                .turbulenceScale = 80.0f,
-                .angle           = 65.0f,
-                .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
-                .percentage      = { .min = 0.38f, .max = 0.5f },
-                .timeout         = { .min = 400, .max = 500 },
-        };
-        Particle::AppearanceRules appearanceRules {
-                .materials     = cgs.media.shaderPlasmaImpactParticle.getAddressOfHandle(),
-                .colors        = kPlasmaParticlesColors,
-                .flareProps    = Particle::FlareProps {
-                        .lightProps                  = kPlasmaParticlesFlareProps,
-                        .alphaScale                  = 0.08f,
-                        .particleFrameAffinityModulo = 2,
-                },
-                .geometryRules = Particle::SpriteRules {
-                        .radius        = { .mean = 1.5f, .spread = 0.5f },
-                        .sizeBehaviour = Particle::Shrinking
-                },
-        };
-
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );*/
-
 
 	}
 
@@ -1217,9 +1108,6 @@ static const LightLifespan kGunbladeBlastFlareProps[1] {
                 .radiusLifespan = { .fadedIn = 25.0f },
         }
 };
-
-UnsignedConfigVar v_minDelay("minDelay"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_maxDelay("maxDelay"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
 
 void EffectsSystemFacade::spawnGunbladeBlastHitEffect( const float *origin, const float *dir ) {
 	startSound( cgs.media.sndGunbladeStrongHit, origin, ATTN_IDLE );
@@ -2241,16 +2129,6 @@ void EffectsSystemFacade::spawnBulletImpactParticleEffectForMaterial( unsigned d
 	}
 }
 
-FloatConfigVar v_minDot("minDot"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_maxDot("maxDot"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_innerSpeed("innerSpead"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_innerSpeedSpread("innerSpeadSpread"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_outerSpeed("outerSpead"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_outerSpeedSpread("outerSpeadSpread"_asView, { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_lifetime("lifetime"_asView, { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-
-
 void EffectsSystemFacade::spawnBulletLikeImpactRingUsingLimiter( unsigned delay, const SolidImpact &impact ) {
 	const EventRateLimiterParams limiterParams {
 		.startDroppingAtDistance = 144.0f,
@@ -2977,17 +2855,12 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> uns
     orientation_t projection;
     CG_PModel_GetProjectionSource(owner, &projection);
 
-    if( v_tracerOffsetMode.get() == 0 ){
-        projection.origin[2] -= v_tracerOffset.get();
-    } else {
-        VectorMA(projection.origin, -v_tracerOffset.get(), &projection.axis[AXIS_UP], projection.origin);
-    }
+    projection.origin[2] -= 10.0f;
 
 	const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to, {
 		.material           = cgs.media.shaderBulletTracer,
 		.duration           = 200,
-		//.prestepDistance    = m_rng.nextFloat( 72.0f, 96.0f ),
-        .prestepDistance    = m_rng.nextFloat( v_tracerPrestepMin.get(), v_tracerPrestepMax.get() ),
+        .prestepDistance    = 0.0f,
 		.smoothEdgeDistance = 172.0f,
 		.width              = m_rng.nextFloat( 4.0f, 8.0f ),
 		.minLength          = m_rng.nextFloat( 80.0f, 108.0f ),
@@ -3006,17 +2879,13 @@ void EffectsSystemFacade::spawnPelletTracers( int owner, std::span<const vec3_t>
     orientation_t projection;
     CG_PModel_GetProjectionSource(owner, &projection);
 
-    if( v_tracerOffsetMode.get() == 0 ){
-        projection.origin[2] -= v_tracerOffset.get();
-    } else {
-        VectorMA(projection.origin, -v_tracerOffset.get(), &projection.axis[AXIS_UP], projection.origin);
-    }
+    projection.origin[2] -= 10.0f;
 
 	for( size_t i = 0; i < to.size(); ++i ) {
 		const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to[i], {
 			.material                 = cgs.media.shaderPelletTracer,
 			.duration                 = 125,
-			.prestepDistance          = m_rng.nextFloat( 0.0f, 1.0f ),
+			.prestepDistance          = 0.5f,
 			.width                    = m_rng.nextFloat( 3.0f, 5.0f ),
             .minLength                = m_rng.nextFloat( 150.0f, 250.0f ),
 			.distancePercentage       = 0.18f,

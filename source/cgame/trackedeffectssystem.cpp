@@ -420,7 +420,7 @@ void TrackedEffectsSystem::touchRocketTrail( int entNum, const float *origin, in
                                                              });
         }
         if( ParticleTrail *trail = effects->particleTrails[0] ) [[likely]] {
-            trail->dropDistance = 16.0f;
+            trail->dropDistance = 15.0f;
             updateAttachedParticleTrail( trail, origin, currTime );
         }
     }
@@ -478,10 +478,11 @@ void TrackedEffectsSystem::touchRocketTrail( int entNum, const float *origin, in
 
 static const RgbaLifespan kGrenadeFuseTrailColors[1] {
 	{
-		.initial  = { 1.0f, 0.7f, 0.3f, 0.0f },
-		.fadedIn  = { 1.0f, 0.7f, 0.3f, 1.0f },
-		.fadedOut = { 1.0f, 1.0f, 1.0f, 0.0f },
-		.finishFadingInAtLifetimeFrac = 0.075f,
+        .initial  = { 1.0f, 0.55f, 0.0f, 1.0f },
+        .fadedIn  = { 1.0f, 0.4f, 0.0f, 1.0f },
+        .fadedOut = { 1.0f, 0.28f, 0.0f, 1.0f },
+        .finishFadingInAtLifetimeFrac = 0.25f,
+        .startFadingOutAtLifetimeFrac = 0.50f,
 	}
 };
 
@@ -497,8 +498,8 @@ static const RgbaLifespan kGrenadeSmokeTrailColors[1] {
 
 static ConicalFlockParams g_grenadeFuseParticlesFlockParams {
 	.gravity     = 0,
-	.angle       = 60,
-	.innerAngle  = 30,
+	.angle       = 40,
+	.innerAngle  = 10,
 	.bounceCount = { .minInclusive = 0, .maxInclusive = 0 },
 	.speed       = { .min = 50, .max = 75 },
 	.timeout     = { .min = 125, .max = 175 },
@@ -562,7 +563,7 @@ void TrackedEffectsSystem::touchGrenadeTrail( int entNum, const float *origin, i
 			});
 		}
 		if( ParticleTrail *trail = effects->particleTrails[1] ) {
-			trail->dropDistance = 8.0f;
+			trail->dropDistance = 4.0f;
 			updateAttachedParticleTrail( trail, origin, currTime );
 		}
 	}
@@ -636,7 +637,7 @@ static ConicalFlockParams g_blastIonsParticlesFlockParams {
         .bounceCount = { .minInclusive = 0, .maxInclusive = 0 },
         .speed       = { .min = 0.0f, .max = 0.0f },
         //.shiftSpeed  = { .min = 100, .max = 150 },
-        .timeout     = { .min = 300, .max = 400 },
+        .timeout     = { .min = 340, .max = 470 },
 };
 
 static const StraightPolyTrailProps kBlastCombinedTrailProps {
@@ -649,27 +650,8 @@ static const StraightPolyTrailProps kBlastStandaloneTrailProps {
 	.width     = 12,
 };
 
-FloatConfigVar v_radius( wsw::StringView("radius"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
 void TrackedEffectsSystem::touchBlastTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
 	AttachedEntityEffects *const __restrict effects = &m_attachedEntityEffects[entNum];
-
-	if( v_projectileSmokeTrail.get() ) {
-		if( !effects->particleTrails[0] ) [[unlikely]] {
-			effects->particleTrails[0] = allocParticleTrail( entNum, 0, origin, kClippedTrailsBin,
-															 &::g_blastSmokeParticlesFlockParams, {
-				.materials     = cgs.media.shaderBlastCloudTrailParticle.getAddressOfHandle(),
-				.colors        = kBlastSmokeTrailColors,
-				.geometryRules = Particle::SpriteRules {
-					.radius = { .mean = 10.0f, .spread = 1.0f }, .sizeBehaviour = Particle::Expanding,
-				},
-			});
-		}
-		if( ParticleTrail *trail = effects->particleTrails[0] ) [[likely]] {
-			trail->dropDistance = 8.0f;
-			updateAttachedParticleTrail( trail, origin, currTime );
-		}
-	}
 
 	if( v_projectileFireTrail.get() ) {
 		if( !effects->particleTrails[1] ) [[unlikely]] {
@@ -696,6 +678,8 @@ void TrackedEffectsSystem::touchBlastTrail( int entNum, const float *origin, con
 
             VectorCopy( offset, flockParams->offset );
 
+            trail->dropDistance = 10.0f;
+
 			updateAttachedParticleTrail( trail, origin, currTime );
 		}
 	}
@@ -719,16 +703,6 @@ void TrackedEffectsSystem::touchBlastTrail( int entNum, const float *origin, con
 	}
 }
 
-static ParticleColorsForTeamHolder g_electroCloudTrailParticleColorsHolder {
-	.defaultColors = {
-		.initial  = { 0.5f, 0.7f, 1.0f, 1.0f },
-		.fadedIn  = { 0.7f, 0.7f, 1.0f, 0.2f },
-		.fadedOut = { 1.0f, 1.0f, 1.0f, 0.0f },
-		.finishFadingInAtLifetimeFrac = 0.1f,
-		.startFadingOutAtLifetimeFrac = 0.5f,
-	}
-};
-
 static const RgbaLifespan kElectroIonsTrailColors[5] {
 	// All components are the same so we omit field designators
 	{ { 1.0f, 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f, 1.0f } },
@@ -744,13 +718,6 @@ static ParticleColorsForTeamHolder g_electroIonsParticleColorsHolder {
 		.fadedIn  = { 1.0f, 1.0f, 1.0f, 1.0f },
 		.fadedOut = { 0.5f, 0.5f, 0.5f, 1.0f }
 	}
-};
-
-static ConicalFlockParams g_electroCloudParticlesFlockParams {
-	.gravity = 0,
-	.angle   = 30,
-	.speed   = { .min = 200, .max = 300 },
-	.timeout = { .min = 150, .max = 200 },
 };
 
 static ConicalFlockParams g_electroIonsParticlesFlockParams {
@@ -780,32 +747,15 @@ void TrackedEffectsSystem::touchElectroTrail( int entNum, int ownerNum, const fl
 		}
 	}
 
-	ParticleColorsForTeamHolder *const cloudColorsHolder = &::g_electroCloudTrailParticleColorsHolder;
 	if( useTeamColors ) {
-		cloudColors = { cloudColorsHolder->getColorsForTeam( team, teamColor ), 1 };
 		// Use the single color, the trail appearance looks worse than default anyway.
 		// TODO: Make ions colors lighter at least
 		ionsColors = { ::g_electroIonsParticleColorsHolder.getColorsForTeam( team, teamColor ), 1 };
 	} else {
-		cloudColors = { &cloudColorsHolder->defaultColors, 1 };
 		ionsColors = kElectroIonsTrailColors;
 	}
 
 	AttachedEntityEffects *const __restrict effects = &m_attachedEntityEffects[entNum];
-	if( !effects->particleTrails[0] ) [[unlikely]] {
-		effects->particleTrails[0] = allocParticleTrail( entNum, 0, origin, kNonClippedTrailsBin,
-														 &::g_electroCloudParticlesFlockParams, {
-			.materials     = cgs.media.shaderElectroCloudTrailParticle.getAddressOfHandle(),
-			.colors        = cloudColors,
-			.geometryRules = Particle::SpriteRules {
-				.radius = { .mean = 9.0f, .spread = 1.0f }, .sizeBehaviour = Particle::Expanding,
-			},
-		});
-	}
-	if( ParticleTrail *trail = effects->particleTrails[0] ) [[likely]] {
-		trail->dropDistance = 16.0f;
-		updateAttachedParticleTrail( trail, origin, currTime );
-	}
 
 	if( !effects->particleTrails[1] ) [[unlikely]] {
 		effects->particleTrails[1] = allocParticleTrail( entNum, 1, origin, kNonClippedTrailsBin,
@@ -846,44 +796,43 @@ static const CurvedPolyTrailProps kPlasmaCurvedPolyTrailProps {
 	.toColor         = { 0.1f, 0.8f, 0.4f, 0.15f },
 };
 
-static const RgbaLifespan kPlasmaIonsTrailColors[] {
+static const RgbaLifespan kPlasmaTrailColors[] { // specific colors are defined in the texture
         {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 0.7f, 0.7f, 0.7f, 1.0f },
+                .initial  = { 0.7f, 0.7f, 0.7f, 1.0f },
+                .fadedIn  = { 0.4f, 0.4f, 0.4f, 1.0f },
                 .fadedOut  = { 0.0f, 0.0f, 0.0f, 1.0f },
         },
 };
 
-FloatConfigVar v_outflow( wsw::StringView("outflow"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+static const RgbaLifespan kPlasmaLingeringTrailColors[] {
+        {
+                .initial  = { 0.3f, 1.0f, 0.5f, 1.0f },
+                .fadedIn  = { 0.1f, 0.7f, 0.1f, 1.0f },
+                .fadedOut  = { 0.0f, 0.4f, 0.0f, 1.0f },
+        },
+};
 
-FloatConfigVar v_rotationMin( wsw::StringView("rotationMin"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_rotationMax( wsw::StringView("rotationMax"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_dropDistance( wsw::StringView("dropDistance"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
+static ConicalFlockParams g_LingeringPlasmaTrailParticlesFlockParams {
+        .gravity         = 0.0f,
+        .turbulenceSpeed = 30.0f,
+        .turbulenceScale = 80.0f,
+        .angle           = 0.5f,
+        .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
+        .speed           = { .min = 0.0f, .max = 0.0f },
+        .timeout         = { .min = 630, .max = 820 },
+};
 
-FloatConfigVar v_particleRadius( wsw::StringView("pRadius"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_particleRadiusSpread( wsw::StringView("pRadiusSpread"), { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
-
-UnsignedConfigVar v_flockLifetimeMin(wsw::StringView("flockLifetimeMin"), { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-UnsignedConfigVar v_flockLifetimeMax(wsw::StringView("flockLifetimeMax"), { .byDefault = 1, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_flockSpeedMin(wsw::StringView("flockSpeedMin"), { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-FloatConfigVar v_flockSpeedMax(wsw::StringView("flockSpeedMax"), { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-FloatConfigVar v_spawnInFront(wsw::StringView("spawnInFront"), { .byDefault = 1.0f, .flags = CVAR_ARCHIVE } );
-
-static ConicalFlockParams g_PlasmaTrailParticlesFlockParams {
-        //.gravity     = -0.09f * GRAVITY,
+static ConicalFlockParams g_StrongPlasmaTrailParticlesFlockParams {
         .gravity      = 0.0f,
-        //.angle       = 30,
         .angle        = 0.01f,
         .innerAngle   = 0.0f,
         .bounceCount  = { .minInclusive = 0, .maxInclusive = 0 },
         .speed        = { .min = 0.0f, .max = 0.0f },
         .randomInitialRotation = { .min = 0.0f, .max = 360.0f },
-        //.outflowSpeed = v_outflow.get(),
-        //.shiftSpeed  = { .min = 100, .max = 150 },
         .timeout      = { .min = 300, .max = 400 },
 };
+
+BoolConfigVar v_projectileLingeringTrails( wsw::StringView( "cg_projectileLingeringTrails"), { .byDefault = true, .flags = CVAR_ARCHIVE } );
 
 static shader_s *g_plasmaTrailMaterialsStorage[5];
 
@@ -902,22 +851,18 @@ void TrackedEffectsSystem::touchStrongPlasmaTrail( int entNum, const float *orig
 	}
 
     if( !effects->particleTrails[0] ) [[unlikely]] {
-        g_plasmaTrailMaterialsStorage[0] = cgs.media.shaderPlasmaTrailParticle1;
-        g_plasmaTrailMaterialsStorage[1] = cgs.media.shaderPlasmaTrailParticle2;
-        g_plasmaTrailMaterialsStorage[2] = cgs.media.shaderPlasmaTrailParticle3;
-        g_plasmaTrailMaterialsStorage[3] = cgs.media.shaderPlasmaTrailParticle4;
-        g_plasmaTrailMaterialsStorage[4] = cgs.media.shaderPlasmaTrailParticle5;
-
         effects->particleTrails[0] = allocParticleTrail( entNum, 0, origin, kNonClippedTrailsBin,
-                                                         &::g_PlasmaTrailParticlesFlockParams,
+                                                         &::g_StrongPlasmaTrailParticlesFlockParams,
                                                          {
                                                                  .materials     = g_plasmaTrailMaterialsStorage,
-                                                                 .colors        = kPlasmaIonsTrailColors,
+                                                                 .colors        = kPlasmaTrailColors,
                                                                  .numMaterials  = std::size( g_plasmaTrailMaterialsStorage ),
                                                                  .geometryRules = Particle::SpriteRules {
-                                                                         .radius = { .mean = v_particleRadius.get(), .spread = v_particleRadiusSpread.get() }, .sizeBehaviour = Particle::Expanding,
+                                                                         .radius = { .mean = 21.0f, .spread = 5.0f }, .sizeBehaviour = Particle::Expanding,
                                                                  },
                                                          });
+
+        effects->particleTrails[0]->dropDistance = 1e-2f; // so it spawns instantly
     }
     if( ParticleTrail *trail = effects->particleTrails[0] ) [[likely]] {
         ConicalFlockParams *flockParams = trail->paramsTemplate;
@@ -928,48 +873,77 @@ void TrackedEffectsSystem::touchStrongPlasmaTrail( int entNum, const float *orig
         g_plasmaTrailMaterialsStorage[3] = cgs.media.shaderPlasmaTrailParticle4;
         g_plasmaTrailMaterialsStorage[4] = cgs.media.shaderPlasmaTrailParticle5;
 
-        flockParams->speed.min = v_flockSpeedMin.get();
-        flockParams->speed.max = v_flockSpeedMax.get();
+        float speed = VectorLengthFast(velocity);
 
-        flockParams->angularVelocity.min = v_rotationMin.get();
-        flockParams->angularVelocity.max = v_rotationMax.get();
+        flockParams->speed.min = speed * -1.008f;
+        flockParams->speed.max = speed * -0.9544f;
 
-        flockParams->timeout.min = v_flockLifetimeMin.get();
-        flockParams->timeout.max = v_flockLifetimeMax.get();
+        flockParams->angularVelocity.min = -720.0f;
+        flockParams->angularVelocity.max = 720.0f;
 
-        trail->dropDistance = v_dropDistance.get();
+        flockParams->timeout.min = 500;
+        flockParams->timeout.max = 800;
+
+        flockParams->outflowSpeed = 5.0f;
 
         trail->linger = false;
 
-        const vec3_t *__restrict dirs = ::kPredefinedDirs;
-        const float *__restrict randomDir = dirs[m_rng.nextBounded( NUMVERTEXNORMALS )];
-        const float radius = v_radius.get();
         vec3_t offset;
 
+        const vec3_t *__restrict dirs = ::kPredefinedDirs;
+        const float *__restrict randomDir = dirs[m_rng.nextBounded( NUMVERTEXNORMALS )];
+        const float radius = 2.0f;
         VectorScale( randomDir, radius, offset );
-        if( velocity[0] || velocity[1] || velocity[2] ) {
-            float speed = VectorLengthSquared(velocity);
-            if( speed > 1e-4 ) {
-                speed = Q_RSqrt(speed );
-            } else {
-                cgNotice() << "speed is zero";
-            }
-            VectorMA(offset, -speed * v_spawnInFront.get(), velocity, offset);
-        } else {
-            cgNotice() << "amk no velocity";
-        }
+
+        VectorMA( offset, 0.024f, velocity, offset);
 
         VectorCopy( offset, flockParams->offset );
-        flockParams->outflowSpeed = v_outflow.get();
 
         updateAttachedParticleTrail( trail, origin, currTime );
+
+        trail->dropDistance = 65.0f;
+    }
+
+    if( v_projectileLingeringTrails.get() ){
+        if( !effects->particleTrails[1] ) [[unlikely]] {
+            effects->particleTrails[1] = allocParticleTrail( entNum, 1, origin, kNonClippedTrailsBin,
+                                                             &::g_LingeringPlasmaTrailParticlesFlockParams,
+                                                             {
+                                                                     .materials     = cgs.media.shaderPlasmaLingeringTrailParticle.getAddressOfHandle(),
+                                                                     .colors        = kPlasmaLingeringTrailColors,
+                                                                     .geometryRules = Particle::SpriteRules {
+                                                                             .radius = { .mean = 2.5f, .spread = 0.75f }, .sizeBehaviour = Particle::Shrinking,
+                                                                     },
+                                                             });
+
+        }
+
+        if( ParticleTrail *trail = effects->particleTrails[1] ) [[likely]] {
+            ConicalFlockParams *flockParams = trail->paramsTemplate;
+
+            ParticleFlock flock;
+
+            vec3_t offset;
+
+            const vec3_t *__restrict dirs = ::kPredefinedDirs;
+            const float *__restrict randomDir = dirs[m_rng.nextBounded( NUMVERTEXNORMALS )];
+            const float radius = 6.5f;
+            VectorScale( randomDir, radius, offset );
+
+            VectorCopy( offset, flockParams->offset );
+
+            updateAttachedParticleTrail( trail, origin, currTime );
+
+            trail->dropDistance = 54.0f;
+        }
     }
 }
 
 void TrackedEffectsSystem::touchWeakPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
 	assert( entNum > 0 && entNum < MAX_EDICTS );
+    AttachedEntityEffects *effects = &m_attachedEntityEffects[entNum];
+
 	if( v_plasmaTrail.get() && v_projectilePolyTrail.get() ) {
-		AttachedEntityEffects *effects = &m_attachedEntityEffects[entNum];
 		if( !effects->curvedPolyTrail ) {
 			effects->curvedPolyTrail = allocCurvedPolyTrail( entNum, cgs.media.shaderPlasmaPolyTrail,
 															 &kPlasmaCurvedPolyTrailProps );
@@ -978,6 +952,41 @@ void TrackedEffectsSystem::touchWeakPlasmaTrail( int entNum, const float *origin
 			updateAttachedCurvedPolyTrail( trail, origin, currTime );
 		}
 	}
+
+    // the weak version currently has no fiery trail like the strong one due to inconsistency with the projectile origin
+    // & speed.
+
+    if( v_projectileLingeringTrails.get() ){
+        if( !effects->particleTrails[1] ) [[unlikely]] {
+            effects->particleTrails[1] = allocParticleTrail( entNum, 1, origin, kNonClippedTrailsBin,
+                                                             &::g_LingeringPlasmaTrailParticlesFlockParams,
+                                                             {
+                                                                     .materials     = cgs.media.shaderPlasmaLingeringTrailParticle.getAddressOfHandle(),
+                                                                     .colors        = kPlasmaLingeringTrailColors,
+                                                                     .geometryRules = Particle::SpriteRules {
+                                                                             .radius = { .mean = 2.5f, .spread = 0.75f }, .sizeBehaviour = Particle::Shrinking,
+                                                                     },
+                                                             });
+
+        }
+
+        if( ParticleTrail *trail = effects->particleTrails[1] ) [[likely]] {
+            ConicalFlockParams *flockParams = trail->paramsTemplate;
+
+            vec3_t offset;
+
+            const vec3_t *__restrict dirs = ::kPredefinedDirs;
+            const float *__restrict randomDir = dirs[m_rng.nextBounded( NUMVERTEXNORMALS )];
+            const float radius = 6.5f;
+            VectorScale( randomDir, radius, offset );
+
+            VectorCopy( offset, flockParams->offset );
+
+            updateAttachedParticleTrail( trail, origin, currTime );
+
+            trail->dropDistance = 54.0f;
+        }
+    }
 }
 
 void TrackedEffectsSystem::detachPlayerTrail( int entNum ) {
