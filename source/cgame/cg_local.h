@@ -422,9 +422,6 @@ typedef struct {
 	struct shader_s *shaderWhite;
 	struct shader_s *shaderMiniMap;
 
-    // geometry
-    Geometry cube;
-
 	int fullclipShaderNum;
 
 	// fonts

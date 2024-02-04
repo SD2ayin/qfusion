@@ -5153,9 +5153,6 @@ static void CG_RegisterWeaponModels( void ) {
 		cgs.weaponInfos[0] = CG_CreateWeaponZeroModel( cgs.weaponModels[0] );
 	}
 
-    //cgNotice() << "register weapon models finished";
-    //Mod_ForName( "models/cube/cube.md3", true );
-
 }
 
 Geometry GetGeometryFromAliasMD3( model_t *model, const char *meshName );
@@ -5226,8 +5223,6 @@ static void CG_RegisterModels( void ) {
 	}
 
 	cgs.media.registerModels();
-
-    cgs.cube = GetGeometryFromAliasMD3( cgs.media.modCube, "Cube" );
 
 	CG_RegisterBasePModel(); // never before registering the weapon models
 	CG_RegisterWeaponModels();
