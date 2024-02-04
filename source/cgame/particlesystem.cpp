@@ -760,7 +760,6 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
 	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
-    const auto before = Sys_Microseconds();
 	// TODO: Make cached conical samples for various angles?
 	for( unsigned i = 0; i < numParticles; ++i ) {
 		Particle *const __restrict p = particles + signedStride * (signed)i;
@@ -837,7 +836,6 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 			p->instanceColorIndex = 0;
 		}
 	}
-    Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
 
 	return FillFlockResult { .resultTimeout = resultTimeout, .numParticles = numParticles };
 }
@@ -924,7 +922,6 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
     static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
     const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
-    const auto before = Sys_Microseconds();
     for( unsigned i = 0; i < numParticles; ++i ) {
         Particle *const __restrict p = particles + signedStride * (signed)i;
 
@@ -1032,7 +1029,6 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
             p->instanceColorIndex = 0;
         }
     }
-    Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
 
     return FillFlockResult { .resultTimeout = resultTimeout, .numParticles = numParticles };
 }
