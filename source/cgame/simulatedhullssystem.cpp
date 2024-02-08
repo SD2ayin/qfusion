@@ -666,22 +666,18 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
 	const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
 
+    const auto before = Sys_Microseconds();
     if( rotation ) {
         mat3_t rotationMatrix;
         Quat_ToMatrix3(rotation, rotationMatrix);
 
-        const auto before = Sys_Microseconds();
         for( size_t i = 0; i < verticesSpan.size(); i++ ) {
-            vec3_t moveDirection;
-            Matrix3_TransformVector(&rotationMatrix[0], vertices[i], moveDirection);
-
-            VectorCopy( moveDirection, hull->vertexMoveDirections[i] );
-
+            Matrix3_TransformVector(&rotationMatrix[0], vertices[i], hull->vertexMoveDirections[i] );
         }
-        Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
     } else {
         std::memcpy( hull->vertexMoveDirections[0], vertices[0], sizeof(vec4_t) * verticesSpan.size() );
     }
+    Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
 
 	// TODO: Add a fused call
 	CM_BuildShapeList( cl.cms, m_tmpShapeList, growthMins, growthMaxs, MASK_SOLID );
@@ -1720,7 +1716,6 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 		const float fracFromCurrKeyframe = wsw::clamp( offsetInFrame * Q_Rcp( frameLength ), 0.0f, 1.0f );
 		layer->lerpFrac                  = fracFromCurrKeyframe;
 
-		const float finalOffset = layer->finalOffset;
 		unsigned vertexNum      = 0;
 		do {
 			float offset = std::lerp( currKeyframe.offsets[vertexNum],
@@ -1735,7 +1730,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
 			// Limit growth by the precomputed obstacle distance
 			const float limit = wsw::max( 0.0f, limitsAtDirections[vertexNum] - offsetFromLimit );
-			offset = wsw::min( offset - finalOffset, limit );
+			offset = wsw::min( offset, limit );
 
 			VectorMA( growthOrigin, offset, vertexMoveDirections[vertexNum], positions[vertexNum] );
 
@@ -2593,7 +2588,7 @@ auto SimulatedHullsSystem::HullDynamicMesh::getOverrideColorsCheckingSiblingCach
 	// If a dynamic allocation is worth it
 	if( m_shared->hasSibling ) {
 		// Allocate some room within the global buffer for frame colors allocation.
-		wsw::Vector<uint32_t> *const sharedBuffer = m_shared->overrideColorsBuffer;
+            wsw::Vector<uint32_t> *const sharedBuffer = m_shared->overrideColorsBuffer;
 		const auto offset = sharedBuffer->size();
 		const auto length = ::basicHullsHolder.getIcosphereForLevel( m_shared->simulatedSubdivLevel ).vertices.size();
 		sharedBuffer->resize( sharedBuffer->size() + length );

@@ -8,6 +8,8 @@
 #include "../common/freelistallocator.h"
 #include "../common/podbufferholder.h"
 #include "../common/wswvector.h"
+#include "../common/geometry.h"
+#include "../common/wswstringview.h"
 
 struct CMShapeList;
 
@@ -92,45 +94,81 @@ public:
 		std::span<const ColorChangeTimelineNode> colorChangeTimeline;
 	};
 
-	static constexpr unsigned kMaxLayerColors = 8;
+    static constexpr unsigned kMaxLayerColors = 8;
 
-	enum class BlendMode : unsigned {
-		AlphaBlend,
-		Add,
-		Subtract
-	};
-	enum class AlphaMode : unsigned {
-		Add,
-		Subtract,
-		Override
-	};
+    enum class BlendMode : unsigned {
+        AlphaBlend,
+        Add,
+        Subtract
+    };
+    enum class AlphaMode : unsigned {
+        Add,
+        Subtract,
+        Override
+    };
 
-	struct MaskedShadingLayer {
-		const float *vertexMaskValues { nullptr };
-		std::span<const byte_vec4_t> colors;
-		float colorRanges[kMaxLayerColors];
-		BlendMode blendMode { BlendMode::AlphaBlend };
-		AlphaMode alphaMode { AlphaMode::Add };
-	};
+    struct MaskedShadingLayer {
+        const float *vertexMaskValues { nullptr };
+        std::span<const byte_vec4_t> colors;
+        float colorRanges[kMaxLayerColors];
+        BlendMode blendMode { BlendMode::AlphaBlend };
+        AlphaMode alphaMode { AlphaMode::Add };
+    };
 
-	struct DotShadingLayer {
-		std::span<const byte_vec4_t> colors;
-		float colorRanges[kMaxLayerColors];
-		BlendMode blendMode { BlendMode::AlphaBlend };
-		AlphaMode alphaMode { AlphaMode::Add };
-	};
+    struct DotShadingLayer {
+        std::span<const byte_vec4_t> colors;
+        float colorRanges[kMaxLayerColors];
+        BlendMode blendMode { BlendMode::AlphaBlend };
+        AlphaMode alphaMode { AlphaMode::Add };
+    };
 
-	struct CombinedShadingLayer {
-		const float *vertexMaskValues { nullptr };
-		std::span<const byte_vec4_t> colors;
-		float colorRanges[kMaxLayerColors];
-		// Between 0 and 1, vertexValue = ( dotInfluence - 1 ) * vertexMaskValue + dotInfluence * dotProduct(viewVector, normal)
-		float dotInfluence { 0.5f };
-		BlendMode blendMode { BlendMode::AlphaBlend };
-		AlphaMode alphaMode { AlphaMode::Add };
-	};
+    struct CombinedShadingLayer {
+        const float *vertexMaskValues { nullptr };
+        std::span<const byte_vec4_t> colors;
+        float colorRanges[kMaxLayerColors];
+        // Between 0 and 1, vertexValue = ( dotInfluence - 1 ) * vertexMaskValue + dotInfluence * dotProduct(viewVector, normal)
+        float dotInfluence { 0.5f };
+        BlendMode blendMode { BlendMode::AlphaBlend };
+        AlphaMode alphaMode { AlphaMode::Add };
+    };
 
-	using ShadingLayer = std::variant<MaskedShadingLayer, DotShadingLayer, CombinedShadingLayer>;
+    using ShadingLayer = std::variant<MaskedShadingLayer, DotShadingLayer, CombinedShadingLayer>;
+
+    struct StaticCage {
+        Geometry *cage;
+        wsw::StringView identifier;
+        wsw::HeapBasedFreelistAllocator *allocator;
+    };
+
+    wsw::Vector<StaticCage> *LoadedStaticCages { nullptr };
+
+    struct StaticCageCoordinate {
+        unsigned cageTriIdx;
+        float coordsOnCageTri[3]; // barycentric coordinates
+        float offset; // offset along direction
+        /// ? float moveDir ? precompute the moveDir?
+        float offsetFromLimit; // offset from boundaries like walls
+    };
+
+    struct CagedMesh {
+        StaticCage *cage;
+        StaticCageCoordinate *vertexCoordinates;
+        unsigned numVertices;
+        unsigned numFrames;
+        std::span<tri> triIndices;
+        std::span<const ShadingLayer> shadingLayers;
+        float boundingRadius; // maximum radius of the mesh for a given frame for culling
+        CagedMesh *LODs; // pointer to lower detail models
+    };
+
+    struct StaticKeyframedHullParams {
+        vec3_t origin;
+        vec3_t offset;
+        vec3_t dir;
+        float rotation;
+        float scale;
+        std::span<CagedMesh> sharedCageCagedMeshes;
+    };
 
 	struct OffsetKeyframe {
 		float lifetimeFraction { 0.0f };
@@ -176,6 +214,37 @@ private:
 		std::span<const ShadingLayer> prevShadingLayers;
 		std::span<const ShadingLayer> nextShadingLayers;
 	};
+
+    //draft
+    struct SharedCageMeshData {
+        std::optional<std::variant<unsigned, std::monostate>> cachedChosenSolidSubdivLevel; // maybe ?
+        const vec4_t *cageVertexMoveDirs;
+        const float *cageVertexLimits;
+        float nextLodTangentRatio { 0.18f };
+        bool hasSibling { false };
+
+        float lifetimeFrac;
+        std::span<const ShadingLayer> prevShadingLayers;
+        std::span<const ShadingLayer> nextShadingLayers;
+
+        //wsw::Vector<uint32_t> *overrideColorsBuffer { nullptr }; NO NEED DIRECTLY COMPUTE COLORS
+        // Must be reset each frame
+        // std::optional<std::variant<std::pair<unsigned, unsigned>, std::monostate>> cachedOverrideColorsSpanInBuffer; X
+        // const vec4_t *simulatedPositions { nullptr }; NO NEED DIRECTLY COMPUTE POSITIONS
+        //const vec4_t *simulatedNormals { nullptr }; COMPUTE DIRECTLY
+        //const byte_vec4_t *simulatedColors { nullptr }; COMPUTE DIRECTLY
+        //unsigned simulatedSubdivLevel { 0 }; THERE IS NO "SUBDIV LEVEL"
+        //float minZLastFrame { 0.0f }; X
+        //float maxZLastFrame { 0.0f }; X
+        //float minFadedOutAlpha { 0.0f }; X
+        //ViewDotFade viewDotFade { ViewDotFade::NoFade }; X
+        //ZFade zFade { ZFade::NoFade }; X
+        //bool tesselateClosestLod { false }; X
+        //bool lerpNextLevelColors { false }; X
+        // currently for keyframed hull shading
+        //bool isAKeyframedHull { false }; X
+        //float lerpFrac { 0.0f };
+    };
 
 	class HullDynamicMesh : public DynamicMesh {
 		friend class SimulatedHullsSystem;
@@ -478,10 +547,6 @@ private:
 			HullSolidDynamicMesh *submittedSolidMesh;
 			HullCloudDynamicMesh *submittedCloudMeshes[1];
 
-			// Subtracted from limitsAtDirections for this layer, must be non-negative.
-			// This offset is supposed to prevent hulls from ending at the same distance in the end position.
-			float finalOffset { 0 };
-
 			const AppearanceRules *overrideAppearanceRules;
 		};
 
@@ -538,6 +603,18 @@ private:
 			}
 		}
 	};
+
+    /*
+    struct Storage{
+        void *data1;
+        void *data2;
+
+        Storage( unsigned elems1, unsigned elems2, uint8_t *mem  ){
+            this->data1 = new( mem )float[elems1];
+            size_t sizeOfData1 = sizeof(float) * elems1;
+            this->data2 = new( mem + sizeOfData1 )float[elems2];
+        }
+    }; // an example */
 
 	static constexpr unsigned kNumFireHullLayers      = 5;
 	static constexpr unsigned kNumToonSmokeHullLayers = 1;

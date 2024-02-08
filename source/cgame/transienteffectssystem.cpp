@@ -509,6 +509,8 @@ static SimulatedHullsSystem::CloudMeshProps g_fireOuterCloudMeshProps {
 static SimulatedHullsSystem::AppearanceRules g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 static SimulatedHullsSystem::AppearanceRules g_fireOuterCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 
+BoolConfigVar v_rotation( wsw::StringView("rotation"), { .byDefault = false, .flags = CVAR_ARCHIVE } );
+
 void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, float radius ) {
 	// 250 for radius of 64
 	// TODO: Make radius affect hulls
@@ -598,9 +600,15 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const float toonSmokeScale   = 38.0f * randomScaling;
 		const auto toonSmokeLifetime = (unsigned)( (float)ToonSmokeOffsetKeyframeHolder::kMinLifetime * randomScaling );
 		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
-			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet,
-                                            ToonSmokeOffsetKeyframeHolder::maxOffset, rotation );
+            if( v_rotation.get() ) {
+                hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale,
+                                               &toonSmokeKeyframeSet,
+                                               ToonSmokeOffsetKeyframeHolder::maxOffset, rotation);
+            } else {
+                hullsSystem->setupHullVertices(hull, smokeOrigin, toonSmokeScale,
+                                               &toonSmokeKeyframeSet,
+                                               ToonSmokeOffsetKeyframeHolder::maxOffset );
+            }
 			hull->compoundMeshKey = compoundMeshKey;
 		}
         cgNotice() << "rotation" << randomAngle;

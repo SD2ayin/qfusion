@@ -293,7 +293,7 @@ private:
 	static constexpr unsigned kMaxLargeFlocks  = 24;
 
 	static constexpr unsigned kMaxClippedTrailFlocks    = 32;
-	static constexpr unsigned kMaxNonClippedTrailFlocks = 48;
+	static constexpr unsigned kMaxNonClippedTrailFlocks = 96;
 
 	static constexpr unsigned kMaxSmallFlockSize  = 8;
 	static constexpr unsigned kMaxMediumFlockSize = 48;

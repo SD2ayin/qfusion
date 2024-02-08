@@ -33,6 +33,13 @@ MediaCache::CachedModel::CachedModel( MediaCache *parent, const wsw::StringView 
 	parent->link( this, &parent->m_models );
 }
 
+/*
+MediaCache::CachedModel::CachedStaticHullCage( MediaCache *parent, const wsw::StringView &name )
+	: m_name( name ) {
+	parent->link( this, &parent->m_models );
+}
+ */
+
 MediaCache::CachedMaterial::CachedMaterial( MediaCache *parent, const wsw::StringView &name )
 	: m_name( name ) {
 	parent->link( this, &parent->m_materials );
@@ -53,6 +60,14 @@ void MediaCache::registerModels() {
 	}
 }
 
+/*
+void MediaCache::registerStaticHullCages() {
+	for( CachedStaticHullCage *cage = m_staticCages; cage; cage = (CachedStaticHullCage *)cage->m_next ) {
+		registerStaticHullCage( cage );
+	}
+}
+ */
+
 void MediaCache::registerMaterials() {
 	for( CachedMaterial *material = m_materials; material; material = (CachedMaterial *)material->m_next ) {
 		registerMaterial( material );
@@ -71,6 +86,12 @@ void MediaCache::registerModel( CachedModel *model ) {
 		model->m_handle = CG_RegisterModel( model->m_name.data() );
 	}
 }
+/*
+void MediaCache::registerStaticHullCage( CachedStaticHullCage *cage ) {
+    if( !cage->m_handle ) {
+        model->m_handle = CG_RegisterStaticHullCage( cage->m_name.data() );
+    }
+}*/
 
 void MediaCache::registerMaterial( CachedMaterial *material ) {
 	if( !material->m_handle ) {
@@ -94,6 +115,16 @@ struct model_s *CG_RegisterModel( const char *name ) {
 
 	return model;
 }
+
+/*
+struct StaticCage *CG_RegisterStaticHullCage( const char *name ) {
+	struct StaticCage *cage;
+
+	cage = SimulatedHullsSystem::RegisterStaticCage( name );
+
+	return cage;
+}
+ */
 
 void CG_RegisterLevelMinimap( void ) {
 	size_t i;
