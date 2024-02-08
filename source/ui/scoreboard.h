@@ -75,7 +75,8 @@ public:
 	using PlayerUpdatesList = wsw::StaticVector<PlayerUpdates, MAX_CLIENTS>;
 	using TeamUpdatesList = wsw::StaticVector<TeamUpdates, 3>;
 private:
-	void addPlayerUpdates( const RawData &oldOne, const RawData &newOne, unsigned playerIndex, PlayerUpdatesList &dest );
+	[[nodiscard]]
+	bool addPlayerUpdates( const RawData &oldOne, const RawData &newOne, unsigned playerIndex, PlayerUpdatesList &dest );
 public:
 	Scoreboard() {
 		m_lastNameUpdateCounters.fill( 0 );
@@ -179,11 +180,12 @@ public:
 	[[nodiscard]]
 	auto getPlayerClanForColumn( unsigned playerIndex, unsigned column ) const -> wsw::StringView;
 
-	enum class UpdateFlags {
-		Players      = 0x1,
-		Teams        = 0x2,
-		Chasers      = 0x4,
-		Challengers  = 0x8
+	enum class UpdateFlags : unsigned {
+		Players      = 1 << 0,  // Properties of players were updated
+		Spectators   = 1 << 1,  // Properties of spectators were updated
+		Teams        = 1 << 2,  // Teams (lists of players in team) were updated
+		Chasers      = 1 << 3,  // Chasers or properties of chasers were updated
+		Challengers  = 1 << 4,  // Challengers or properties of challengers were updated
 	};
 
 	[[nodiscard]]

@@ -6,11 +6,14 @@ import QtQuick.Layouts 1.12
 import net.warsow 2.6
 
 Item {
+    id: root
     width: implicitWidth
     height: implicitHeight
 
     implicitWidth: 240
     implicitHeight: list.contentHeight + 20
+
+    property var commonDataModel
 
     Connections {
         target: Hud.ui
@@ -23,7 +26,7 @@ Item {
 
     ListView {
         id: list
-        model: Hud.dataModel.getFragsFeedModel()
+        model: root.commonDataModel.getFragsFeedModel()
         width: parent.width - 16
         height: contentHeight
         anchors.centerIn: parent

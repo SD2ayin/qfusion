@@ -38,6 +38,10 @@
         <file>HudInventoryBar.qml</file>
         <file>HudMatchTime.qml</file>
         <file>HudMessageFeed.qml</file>
+        <file>HudMiniviewPane.qml</file>
+        <file>HudMiniInventoryBar.qml</file>
+        <file>HudMiniValueBar.qml</file>
+        <file>HudMiniWeaponStatus.qml</file>
         <file>HudObjectiveIndicator.qml</file>
         <file>HudObjectiveIndicatorFrameAnim.qml</file>
         <file>HudObjectiveIndicatorIconAnim.qml</file>

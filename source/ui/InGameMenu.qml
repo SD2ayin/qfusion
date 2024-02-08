@@ -9,7 +9,7 @@ Rectangle {
     id: root
     color: UI.ui.colorWithAlpha(Material.background, UI.ui.fullscreenOverlayOpacity)
 
-    readonly property bool canShowLoadouts: UI.gametypeOptionsModel.available && UI.hudDataModel.realClientTeam !== HudDataModel.TeamSpectators
+    readonly property bool canShowLoadouts: UI.gametypeOptionsModel.available && UI.hudCommonDataModel.realClientTeam !== HudDataModel.TeamSpectators
 
     // Force redrawing stuff every frame
     ProgressBar {
@@ -117,7 +117,7 @@ Rectangle {
                     text: "Join"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (UI.hudDataModel.hasTwoTeams && UI.ui.canJoinAlpha && UI.ui.canJoinBeta) {
+                        if (UI.hudCommonDataModel.hasTwoTeams && UI.ui.canJoinAlpha && UI.ui.canJoinBeta) {
                             stackView.push(teamSelectionComponent)
                         } else {
                             UI.ui.join()
@@ -133,7 +133,7 @@ Rectangle {
                     text: "Switch team"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (UI.hudDataModel.isInWarmupState) {
+                        if (UI.hudCommonDataModel.isInWarmupState) {
                             if (UI.ui.canJoinAlpha) {
                                 UI.ui.joinAlpha()
                                 stackView.push(awaitingSwitchTeamComponent, {"targetTeam" : HudDataModel.TeamAlpha})
@@ -150,7 +150,7 @@ Rectangle {
                     id: queueActionButton
                     KeyNavigation.up: switchTeamButton
                     KeyNavigation.down: spectateButton
-                    visible: UI.ui.canToggleChallengerStatus && UI.hudDataModel.realClientTeam === HudDataModel.TeamSpectators
+                    visible: UI.ui.canToggleChallengerStatus && UI.hudCommonDataModel.realClientTeam === HudDataModel.TeamSpectators
                     text: UI.ui.isInChallengersQueue ? "Leave the queue" : "Enter the queue"
                     Layout.fillWidth: true
                     onClicked: {
@@ -171,7 +171,7 @@ Rectangle {
                     text: "Spectate"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (UI.hudDataModel.isInWarmupState) {
+                        if (UI.hudCommonDataModel.isInWarmupState) {
                             UI.ui.spectate()
                             UI.ui.returnFromInGameMenu()
                         } else {
@@ -185,7 +185,7 @@ Rectangle {
                     text: "Disconnect"
                     Layout.fillWidth: true
                     onClicked: {
-                        if (UI.hudDataModel.realClientTeam === HudDataModel.TeamSpectators || UI.hudDataModel.isInWarmupState) {
+                        if (UI.hudCommonDataModel.realClientTeam === HudDataModel.TeamSpectators || UI.hudCommonDataModel.isInWarmupState) {
                             UI.ui.disconnect()
                         } else {
                             stackView.push(disconnectConfirmationComponent)
@@ -250,9 +250,9 @@ Rectangle {
                 }
             }
             Connections {
-                target: UI.hudDataModel
+                target: UI.hudCommonDataModel
                 onIsInPostmatchStateChanged: {
-                    if (UI.hudDataModel.isInPostmatchState) {
+                    if (UI.hudCommonDataModel.isInPostmatchState) {
                         stackView.pop()
                     }
                 }
@@ -302,9 +302,9 @@ Rectangle {
                 }
             }
             Connections {
-                target: UI.hudDataModel
+                target: UI.hudCommonDataModel
                 onIsInPostmatchStateChanged: {
-                    if (UI.hudDataModel.isInPostmatchState) {
+                    if (UI.hudCommonDataModel.isInPostmatchState) {
                         stackView.pop()
                     }
                 }
@@ -363,7 +363,7 @@ Rectangle {
                         Layout.fillWidth: true
                         alignment: Qt.AlignRight
                         Layout.preferredHeight: Math.max(alphaTeamPane.implicitHeight, betaTeamPane.implicitHeight, 144 + 32)
-                        color: UI.hudDataModel.alphaColor
+                        color: UI.hudCommonDataModel.alphaColor
                     }
                     TeamSelectionTeamPane {
                         id: betaTeamPane
@@ -371,7 +371,7 @@ Rectangle {
                         Layout.fillWidth: true
                         alignment: Qt.AlignLeft
                         Layout.preferredHeight: Math.max(alphaTeamPane.implicitHeight, betaTeamPane.implicitHeight, 144 + 32)
-                        color: UI.hudDataModel.betaColor
+                        color: UI.hudCommonDataModel.betaColor
                     }
                 }
                 RowLayout {
@@ -383,9 +383,9 @@ Rectangle {
                         labelHorizontalCenterOffset: -10
                         bodySlantDegrees: -9
                         textSlantDegrees: -4
-                        Material.background: Qt.darker(UI.hudDataModel.alphaColor, 2)
-                        Material.accent: Qt.darker(UI.hudDataModel.alphaColor, 1.2)
-                        text: UI.hudDataModel.alphaName
+                        Material.background: Qt.darker(UI.hudCommonDataModel.alphaColor, 2)
+                        Material.accent: Qt.darker(UI.hudCommonDataModel.alphaColor, 1.2)
+                        text: UI.hudCommonDataModel.alphaName
                         onClicked: {
                             connectionsEnabled = false
                             stackView.pop()
@@ -414,9 +414,9 @@ Rectangle {
                         labelHorizontalCenterOffset: 0
                         bodySlantDegrees: +10
                         textSlantDegrees: +5
-                        Material.background: Qt.darker(UI.hudDataModel.betaColor, 2)
-                        Material.accent: Qt.darker(UI.hudDataModel.betaColor, 1.2)
-                        text: UI.hudDataModel.betaName
+                        Material.background: Qt.darker(UI.hudCommonDataModel.betaColor, 2)
+                        Material.accent: Qt.darker(UI.hudCommonDataModel.betaColor, 1.2)
+                        text: UI.hudCommonDataModel.betaName
                         onClicked: {
                             connectionsEnabled = false
                             stackView.pop()
@@ -441,10 +441,10 @@ Rectangle {
                 }
             }
             Connections {
-                target: UI.hudDataModel
+                target: UI.hudCommonDataModel
                 enabled: connectionsEnabled
                 onIsInPostmatchStateChanged: {
-                    if (UI.hudDataModel.isInPostmatchState) {
+                    if (UI.hudCommonDataModel.isInPostmatchState) {
                         stackView.pop()
                     }
                 }
@@ -463,10 +463,10 @@ Rectangle {
                 Material.accent: "white"
             }
             Connections {
-                target: UI.hudDataModel
+                target: UI.hudCommonDataModel
                 onRealClientTeamChanged: {
                     // TODO: Should we check for the actual team?
-                    if (UI.hudDataModel.realClientTeam !== HudDataModel.TeamSpectators) {
+                    if (UI.hudCommonDataModel.realClientTeam !== HudDataModel.TeamSpectators) {
                         UI.ui.returnFromInGameMenu()
                     }
                 }
@@ -484,9 +484,9 @@ Rectangle {
                     if (maybeTargetTeam === HudDataModel.TeamAlpha || maybeTargetTeam === HudDataModel.TeamBeta) {
                         let actualTeamName
                         if (maybeTargetTeam === HudDataModel.TeamAlpha) {
-                            actualTeamName = UI.hudDataModel.alphaName;
+                            actualTeamName = UI.hudCommonDataModel.alphaName;
                         } else {
-                            actualTeamName = UI.hudDataModel.betaName;
+                            actualTeamName = UI.hudCommonDataModel.betaName;
                         }
                         stackView.push(actionFailureComponent, {"message" : "Failed to join the <b>" + actualTeamName + "</b> team"})
                     } else {
@@ -521,14 +521,14 @@ Rectangle {
                 Material.accent: "white"
             }
             Connections {
-                target: UI.hudDataModel
+                target: UI.hudCommonDataModel
                 onIsInPostmatchStateChanged: {
-                    if (UI.hudDataModel.isInPostmatchState) {
+                    if (UI.hudCommonDataModel.isInPostmatchState) {
                         stackView.pop()
                     }
                 }
                 onRealClientTeamChanged: {
-                    if (UI.hudDataModel.realClientTeam === targetTeam) {
+                    if (UI.hudCommonDataModel.realClientTeam === targetTeam) {
                         UI.ui.returnFromInGameMenu()
                     }
                 }
@@ -575,10 +575,10 @@ Rectangle {
                 }
             }
             Connections {
-                target: UI.hudDataModel
+                target: UI.hudCommonDataModel
                 onRealClientTeamChanged: {
                     // If in-game
-                    if (UI.hudDataModel.realClientTeam === HudDataModel.TeamSpectators) {
+                    if (UI.hudCommonDataModel.realClientTeam === HudDataModel.TeamSpectators) {
                         UI.ui.returnFromInGameMenu()
                     }
                 }

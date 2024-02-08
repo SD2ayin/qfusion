@@ -6,8 +6,8 @@ import net.warsow 2.6
 
 Item {
     id: root
-    readonly property var availableRegularCrosshairs: UI.hudDataModel.getAvailableRegularCrosshairs()
-    readonly property var availableStrongCrosshairs: UI.hudDataModel.getAvailableStrongCrosshairs()
+    readonly property var availableRegularCrosshairs: UI.hudCommonDataModel.getAvailableRegularCrosshairs()
+    readonly property var availableStrongCrosshairs: UI.hudCommonDataModel.getAvailableStrongCrosshairs()
     readonly property bool drawNativeParts: root.StackView.view && !root.StackView.view.busy
     readonly property real innerPaneMargin: 20.0
     readonly property real innerPaneWidth: 0.5 * root.width - innerPaneMargin
@@ -53,7 +53,7 @@ Item {
         SettingsRow {
             text: "Crosshair damage color"
             CVarAwareColorPicker {
-                cvarName: "cg_crosshair_damage_color"
+                cvarName: "cg_crosshairDamageColor"
             }
         }
 
@@ -62,7 +62,7 @@ Item {
             CVarAwareComboBox {
                 id: strongComboBox
                 knownHeadingsAndValues: [["(none)"].concat(availableStrongCrosshairs), [""].concat(availableStrongCrosshairs)]
-                cvarName: "cg_crosshair_strong"
+                cvarName: "cg_strongCrosshairName"
             }
         }
 
@@ -70,7 +70,7 @@ Item {
             text: "Strong crosshair color"
             CVarAwareColorPicker {
                 id: strongColorPicker
-                cvarName: "cg_crosshair_strong_color"
+                cvarName: "cg_strongCrosshairColor"
             }
         }
 
@@ -81,7 +81,7 @@ Item {
                 from: UI.ui.minStrongCrosshairSize
                 to: UI.ui.maxStrongCrosshairSize
                 stepSize: UI.ui.crosshairSizeStep
-                cvarName: "cg_crosshair_strong_size"
+                cvarName: "cg_strongCrosshairSize"
                 fractionalPartDigits: 0
             }
         }
@@ -90,7 +90,7 @@ Item {
             id: separateCheckBox
             Layout.alignment: Qt.AlignHCenter
             text: "Separate per weapon"
-            cvarName: "cg_separate_weapon_settings"
+            cvarName: "cg_separateWeaponCrosshairSettings"
         }
 
         Item {
@@ -102,7 +102,7 @@ Item {
             Component.onCompleted: opacity = 1.0
 
             property int selectedIndex: 0
-            property string weaponShortName: UI.hudDataModel.getWeaponShortName(weaponsPane.selectedIndex + 1)
+            property string weaponShortName: UI.hudCommonDataModel.getWeaponShortName(weaponsPane.selectedIndex + 1)
 
             ListView {
                 id: weaponsList
@@ -126,7 +126,7 @@ Item {
                     color: enabled ? ((mouseArea.containsMouse || weaponsPane.selectedIndex === index) ?
                         Material.accent : Material.foreground) : "grey"
                     opacity: enabled ? 1.0 : 0.5
-                    text: UI.hudDataModel.getWeaponFullName(index + 1)
+                    text: UI.hudCommonDataModel.getWeaponFullName(index + 1)
                     enabled: separateCheckBox.checked
                     MouseArea {
                         id: mouseArea
@@ -161,7 +161,7 @@ Item {
                         desiredSize: Qt.size(strongSizeSlider.value, strongSizeSlider.value)
                         borderWidth: 1
                         materialName: strongComboBox.currentIndex < 0 ? "" :
-                            UI.hudDataModel.getStrongCrosshairFilePath(strongComboBox.values[strongComboBox.currentIndex])
+                            UI.hudCommonDataModel.getStrongCrosshairFilePath(strongComboBox.values[strongComboBox.currentIndex])
                         useOutlineEffect: true
                         fitSizeForCrispness: true
                         color: strongColorPicker.selectedColor
@@ -173,7 +173,7 @@ Item {
                         desiredSize: Qt.size(regularSizeSlider.value, regularSizeSlider.value)
                         borderWidth: 1
                         materialName: regularComboBox.currentIndex < 0 ? "" :
-                            UI.hudDataModel.getRegularCrosshairFilePath(regularComboBox.values[regularComboBox.currentIndex])
+                            UI.hudCommonDataModel.getRegularCrosshairFilePath(regularComboBox.values[regularComboBox.currentIndex])
                         useOutlineEffect: true
                         fitSizeForCrispness: true
                         color: regularColorPicker.selectedColor
@@ -183,13 +183,13 @@ Item {
                 CVarAwareComboBox {
                     id: regularComboBox
                     knownHeadingsAndValues: [["(none)"].concat(availableRegularCrosshairs), [""].concat(availableRegularCrosshairs)]
-                    cvarName: separateCheckBox.checked ? "cg_crosshair_" + weaponsPane.weaponShortName : "cg_crosshair"
+                    cvarName: separateCheckBox.checked ? "cg_crosshairName_" + weaponsPane.weaponShortName : "cg_crosshairName"
                 }
 
                 CVarAwareSliderWithBox {
                     id: regularSizeSlider
                     Layout.alignment: Qt.AlignLeft
-                    cvarName: separateCheckBox.checked ? "cg_crosshair_size_" + weaponsPane.weaponShortName : "cg_crosshair_size"
+                    cvarName: separateCheckBox.checked ? "cg_crosshairSize_" + weaponsPane.weaponShortName : "cg_crosshairSize"
                     from: UI.ui.minRegularCrosshairSize
                     to: UI.ui.maxRegularCrosshairSize
                     stepSize: UI.ui.crosshairSizeStep
@@ -199,7 +199,7 @@ Item {
                 CVarAwareColorPicker {
                     id: regularColorPicker
                     Layout.alignment: Qt.AlignLeft
-                    cvarName: separateCheckBox.checked ? "cg_crosshair_color_" + weaponsPane.weaponShortName : "cg_crosshair_color"
+                    cvarName: separateCheckBox.checked ? "cg_crosshairColor_" + weaponsPane.weaponShortName : "cg_crosshairColor"
                 }
             }
         }

@@ -1,5 +1,6 @@
 /*
 Copyright (C) 2002-2003 Victor Luchits
+Copyright (C) 2024 Chasseur de bots
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -33,6 +34,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../ref/ref.h"
 
 #include "cg_public.h"
+#include "../ui/cgameimports.h"
 
 #include <cmath>
 #include <new>
@@ -57,10 +59,6 @@ enum {
 	, LOCALEFFECT_EV_WEAPONBEAM
 	, MAX_LOCALEFFECTS = 5
 };
-
-typedef struct {
-	int x, y, width, height;
-} vrect_t;
 
 typedef struct {
 	entity_state_t current;
@@ -250,6 +248,115 @@ typedef struct {
 
 extern pmodel_t cg_entPModels[MAX_EDICTS];      //a pmodel handle for each cg_entity
 
+#define MAX_ANGLES_KICKS 3
+
+typedef struct {
+	int64_t timestamp;
+	int64_t kicktime;
+	float v_roll, v_pitch;
+} cg_kickangles_t;
+
+#define MAX_COLORBLENDS 3
+
+typedef struct {
+	int64_t timestamp;
+	int64_t blendtime;
+	float blend[4];
+} cg_viewblend_t;
+
+typedef struct {
+	entity_t ent;
+
+	unsigned int POVnum;
+	int weapon;
+
+	// animation
+	int baseAnim;
+	int64_t baseAnimStartTime;
+	int eventAnim;
+	int64_t eventAnimStartTime;
+
+	// other effects
+	orientation_t projectionSource;
+} cg_viewweapon_t;
+
+typedef struct {
+	int type;
+	int POVent;
+	bool thirdperson;
+	bool playerPrediction;
+	bool drawWeapon;
+	bool draw2D;
+	refdef_t refdef;
+	float fracDistFOV;
+	vec3_t origin;
+	vec3_t angles;
+	mat3_t axis;
+	vec3_t velocity;
+	bool flipped;
+} cg_viewdef_t;
+
+struct ViewState {
+	[[nodiscard]]
+	bool isViewerEntity( int entNum ) const;
+	[[nodiscard]]
+	bool canBeAMultiviewChaseTarget() const;
+	[[nodiscard]]
+	bool isUsingChasecam() const;
+
+	// current in use, predicted or interpolated
+	player_state_t predictedPlayerState;
+
+	bool mutePovSounds;
+
+	float xyspeed;
+	float oldBobTime;
+	int bobCycle;                   // odd cycles are right foot going forward
+	float bobFracSin;               // sin(bobfrac*M_PI)
+
+	// TODO: All of this belongs to viewstate
+	cg_kickangles_t kickangles[MAX_ANGLES_KICKS];
+	cg_viewblend_t colorblends[MAX_COLORBLENDS];
+	int64_t damageBlends[4];
+	int64_t fallEffectTime;
+	int64_t fallEffectRebounceTime;
+
+	int64_t pointRemoveTime;
+	int pointedNum;
+	int pointedHealth;
+	int pointedArmor;
+
+	cg_viewweapon_t weapon;
+	cg_viewdef_t view;
+
+	gs_laserbeamtrail_t weaklaserTrail;
+
+	int64_t crosshairDamageTimestamp;
+
+	float predictedOrigins[CMD_BACKUP][3];              // for debug comparing against server
+
+	float predictedStep;                // for stair up smoothing
+	int64_t predictedStepTime;
+
+	int64_t predictingTimeStamp;
+	int64_t predictedEventTimes[PREDICTABLE_EVENTS_MAX];
+	vec3_t predictionError;
+	int predictedWeaponSwitch;              // inhibit shooting prediction while a weapon change is expected
+	int predictedGroundEntity;
+
+	// prediction optimization (don't run all ucmds in not needed)
+	int64_t predictFrom;
+	entity_state_t predictFromEntityState;
+	player_state_t predictFromPlayerState;
+
+	float predictedSteps[CMD_BACKUP]; // for step smoothing
+
+	int lastWeapon;
+
+	player_state_t snapPlayerState;
+	player_state_t oldSnapPlayerState;
+};
+
 //
 // cg_pmodels.c
 //
@@ -272,8 +379,8 @@ void CG_PModelsShutdown( void );
 void CG_ResetPModels( void );
 void CG_RegisterBasePModel( void );
 struct pmodelinfo_s *CG_RegisterPlayerModel( const char *filename );
-void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest );
-bool CG_PModel_GetProjectionSource( int entnum, orientation_t *tag_result );
+void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest, ViewState *viewState );
+bool CG_PModel_GetProjectionSource( int entnum, orientation_t *tag_result, ViewState *viewState );
 void CG_UpdatePlayerModelEnt( centity_t *cent );
 void CG_PModel_AddAnimation( int entNum, int loweranim, int upperanim, int headanim, int channel );
 void CG_PModel_ClearEventAnimations( int entNum );
@@ -285,28 +392,8 @@ void CG_WModelsInit();
 void CG_WModelsShutdown();
 struct weaponinfo_s *CG_CreateWeaponZeroModel( char *cgs_name );
 struct weaponinfo_s *CG_RegisterWeaponModel( char *cgs_name, int weaponTag );
-void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, DrawSceneRequest *drawSceneRequest );
+void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weapon, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, DrawSceneRequest *drawSceneRequest, ViewState *viewState );
 struct weaponinfo_s *CG_GetWeaponInfo( int currentweapon );
-
-//=================================================
-//				VIEW WEAPON
-//=================================================
-
-typedef struct {
-	entity_t ent;
-
-	unsigned int POVnum;
-	int weapon;
-
-	// animation
-	int baseAnim;
-	int64_t baseAnimStartTime;
-	int eventAnim;
-	int64_t eventAnimStartTime;
-
-	// other effects
-	orientation_t projectionSource;
-} cg_viewweapon_t;
 
 #include "mediacache.h"
 
@@ -367,22 +454,6 @@ typedef struct {
 	struct shader_s *icon;
 } cg_clientInfo_t;
 
-#define MAX_ANGLES_KICKS 3
-
-typedef struct {
-	int64_t timestamp;
-	int64_t kicktime;
-	float v_roll, v_pitch;
-} cg_kickangles_t;
-
-#define MAX_COLORBLENDS 3
-
-typedef struct {
-	int64_t timestamp;
-	int64_t blendtime;
-	float blend[4];
-} cg_viewblend_t;
-
 #define PREDICTED_STEP_TIME 150 // stairs smoothing time
 
 // view types
@@ -392,22 +463,6 @@ enum {
 
 	VIEWDEF_MAXTYPES
 };
-
-typedef struct {
-	int type;
-	int POVent;
-	bool thirdperson;
-	bool playerPrediction;
-	bool drawWeapon;
-	bool draw2D;
-	refdef_t refdef;
-	float fracDistFOV;
-	vec3_t origin;
-	vec3_t angles;
-	mat3_t axis;
-	vec3_t velocity;
-	bool flipped;
-} cg_viewdef_t;
 
 #include "../common/configstringstorage.h"
 #include "../common/geometry.h"
@@ -509,68 +564,11 @@ typedef struct {
 
 struct shader_s;
 
-struct SizeProps { unsigned minSize, maxSize, defaultSize; };
+struct CrosshairSizeProps { unsigned minSize, maxSize, defaultSize; };
 
-constexpr const SizeProps kRegularCrosshairSizeProps { 16, 48, 24 };
-constexpr const SizeProps kStrongCrosshairSizeProps { 48, 72, 64 };
-
-class CrosshairState {
-public:
-	enum Style : bool { Regular, Strong };
-
-private:
-	cvar_t *m_valueVar { nullptr };
-	cvar_t *m_colorVar { nullptr };
-	cvar_t *m_sizeVar { nullptr };
-
-	static inline cvar_t *s_sizeVars[WEAP_TOTAL - 1] {};
-	static inline cvar_t *s_colorVars[WEAP_TOTAL - 1] {};
-	static inline cvar_t *s_valueVars[WEAP_TOTAL - 1] {};
-
-	static inline cvar_t *cg_crosshair { nullptr };
-	static inline cvar_t *cg_crosshair_size { nullptr };
-	static inline cvar_t *cg_crosshair_color { nullptr };
-	static inline cvar_t *cg_crosshair_strong { nullptr };
-	static inline cvar_t *cg_crosshair_strong_size { nullptr };
-	static inline cvar_t *cg_crosshair_strong_color { nullptr };
-	static inline cvar_t *cg_crosshair_damage_color { nullptr };
-	static inline cvar_t *cg_separate_weapon_settings { nullptr };
-	static inline float s_damageColor[4] {};
-	static inline int s_oldPackedDamageColor { -1 };
-
-	const int m_decayTime;
-	const float m_invDecayTime;
-
-	int m_decayTimeLeft { 0 };
-	int m_oldPackedColor { -1 };
-	float m_varColor[4] { 1.0f, 1.0f, 1.0f, 1.0f };
-	float m_drawColor[4] { 1.0f, 1.0f, 1.0f, 1.0f };
-
-	const Style m_style;
-
-	// Don't use var->modified flags as this is error-prone (multiple subsystems could reset it).
-	// Just check values caching whether its needed. We do the same for the UI var tracking code.
-
-	static void checkValueVar( cvar_t *var, Style style );
-	static void checkSizeVar( cvar_t *var, const SizeProps &sizeProps );
-	static void checkColorVar( cvar_t *var, float *cachedColor = nullptr, int *oldPackedColor = nullptr );
-public:
-	CrosshairState( Style style, unsigned decayTime ) noexcept
-		: m_decayTime( (int)decayTime ), m_invDecayTime( 1.0f / (float)decayTime ), m_style( style ) {}
-
-	void touchDamageState() { m_decayTimeLeft = m_decayTime; }
-
-	static void initPersistentState();
-	static void updateSharedPart();
-
-	void update( unsigned weapon );
-	void clear();
-
-	[[nodiscard]]
-	auto getDrawingColor() -> const float *;
-	[[nodiscard]]
-	auto getDrawingMaterial() -> std::optional<std::tuple<shader_s *, unsigned, unsigned>>;
-};
+// TODO: We do not need this if we are able to query var bounds in a generic fashion
+constexpr const CrosshairSizeProps kRegularCrosshairSizeProps { 16, 48, 32 };
+constexpr const CrosshairSizeProps kStrongCrosshairSizeProps { 48, 72, 64 };
 
 typedef struct cg_state_s {
 	int64_t time;
@@ -581,36 +579,15 @@ typedef struct cg_state_s {
 	int realFrameTime;
 	int frameCount;
 
-	int64_t firstViewRealTime;
-	int viewFrameCount;
-	bool startedMusic;
-
 	snapshot_t frame, oldFrame;
-	bool frameSequenceRunning;
+
+	// Unused?
 	bool oldAreabits;
-	bool portalInView;
+
 	bool fireEvents;
 	bool firstFrame;
 
-	float predictedOrigins[CMD_BACKUP][3];              // for debug comparing against server
 
-	float predictedStep;                // for stair up smoothing
-	int64_t predictedStepTime;
-
-	int64_t predictingTimeStamp;
-	int64_t predictedEventTimes[PREDICTABLE_EVENTS_MAX];
-	vec3_t predictionError;
-	player_state_t predictedPlayerState;     // current in use, predicted or interpolated
-	int predictedWeaponSwitch;              // inhibit shooting prediction while a weapon change is expected
-	int predictedGroundEntity;
-	gs_laserbeamtrail_t weaklaserTrail;
-
-	// prediction optimization (don't run all ucmds in not needed)
-	int64_t predictFrom;
-	entity_state_t predictFromEntityState;
-	player_state_t predictFromPlayerState;
-
-	int lastWeapon;
 
 	mat3_t autorotateAxis;
 
@@ -623,34 +600,29 @@ typedef struct cg_state_s {
 
 	vec3_t lightingOrigin;
 
-	bool showScoreboard;            // demos and multipov
-	bool specStateChanged;
+	// Addressed by index in snapshot
+	// The last is for demo TODO fix
+	ViewState viewStates[MAX_CLIENTS + 1];
+	// Addressed by player number (entity number + 1)
+	uint32_t snapViewStatePresentMask;
+	unsigned numSnapViewStates;
 
-	unsigned int multiviewPlayerNum;       // for multipov chasing, takes effect on next snap
+	unsigned ourClientViewportIndex;
+	unsigned chasedPlayerNum;
+	unsigned chasedViewportIndex;
 
-	int pointedNum;
-	int64_t pointRemoveTime;
-	int pointedHealth;
-	int pointedArmor;
+	int chaseMode;
+	int64_t chaseSwitchTimestamp;
 
-	//
-	// all cyclic walking effects
-	//
-	float xyspeed;
+	wsw::StaticVector<uint8_t, MAX_CLIENTS> hudControlledMiniviewViewStateIndicesForPane[2];
+	wsw::StaticVector<uint8_t, MAX_CLIENTS> tileMiniviewViewStateIndices;
+	wsw::StaticVector<Rect, MAX_CLIENTS> tileMiniviewPositions;
 
-	float oldBobTime;
-	int bobCycle;                   // odd cycles are right foot going forward
-	float bobFracSin;               // sin(bobfrac*M_PI)
-
-	//
-	// kick angles and color blend effects
-	//
-
-	cg_kickangles_t kickangles[MAX_ANGLES_KICKS];
-	cg_viewblend_t colorblends[MAX_COLORBLENDS];
-	int64_t damageBlends[4];
-	int64_t fallEffectTime;
-	int64_t fallEffectRebounceTime;
+	vec3_t demoFreeCamOrigin;
+	vec3_t demoFreeCamAngles;
+	vec3_t demoFreeCamVelocity;
+	short demoFreeCamDeltaAngles[3];
+	bool isDemoCamFree;
 
 	//
 	// transient data from server
@@ -661,12 +633,6 @@ typedef struct cg_state_s {
 	char *motd;
 	int64_t motd_time;
 
-	cg_viewweapon_t weapon;
-	cg_viewdef_t view;
-
-	CrosshairState crosshairState { CrosshairState::Regular, 350 };
-	CrosshairState strongCrosshairState { CrosshairState::Strong, 300 };
-
 	ParticleSystem particleSystem;
 	SimulatedHullsSystem simulatedHullsSystem;
 	PolyEffectsSystem polyEffectsSystem;
@@ -676,25 +642,31 @@ typedef struct cg_state_s {
 extern cg_static_t cgs;
 extern cg_state_t cg;
 
-#define ISVIEWERENTITY( entNum )  ( ( cg.predictedPlayerState.POVnum > 0 ) && ( (int)cg.predictedPlayerState.POVnum == (int)( entNum ) ) && ( cg.view.type == VIEWDEF_PLAYERVIEW ) )
+[[nodiscard]]
+auto getPrimaryViewState() -> ViewState *;
+[[nodiscard]]
+auto getOurClientViewState() -> ViewState *;
+[[nodiscard]]
+auto getViewStateForEntity( int number ) -> ViewState *;
+
 #define ISBRUSHMODEL( x ) ( ( ( x > 0 ) && ( (int)x < CG_NumInlineModels() ) ) ? true : false )
 
-#define ISREALSPECTATOR()       ( cg.frame.playerState.stats[STAT_REALTEAM] == TEAM_SPECTATOR )
+#define ISREALSPECTATOR( vs )       ( vs->snapPlayerState.stats[STAT_REALTEAM] == TEAM_SPECTATOR )
 #define SPECSTATECHANGED()      ( ( cg.frame.playerState.stats[STAT_REALTEAM] == TEAM_SPECTATOR ) != ( cg.oldFrame.playerState.stats[STAT_REALTEAM] == TEAM_SPECTATOR ) )
 
 extern centity_t cg_entities[MAX_EDICTS];
 
 const struct cmodel_s *CG_CModelForEntity( int entNum );
 void CG_SoundEntityNewState( centity_t *cent );
-void CG_AddEntities( DrawSceneRequest *drawSceneRequest );
-void CG_LerpEntities( void );
-void CG_LerpGenericEnt( centity_t *cent );
+void CG_AddEntities( DrawSceneRequest *drawSceneRequest, ViewState *viewState );
+void CG_LerpEntities( ViewState *viewState );
+void CG_LerpGenericEnt( centity_t *cent, ViewState *viewState );
 
 void CG_SetOutlineColor( byte_vec4_t outlineColor, byte_vec4_t color );
-void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t g, uint8_t b, uint8_t a );
-void CG_AddCentityOutLineEffect( centity_t *cent );
+void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t g, uint8_t b, uint8_t a, const ViewState *viewState );
+void CG_AddCentityOutLineEffect( centity_t *cent, const ViewState *viewState );
 
-void CG_AddFlagModelOnTag( centity_t *cent, byte_vec4_t teamcolor, const char *tagname, DrawSceneRequest * );
+void CG_AddFlagModelOnTag( centity_t *cent, byte_vec4_t teamcolor, const char *tagname, DrawSceneRequest *, ViewState *viewState );
 
 void CG_ResetItemTimers( void );
 
@@ -720,7 +692,7 @@ const SoundSet *CG_RegisterSexedSound( int entnum, const char *name );
 void CG_PredictedEvent( int entNum, int ev, int parm );
 void CG_Predict_ChangeWeapon( int new_weapon );
 void CG_PredictMovement( void );
-void CG_CheckPredictionError( void );
+void CG_CheckPredictionError();
 void CG_BuildSolidList( void );
 void CG_Trace( trace_t *t, const vec3_t start, const vec3_t mins, const vec3_t maxs, const vec3_t end, int ignore, int contentmask );
 int CG_PointContents( const vec3_t point );
@@ -729,19 +701,16 @@ void CG_Predict_TouchTriggers( pmove_t *pm, const vec3_t previous_origin );
 //
 // cg_screen.c
 //
-void CG_Draw2D( void );
-void CG_CalcVrect( void );
+void CG_Draw2D( ViewState *viewState );
 void CG_CenterPrint( const char *str );
 
 void CG_LoadingString( const char *str );
 bool CG_LoadingItemName( const char *str );
 
-void CG_DrawCrosshair();
-void CG_DrawKeyState( int x, int y, int w, int h, int align, const char *key );
+void CG_CheckSharedCrosshairState( bool initial );
+void CG_DrawCrosshair( ViewState *viewState );
 
-void CG_ScreenCrosshairDamageUpdate( void );
-
-void CG_ClearPointedNum( void );
+void CG_ClearPointedNum( ViewState *viewState );
 
 void CG_SC_ResetFragsFeed( const CmdArgs & );
 
@@ -870,32 +839,30 @@ uint8_t *CG_PlayerColorForEntity( int entNum, byte_vec4_t color );
 enum {
 	CAM_INEYES,
 	CAM_THIRDPERSON,
+	// TODO: Freecam should be another mode
+	CAM_TILED,
 	CAM_MODES
 };
-
-typedef struct {
-	int mode;
-	unsigned int cmd_mode_delay;
-} cg_chasecam_t;
-
-extern cg_chasecam_t chaseCam;
 
 void CG_DemocamInit( void );
 void CG_DemocamShutdown( void );
 
-void CG_ResetKickAngles( void );
-void CG_ResetColorBlend( void );
-void CG_ResetDamageIndicator( void );
-void CG_DamageIndicatorAdd( int damage, const vec3_t dir );
+void CG_ResetKickAngles( ViewState *viewState );
+void CG_ResetColorBlend( ViewState *viewState );
+void CG_ResetDamageIndicator( ViewState *viewState );
+void CG_DamageIndicatorAdd( int damage, const vec3_t dir, ViewState *viewState );
 void CG_StartKickAnglesEffect( vec3_t source, float knockback, float radius, int time );
-void CG_StartColorBlendEffect( float r, float g, float b, float a, int time );
-void CG_StartFallKickEffect( int bounceTime );
-void CG_ViewSmoothPredictedSteps( vec3_t vieworg );
-float CG_ViewSmoothFallKick( void );
-void CG_AddKickAngles( vec3_t viewangles );
+void CG_StartColorBlendEffect( float r, float g, float b, float a, int time, ViewState *viewState );
+void CG_StartFallKickEffect( int bounceTime, ViewState *viewState );
+void CG_ViewSmoothPredictedSteps( vec3_t vieworg, ViewState *viewState );
+float CG_ViewSmoothFallKick( ViewState *viewState );
+void CG_AddKickAngles( vec3_t viewangles, ViewState *viewState );
 bool CG_ChaseStep( int step );
 bool CG_SwitchChaseCamMode( void );
 void CG_ClearChaseCam();
+
+std::optional<std::pair<unsigned, unsigned>> CG_FindMultiviewPovToChase();
+std::optional<unsigned> CG_FindChaseableViewportForPlayernum( unsigned playerNum );
 
 inline void CG_SmallPileOfGibs( const vec3_t origin, int damage, const vec3_t initialVelocity, int team ) {}
 
@@ -913,10 +880,10 @@ inline void CG_AddFragmentedDecal( vec3_t origin, vec3_t dir, float orient, floa
 //
 //	cg_vweap.c - client weapon
 //
-void CG_AddViewWeapon( cg_viewweapon_t *viewweapon, DrawSceneRequest *drawSceneRequest );
-void CG_CalcViewWeapon( cg_viewweapon_t *viewweapon );
-void CG_ViewWeapon_StartAnimationEvent( int newAnim );
-void CG_ViewWeapon_RefreshAnimation( cg_viewweapon_t *viewweapon );
+void CG_AddViewWeapon( cg_viewweapon_t *viewweapon, DrawSceneRequest *drawSceneRequest, ViewState *viewState );
+void CG_CalcViewWeapon( cg_viewweapon_t *viewweapon, ViewState *viewState );
+void CG_ViewWeapon_StartAnimationEvent( int newAnim, ViewState *viewState );
+void CG_ViewWeapon_RefreshAnimation( cg_viewweapon_t *viewweapon, ViewState *viewState );
 
 void CG_FireEvents( bool early );
 void CG_EntityEvent( entity_state_t *ent, int ev, int parm, bool predicted );
@@ -925,8 +892,8 @@ void CG_ReleaseAnnouncerEvents( void );
 void CG_ClearAnnouncerEvents( void );
 
 // I don't know where to put these ones
-void CG_WeaponBeamEffect( centity_t *cent );
-void CG_LaserBeamEffect( centity_t *owner, DrawSceneRequest *drawSceneRequest );
+void CG_WeaponBeamEffect( centity_t *cent, ViewState *viewState );
+void CG_LaserBeamEffect( centity_t *owner, DrawSceneRequest *drawSceneRequest, ViewState *viewState );
 
 
 //

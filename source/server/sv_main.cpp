@@ -25,7 +25,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../common/compression.h"
 #include "../common/demometadata.h"
 #include "../common/wswtonum.h"
+#include "../common/wswfs.h"
+#include "../common/wswstringsplitter.h"
 #include "../common/gs_public.h"
+
+#include <variant>
 
 using wsw::operator""_asView;
 
@@ -118,6 +122,58 @@ static struct {
 	}
 } sv;
 
+class IteratorOverClients {
+public:
+	struct Params {
+		int minAcceptableState { CS_CONNECTING };
+		bool includeFakeClients { false };
+		// Note: Hidden clients are not even getting put in the array of all clients (TODO Really?)
+	};
+
+	explicit IteratorOverClients( Params &&params ) : m_params( params ) {}
+
+	[[nodiscard]]
+	auto getNextWithIndex() -> std::optional<std::pair<client_t *, int>> {
+		std::optional<std::pair<client_t *, int>> result;
+		for( int index = m_index; index < sv_maxclients->integer; ++index ) {
+			if( client_t *client = svs.clients + index; isAcceptable( client ) ) {
+				m_index = index + 1;
+				result  = std::make_pair( client, index );
+				break;
+			}
+		}
+		return result;
+	}
+
+	[[nodiscard]]
+	auto getNext() -> client_t * {
+		client_t *result = nullptr;
+		for( int index = m_index; index < sv_maxclients->integer; ++index ) {
+			if( client_t *client = svs.clients + index; isAcceptable( client ) ) {
+				m_index = index + 1;
+				result  = client;
+				break;
+			}
+		}
+		return result;
+	}
+
+	void rewind() { m_index = 0; }
+private:
+	[[nodiscard]]
+	bool isAcceptable( const client_t *client ) const {
+		if( client->state >= m_params.minAcceptableState ) {
+			if( m_params.includeFakeClients || !client->isAFakeClient() ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	int m_index { 0 };
+	const Params m_params;
+};
+
 // IPv4
 cvar_t *sv_ip;
 cvar_t *sv_port;
@@ -207,24 +263,19 @@ typedef struct sv_infoserver_s {
 
 static sv_infoserver_t sv_infoServers[MAX_INFO_SERVERS];
 
+static int64_t accTime = 0;
+
 static void PF_DropClient( edict_t *ent, ReconnectBehaviour reconnectBehaviour, const char *message ) {
-	int p;
-	client_t *drop;
-
-	if( !ent ) {
-		return;
-	}
-
-	p = NUM_FOR_EDICT( ent );
-	if( p < 1 || p > sv_maxclients->integer ) {
-		return;
-	}
-
-	drop = svs.clients + ( p - 1 );
-	if( message ) {
-		SV_DropClient( drop, reconnectBehaviour, "%s", message );
-	} else {
-		SV_DropClient( drop, reconnectBehaviour, NULL );
+	if( ent ) {
+		const int entNum = NUM_FOR_EDICT( ent );
+		if( entNum >= 1 && entNum <= sv_maxclients->integer ) {
+			client_t *drop = svs.clients + ( entNum - 1 );
+			if( message ) {
+				SV_DropClient( drop, reconnectBehaviour, "%s", message );
+			} else {
+				SV_DropClient( drop, reconnectBehaviour, NULL );
+			}
+		}
 	}
 }
 
@@ -234,10 +285,10 @@ static void PF_DropClient( edict_t *ent, ReconnectBehaviour reconnectBehaviour, 
 * Game code asks for the state of this client
 */
 static int PF_GetClientState( int clientNum ) {
-	if( clientNum < 0 || clientNum >= sv_maxclients->integer ) {
-		return -1;
+	if( clientNum >= 0 && clientNum < sv_maxclients->integer ) {
+		return svs.clients[clientNum].state;
 	}
-	return svs.clients[clientNum].state;
+	return -1;
 }
 
 /*
@@ -247,43 +298,33 @@ static int PF_GetClientState( int clientNum ) {
 * If ent is NULL the command will be sent to all connected clients
 */
 static void PF_GameCmd( const edict_t *ent, const char *cmd ) {
-	int i;
-	client_t *client;
-
-	if( !cmd || !cmd[0] ) {
-		return;
-	}
-
-	if( !ent ) {
-		for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
-			if( client->state < CS_SPAWNED ) {
-				continue;
+	if( cmd && cmd[0] ) {
+		if( !ent ) {
+			for( int clientNum = 0; clientNum < sv_maxclients->integer; ++clientNum ) {
+				if( client_t *client = svs.clients + clientNum; client->state >= CS_SPAWNED ) {
+					SV_AddGameCommand( client, cmd );
+				}
 			}
-			SV_AddGameCommand( client, cmd );
+		} else {
+			const int entNum = NUM_FOR_EDICT( ent );
+			if( entNum >= 1 && entNum <= sv_maxclients->integer ) {
+				if( client_t *client = svs.clients + ( entNum - 1 ); client->state >= CS_SPAWNED ) {
+					SV_AddGameCommand( client, cmd );
+				}
+			}
 		}
-	} else {
-		i = NUM_FOR_EDICT( ent );
-		if( i < 1 || i > sv_maxclients->integer ) {
-			return;
-		}
-
-		client = svs.clients + ( i - 1 );
-		if( client->state < CS_SPAWNED ) {
-			return;
-		}
-
-		SV_AddGameCommand( client, cmd );
 	}
 }
 
 static void PF_dprint( const char *msg ) {
-	char copy[MAX_PRINTMSG], *end = copy + sizeof( copy );
-	char *out = copy;
-	const char *in = msg;
-
 	if( !msg ) {
 		return;
 	}
+
+	char copy[MAX_PRINTMSG];
+	const char *end = copy + sizeof( copy );
+	const char *in  = msg;
+	char *out       = copy;
 
 	// don't allow control chars except for \n
 	if( sv_highchars && sv_highchars->integer ) {
@@ -313,13 +354,13 @@ __declspec( noreturn ) static void PF_error( const char *msg );
 #endif
 
 static void PF_error( const char *msg ) {
-	int i;
-	char copy[MAX_PRINTMSG];
-
 	if( !msg ) {
 		Com_Error( ERR_DROP, "Game Error: unknown error" );
 	}
 
+	char copy[MAX_PRINTMSG];
+
+	int i;
 	// mask off high bits and colored strings
 	for( i = 0; i < (int)sizeof( copy ) - 1 && msg[i]; i++ ) {
 		copy[i] = (char)( msg[i] & 127 );
@@ -333,54 +374,46 @@ static void PF_error( const char *msg ) {
 * PF_Configstring
 */
 static void PF_ConfigString( int index, const char *val ) {
-	if( !val ) {
-		return;
-	}
+	if( val ) {
+		if( index < 0 || index >= MAX_CONFIGSTRINGS ) {
+			Com_Error( ERR_DROP, "configstring: bad index %i", index );
+		} else {
+			if( index < SERVER_PROTECTED_CONFIGSTRINGS ) {
+				Com_Printf( "WARNING: 'PF_Configstring', configstring %i is server protected\n", index );
+			} else {
+				if( !COM_ValidateConfigstring( val ) ) {
+					Com_Printf( "WARNING: 'PF_Configstring' invalid configstring %i: %s\n", index, val );
+				} else {
+					const wsw::StringView stringView( val );
+					wsw::ConfigStringStorage &storage = sv.configStrings;
 
-	if( index < 0 || index >= MAX_CONFIGSTRINGS ) {
-		Com_Error( ERR_DROP, "configstring: bad index %i", index );
-	}
+					bool hasTheSameContent = false;
+					if( const std::optional<wsw::StringView> maybeExistingString = storage.get( index ) ) {
+						if( maybeExistingString->equals( stringView ) ) {
+							hasTheSameContent = true;
+						}
+					}
 
-	if( index < SERVER_PROTECTED_CONFIGSTRINGS ) {
-		Com_Printf( "WARNING: 'PF_Configstring', configstring %i is server protected\n", index );
-		return;
-	}
-
-	if( !COM_ValidateConfigstring( val ) ) {
-		Com_Printf( "WARNING: 'PF_Configstring' invalid configstring %i: %s\n", index, val );
-		return;
-	}
-
-	const wsw::StringView stringView( val );
-
-	wsw::ConfigStringStorage &storage = sv.configStrings;
-	// ignore if no changes
-	if( auto maybeExistingString = storage.get( index ) ) {
-		if( maybeExistingString->equals( stringView ) ) {
-			return;
+					if( !hasTheSameContent ) {
+						storage.set( index, stringView );
+						if( sv.state != ss_loading ) {
+							SV_SendServerCommand( nullptr, "cs %i \"%s\"", index, val );
+						}
+					}
+				}
+			}
 		}
-	}
-
-	// change the string in sv
-	storage.set( index, stringView );
-
-	if( sv.state != ss_loading ) {
-		SV_SendServerCommand( NULL, "cs %i \"%s\"", index, val );
 	}
 }
 
 static const char *PF_GetConfigString( int index ) {
-	if( index < 0 || index >= MAX_CONFIGSTRINGS ) {
-		return NULL;
+	if( index >= 0 && index < MAX_CONFIGSTRINGS ) {
+		return sv.configStrings.get( index ).value_or( wsw::StringView() ).data();
 	}
-
-	return sv.configStrings.get( index ).value_or( wsw::StringView() ).data();
+	return nullptr;
 }
 
 static void PF_PureSound( const char *name ) {
-	const char *extension;
-	char tempname[MAX_QPATH];
-
 	if( sv.state != ss_loading ) {
 		return;
 	}
@@ -389,18 +422,20 @@ static void PF_PureSound( const char *name ) {
 		return;
 	}
 
+	char tempname[MAX_QPATH];
 	Q_strncpyz( tempname, name, sizeof( tempname ) );
 
-	if( !COM_FileExtension( tempname ) ) {
-		extension = FS_FirstExtension( tempname, SOUND_EXTENSIONS, NUM_SOUND_EXTENSIONS );
-		if( !extension ) {
-			return;
+	bool hasExtension = COM_FileExtension( tempname ) != nullptr;
+	if( !hasExtension ) {
+		if( const char *extension = FS_FirstExtension( tempname, SOUND_EXTENSIONS, NUM_SOUND_EXTENSIONS ) ) {
+			COM_ReplaceExtension( tempname, extension, sizeof( tempname ) );
+			hasExtension = true;
 		}
-
-		COM_ReplaceExtension( tempname, extension, sizeof( tempname ) );
 	}
 
-	SV_AddPureFile( wsw::StringView( tempname ) );
+	if( hasExtension ) {
+		SV_AddPureFile( wsw::StringView( tempname ) );
+	}
 }
 
 /*
@@ -409,40 +444,43 @@ static void PF_PureSound( const char *name ) {
 * FIXME: For now we don't parse shaders, but simply assume that it uses the same name .tga or .jpg
 */
 static void SV_AddPureShader( const char *name ) {
-	const char *extension;
-	char tempname[MAX_QPATH];
-
 	if( !name || !name[0] ) {
 		return;
 	}
 
 	assert( name && name[0] && strlen( name ) < MAX_QPATH );
-
 	if( !Q_strnicmp( name, "textures/common/", strlen( "textures/common/" ) ) ) {
 		return;
 	}
 
+	char tempname[MAX_QPATH];
 	Q_strncpyz( tempname, name, sizeof( tempname ) );
 
-	if( !COM_FileExtension( tempname ) ) {
-		extension = FS_FirstExtension( tempname, IMAGE_EXTENSIONS, NUM_IMAGE_EXTENSIONS );
-		if( !extension ) {
-			return;
+	bool hasExtension = COM_FileExtension( tempname );
+	if( !hasExtension ) {
+		if( const char *extension = FS_FirstExtension( tempname, IMAGE_EXTENSIONS, NUM_IMAGE_EXTENSIONS ) ) {
+			COM_ReplaceExtension( tempname, extension, sizeof( tempname ) );
+			hasExtension = true;
 		}
-
-		COM_ReplaceExtension( tempname, extension, sizeof( tempname ) );
 	}
 
-	SV_AddPureFile( wsw::StringView( tempname ) );
+	if( hasExtension ) {
+		SV_AddPureFile( wsw::StringView( tempname ) );
+	}
 }
 
-static void SV_AddPureBSP( void ) {
-	int i;
-	const char *shader;
-
+static void SV_AddPureBSP() {
 	SV_AddPureFile( sv.configStrings.getWorldModel().value() );
-	for( i = 0; ( shader = CM_ShaderrefName( svs.cms, i ) ); i++ )
-		SV_AddPureShader( shader );
+
+	int ref = 0;
+	for(;; ) {
+		if( const char *shader = CM_ShaderrefName( svs.cms, ref ) ) {
+			SV_AddPureShader( shader );
+			++ref;
+		} else {
+			break;
+		}
+	}
 }
 
 static void PF_PureModel( const char *name ) {
@@ -471,17 +509,15 @@ static bool PF_Compress( void *dst, size_t *const dstSize, const void *src, size
 	return false;
 }
 
-void SV_ShutdownGameProgs( void ) {
-	if( !ge ) {
-		return;
-	}
-
-	ge->Shutdown();
-	// This call might still require the memory pool to be valid
-	// (for example if there are global object destructors calling G_Free()),
-	// that's why it's called before releasing the pool.
-	Com_UnloadGameLibrary( &module_handle );
-	ge = NULL;
+void SV_ShutdownGameProgs() {
+	if( ge ) {
+		ge->Shutdown();
+		// This call might still require the memory pool to be valid
+		// (for example if there are global object destructors calling G_Free()),
+		// that's why it's called before releasing the pool.
+		Com_UnloadGameLibrary( &module_handle );
+		ge = nullptr;
+	};
 }
 
 static void SV_LocateEntities( struct edict_s *edicts, int edict_size, int num_edicts, int max_edicts ) {
@@ -489,64 +525,65 @@ static void SV_LocateEntities( struct edict_s *edicts, int edict_size, int num_e
 		Com_Error( ERR_DROP, "SV_LocateEntities: bad edicts" );
 	}
 
-	sv.gi.edicts = edicts;
-	sv.gi.clients = svs.clients;
-	sv.gi.edict_size = edict_size;
-	sv.gi.num_edicts = num_edicts;
-	sv.gi.max_edicts = max_edicts;
+	sv.gi.edicts      = edicts;
+	sv.gi.clients     = svs.clients;
+	sv.gi.edict_size  = edict_size;
+	sv.gi.num_edicts  = num_edicts;
+	sv.gi.max_edicts  = max_edicts;
 	sv.gi.max_clients = wsw::min( num_edicts, sv_maxclients->integer );
 }
 
-static int SV_FindIndex( const char *name, int start, int max, bool create ) {
-	if( !name || !name[0] ) {
-		return 0;
-	}
+static int SV_FindIndex( const char *name, int start, int max, bool createIfMissing ) {
+	int resultIndex = 0;
 
-	const wsw::StringView nameView( name );
-	if( nameView.length() >= MAX_CONFIGSTRING_CHARS ) {
-		Com_Error( ERR_DROP, "Configstring too long: %s\n", name );
-	}
+	if( name && name[0] ) {
+		const wsw::StringView nameView( name );
+		if( nameView.length() >= MAX_CONFIGSTRING_CHARS ) {
+			Com_Error( ERR_DROP, "Configstring too long: %s\n", name );
+		}
 
-	int index = 1;
-	for( ; index < max; index++ ) {
-		if( const std::optional<wsw::StringView> &maybeConfigString = sv.configStrings.get( start + index ) ) {
-			if( maybeConfigString->equals( nameView ) ) {
-				return index;
+		int testedIndex    = 1;
+		bool foundMatching = false;
+		// TODO: Check whether we should start from `start`, not 1
+		for(; testedIndex < max; testedIndex++ ) {
+			if( const std::optional<wsw::StringView> &maybeConfigString = sv.configStrings.get( start + testedIndex ) ) {
+				if( maybeConfigString->equals( nameView ) ) {
+					foundMatching = true;
+					break;
+				}
+			} else {
+				break;
 			}
-		} else {
-			break;
+		}
+
+		if( foundMatching ) {
+			resultIndex = testedIndex;
+		} else if( createIfMissing ) {
+			if( testedIndex == max ) {
+				Com_Error( ERR_DROP, "*Index: overflow" );
+			}
+
+			sv.configStrings.set( start + testedIndex, nameView );
+
+			// send the update to everyone
+			if( sv.state != ss_loading ) {
+				SV_SendServerCommand( nullptr, "cs %i \"%s\"", start + testedIndex, name );
+			}
+
+			resultIndex = testedIndex;
 		}
 	}
 
-	if( !create ) {
-		return 0;
-	}
-
-	if( index == max ) {
-		Com_Error( ERR_DROP, "*Index: overflow" );
-	}
-
-	sv.configStrings.set( start + index, nameView );
-
-	// send the update to everyone
-	if( sv.state != ss_loading ) {
-		SV_SendServerCommand( NULL, "cs %i \"%s\"", start + index, name );
-	}
-
-	return index;
+	return resultIndex;
 }
 
-void SV_InitGameProgs( void ) {
-	int apiversion;
-	game_import_t import;
-	void *( *builtinAPIfunc )( void * ) = NULL;
-	char manifest[MAX_INFO_STRING];
-
+void SV_InitGameProgs() {
 	// unload anything we have now
 	if( ge ) {
 		SV_ShutdownGameProgs();
 	}
 
+	game_import_t import;
 	// load a new game dll
 	import.Print = PF_dprint;
 	import.Error = PF_error;
@@ -696,9 +733,11 @@ void SV_InitGameProgs( void ) {
 	import.submitMessageStream = wsw::submitMessageStream;
 
 	// clear module manifest string
+	char manifest[MAX_INFO_STRING];
 	assert( sizeof( manifest ) >= MAX_INFO_STRING );
 	memset( manifest, 0, sizeof( manifest ) );
 
+	void *( *builtinAPIfunc )( void * ) = NULL;
 	if( builtinAPIfunc ) {
 		ge = (game_export_t *)builtinAPIfunc( &import );
 	} else {
@@ -708,10 +747,9 @@ void SV_InitGameProgs( void ) {
 		Com_Error( ERR_DROP, "Failed to load game DLL" );
 	}
 
-	apiversion = ge->API();
-	if( apiversion != GAME_API_VERSION ) {
+	if( const int apiversion = ge->API(); apiversion != GAME_API_VERSION ) {
 		Com_UnloadGameLibrary( &module_handle );
-		ge = NULL;
+		ge = nullptr;
 		Com_Error( ERR_DROP, "Game is version %i, not %i", apiversion, GAME_API_VERSION );
 	}
 
@@ -719,53 +757,31 @@ void SV_InitGameProgs( void ) {
 
 	SV_SetServerConfigStrings();
 
-	ge->Init( time( NULL ), svc.snapFrameTime, APP_PROTOCOL_VERSION, APP_DEMO_EXTENSION_STR );
+	ge->Init( time( nullptr ), svc.snapFrameTime, APP_PROTOCOL_VERSION, APP_DEMO_EXTENSION_STR );
 }
 
-/*
-* SV_CalcPings
-*
-* Updates the cl->ping variables
-*/
-static void SV_CalcPings( void ) {
-	unsigned int i, j;
-	client_t *cl;
-	unsigned int total, count, lat, best;
-
-	for( i = 0; i < (unsigned int)sv_maxclients->integer; i++ ) {
-		cl = &svs.clients[i];
-		if( cl->state != CS_SPAWNED ) {
-			continue;
-		}
-		if( cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			continue;
-		}
-
-		total = 0;
-		count = 0;
-		best = 9999;
-		for( j = 0; j < LATENCY_COUNTS; j++ ) {
-			if( cl->frame_latency[j] > 0 ) {
-				lat = (unsigned)cl->frame_latency[j];
-				if( lat < best ) {
-					best = lat;
-				}
-
-				total += lat;
+static void SV_CalcPings() {
+	IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_SPAWNED, .includeFakeClients = false } );
+	while( client_t *const client = iteratorOverClients.getNext() ) {
+		unsigned total = 0;
+		unsigned count = 0;
+		unsigned best  = std::numeric_limits<unsigned>::max();
+		for( const int latency : client->frame_latency ) {
+			if( latency > 0 ) {
+				best = wsw::min<unsigned>( latency, best );
+				total += latency;
 				count++;
 			}
 		}
 
-		if( !count ) {
-			cl->ping = 0;
-		} else
-#if 1
-		{ cl->ping = ( best + ( total / count ) ) * 0.5f;}
-#else
-		{ cl->ping = total / count;}
-#endif
+		if( count ) {
+			client->ping = (int)( best + ( total / count ) ) / 2;
+		} else {
+			client->ping = 0;
+		}
+
 		// let the game dll know about the ping
-		cl->edict->r.client->m_ping = cl->ping;
+		client->edict->r.client->m_ping = client->ping;
 	}
 }
 
@@ -793,80 +809,57 @@ static bool SV_ProcessPacket( netchan_t *netchan, msg_t *msg ) {
 	return true;
 }
 
-static void SV_ReadPackets( void ) {
-	int i, socketind, ret;
-	client_t *cl;
-	int game_port;
-	socket_t *socket;
-	netadr_t address;
-
-	static msg_t msg;
-	static uint8_t msgData[MAX_MSGLEN];
-
-	socket_t* sockets [] =
-	{
-		&svs.socket_loopback,
-		&svs.socket_udp,
-		&svs.socket_udp6,
-	};
+static void SV_ReadPackets() {
+	msg_t msg;
+	uint8_t msgData[MAX_MSGLEN];
 
 	MSG_Init( &msg, msgData, sizeof( msgData ) );
 
-	for( socketind = 0; socketind < (int)( sizeof( sockets ) / sizeof( sockets[0] ) ); socketind++ ) {
-		socket = sockets[socketind];
+	for( socket_t *socket: { &svs.socket_loopback, &svs.socket_udp, &svs.socket_udp6 } ) {
+		if( socket->open ) {
+			netadr_t address;
+			int ret = 0;
+			while( ( ret = NET_GetPacket( socket, &address, &msg ) ) != 0 ) {
+				if( ret == -1 ) {
+					Com_Printf( "NET_GetPacket: Error: %s\n", NET_ErrorString() );
+				} else {
+					// check for connectionless packet (0xffffffff) first
+					if( *(int *)msg.data == -1 ) {
+						SV_ConnectionlessPacket( socket, &address, &msg );
+					} else {
+						// read the game port out of the message so we can fix up
+						// stupid address translating routers
+						MSG_BeginReading( &msg );
+						MSG_ReadInt32( &msg ); // sequence number
+						MSG_ReadInt32( &msg ); // sequence number
+						const int game_port = MSG_ReadInt16( &msg ) & 0xffff;
+						// data follows
 
-		if( !socket->open ) {
-			continue;
-		}
+						client_t *matchingClient = nullptr;
+						IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_CONNECTING } );
+						while( client_t *const client = iteratorOverClients.getNext() ) {
+							if( NET_CompareBaseAddress( &address, &client->netchan.remoteAddress ) ) {
+								if( client->netchan.game_port == game_port ) {
+									matchingClient = client;
+									break;
+								}
+							}
+						}
 
-		while( ( ret = NET_GetPacket( socket, &address, &msg ) ) != 0 ) {
-			if( ret == -1 ) {
-				Com_Printf( "NET_GetPacket: Error: %s\n", NET_ErrorString() );
-				continue;
-			}
-
-			// check for connectionless packet (0xffffffff) first
-			if( *(int *)msg.data == -1 ) {
-				SV_ConnectionlessPacket( socket, &address, &msg );
-				continue;
-			}
-
-			// read the game port out of the message so we can fix up
-			// stupid address translating routers
-			MSG_BeginReading( &msg );
-			MSG_ReadInt32( &msg ); // sequence number
-			MSG_ReadInt32( &msg ); // sequence number
-			game_port = MSG_ReadInt16( &msg ) & 0xffff;
-			// data follows
-
-			// check for packets from connected clients
-			for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ ) {
-				unsigned short addr_port;
-
-				if( cl->state == CS_FREE || cl->state == CS_ZOMBIE ) {
-					continue;
+						if( matchingClient ) {
+							const unsigned short addr_port = NET_GetAddressPort( &address );
+							if( NET_GetAddressPort( &matchingClient->netchan.remoteAddress ) != addr_port ) {
+								svNotice() << "SV_ReadPackets: fixing up a translated port";
+								NET_SetAddressPort( &matchingClient->netchan.remoteAddress, addr_port );
+							}
+							// This is a valid, sequenced packet, so process it
+							if( SV_ProcessPacket( &matchingClient->netchan, &msg ) ) {
+								matchingClient->lastPacketReceivedTime = svs.realtime;
+								SV_ParseClientMessage( matchingClient, &msg );
+							}
+						}
+					}
 				}
-				if( cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
-					continue;
-				}
-				if( !NET_CompareBaseAddress( &address, &cl->netchan.remoteAddress ) ) {
-					continue;
-				}
-				if( cl->netchan.game_port != game_port ) {
-					continue;
-				}
-
-				addr_port = NET_GetAddressPort( &address );
-				if( NET_GetAddressPort( &cl->netchan.remoteAddress ) != addr_port ) {
-					svNotice() << "SV_ReadPackets: fixing up a translated port";
-					NET_SetAddressPort( &cl->netchan.remoteAddress, addr_port );
-				}
-
-				if( SV_ProcessPacket( &cl->netchan, &msg ) ) { // this is a valid, sequenced packet, so process it
-					cl->lastPacketReceivedTime = svs.realtime;
-					SV_ParseClientMessage( cl, &msg );
-				}
-				break;
 			}
 		}
 	}
@@ -883,37 +876,34 @@ static void SV_ReadPackets( void ) {
 * for a few seconds to make sure any final reliable message gets resent
 * if necessary
 */
-static void SV_CheckTimeouts( void ) {
-	client_t *cl;
-	int i;
-
-	// timeout clients
-	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ ) {
-		// fake clients do not timeout
+static void SV_CheckTimeouts() {
+	for( int clientNum = 0; clientNum < sv_maxclients->integer; ++clientNum ) {
+		client_t *const cl = svs.clients + clientNum;
+		// Fake clients do not timeout
 		if( cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
 			cl->lastPacketReceivedTime = svs.realtime;
-		}
-		// message times may be wrong across a changelevel
-		else if( cl->lastPacketReceivedTime > svs.realtime ) {
+		} else if( cl->lastPacketReceivedTime > svs.realtime ) {
+			// Message times may be wrong across a changelevel
 			cl->lastPacketReceivedTime = svs.realtime;
 		}
 
-		if( cl->state == CS_ZOMBIE && cl->lastPacketReceivedTime + 1000 * sv_zombietime->value < svs.realtime ) {
-			cl->state = CS_FREE; // can now be reused
-			continue;
-		}
-
-		if( ( cl->state != CS_FREE && cl->state != CS_ZOMBIE ) &&
-			( cl->lastPacketReceivedTime + 1000 * sv_timeout->value < svs.realtime ) ) {
-			SV_DropClient( cl, ReconnectBehaviour::OfUserChoice, "%s", "Error: Connection timed out" );
-			cl->state = CS_FREE; // don't bother with zombie state
-		}
-
-		// timeout downloads left open
-		if( ( cl->state != CS_FREE && cl->state != CS_ZOMBIE ) &&
-			( cl->download.name && cl->download.timeout < svs.realtime ) ) {
-			Com_Printf( "Download of %s to %s%s timed out\n", cl->download.name, cl->name, S_COLOR_WHITE );
-			SV_ClientCloseDownload( cl );
+		if( cl->state == CS_ZOMBIE ) {
+			if( cl->lastPacketReceivedTime + 1000 * sv_zombietime->value < svs.realtime ) {
+				// Can now be reused
+				cl->state = CS_FREE;
+			}
+		} else if( cl->state != CS_FREE ) {
+			if( cl->lastPacketReceivedTime + 1000 * sv_timeout->value < svs.realtime ) {
+				// Don't even bother with transition to zombie state
+				SV_DropClient( cl, ReconnectBehaviour::OfUserChoice, "%s", "Error: Connection timed out" );
+				cl->state = CS_FREE;
+			} else {
+				// timeout downloads left open
+				if( cl->download.name && cl->download.timeout < svs.realtime ) {
+					Com_Printf( "Download of %s to %s%s timed out\n", cl->download.name, cl->name, S_COLOR_WHITE );
+					SV_ClientCloseDownload( cl );
+				}
+			}
 		}
 	}
 }
@@ -925,22 +915,14 @@ static void SV_CheckTimeouts( void ) {
 * and only the last one is applied.
 * Applies latched userinfo updates if the timeout is over.
 */
-static void SV_CheckLatchedUserinfoChanges( void ) {
-	client_t *cl;
-	int i;
-	int64_t time = Sys_Milliseconds();
-
-	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ ) {
-		if( cl->state == CS_FREE || cl->state == CS_ZOMBIE ) {
-			continue;
-		}
-
-		if( cl->userinfoLatched[0] && cl->userinfoLatchTimeout <= time ) {
-			Q_strncpyz( cl->userinfo, cl->userinfoLatched, sizeof( cl->userinfo ) );
-
-			cl->userinfoLatched[0] = '\0';
-
-			SV_UserinfoChanged( cl );
+static void SV_CheckLatchedUserinfoChanges() {
+	const int64_t time = Sys_Milliseconds();
+	IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_CONNECTING, .includeFakeClients = true } );
+	while( client_t *client = iteratorOverClients.getNext() ) {
+		if( client->userinfoLatched[0] && client->userinfoLatchTimeout <= time ) {
+			Q_strncpyz( client->userinfo, client->userinfoLatched, sizeof( client->userinfo ) );
+			client->userinfoLatched[0] = '\0';
+			SV_UserinfoChanged( client );
 		}
 	}
 }
@@ -948,11 +930,9 @@ static void SV_CheckLatchedUserinfoChanges( void ) {
 #define WORLDFRAMETIME 16 // 62.5fps
 
 static bool SV_RunGameFrame( int msec ) {
-	static int64_t accTime = 0;
-
 	accTime += msec;
 
-	bool refreshSnapshot = false;
+	bool refreshSnapshot   = false;
 	bool refreshGameModule = false;
 
 	const bool sentFragments = SV_SendClientsFragments();
@@ -964,13 +944,13 @@ static bool SV_RunGameFrame( int msec ) {
 
 	// see if it's time for a new snapshot
 	if( !sentFragments && svs.gametime >= sv.nextSnapTime ) {
-		refreshSnapshot = true;
+		refreshSnapshot   = true;
 		refreshGameModule = true;
 	}
 
 	// if there aren't pending packets to be sent, we can sleep
 	if( dedicated->integer && !sentFragments && !refreshSnapshot ) {
-		int sleeptime = wsw::min( (int)( WORLDFRAMETIME - ( accTime + 1 ) ), (int)( sv.nextSnapTime - ( svs.gametime + 1 ) ) );
+		const int sleeptime = wsw::min( (int)( WORLDFRAMETIME - ( accTime + 1 ) ), (int)( sv.nextSnapTime - ( svs.gametime + 1 ) ) );
 
 		if( sleeptime > 0 ) {
 			socket_t *sockets [] = { &svs.socket_udp, &svs.socket_udp6 };
@@ -986,18 +966,17 @@ static bool SV_RunGameFrame( int msec ) {
 					open_ind++;
 				}
 			}
-			opened_sockets[open_ind] = NULL;
+			opened_sockets[open_ind] = nullptr;
 
 			NET_Sleep( sleeptime, opened_sockets );
 		}
 	}
 
 	if( refreshGameModule ) {
-		int64_t moduleTime;
-
 		// update ping based on the last known frame from all clients
 		SV_CalcPings();
 
+		int64_t moduleTime;
 		if( accTime >= WORLDFRAMETIME ) {
 			moduleTime = WORLDFRAMETIME;
 			accTime -= WORLDFRAMETIME;
@@ -1014,14 +993,12 @@ static bool SV_RunGameFrame( int msec ) {
 
 	// if we don't have to send a snapshot we are done here
 	if( refreshSnapshot ) {
-		int extraSnapTime;
-
 		// set up for sending a snapshot
 		sv.framenum++;
 		ge->SnapFrame();
 
 		// set time for next snapshot
-		extraSnapTime = (int)( svs.gametime - sv.nextSnapTime );
+		int extraSnapTime = (int)( svs.gametime - sv.nextSnapTime );
 		if( extraSnapTime > svc.snapFrameTime * 0.5 ) { // don't let too much time be accumulated
 			extraSnapTime = svc.snapFrameTime * 0.5;
 		}
@@ -1087,21 +1064,20 @@ void SV_Frame( unsigned realmsec, unsigned gamemsec ) {
 * to the clients -- only the fields that differ from the
 * baseline will be transmitted
 */
-static void SV_CreateBaseline( void ) {
-	for( int entnum = 1; entnum < sv.gi.num_edicts; entnum++ ) {
-		if( edict_t *svent = EDICT_NUM( entnum ); svent->r.inuse ) {
-			svent->s.number = entnum;
+static void SV_CreateBaseline() {
+	for( int entNum = 1; entNum < sv.gi.num_edicts; entNum++ ) {
+		if( edict_t *svent = EDICT_NUM( entNum ); svent->r.inuse ) {
+			svent->s.number = entNum;
 			// take current state as baseline
-			sv.baselines[entnum] = svent->s;
+			sv.baselines[entNum] = svent->s;
 		}
 	}
 }
 
 void SV_PureList_f( const CmdArgs & ) {
 	Com_Printf( "Pure files:\n" );
-	for( purelist_t *purefile = svs.purelist; purefile; purefile = purefile->next ) {
-		Com_Printf( "- %s (%u)\n", purefile->filename, purefile->checksum );
-		purefile = purefile->next;
+	for( purelist_t *pureFile = svs.purelist; pureFile; pureFile = pureFile->next ) {
+		Com_Printf( "- %s (%u)\n", pureFile->filename, pureFile->checksum );
 	}
 }
 
@@ -1115,18 +1091,18 @@ void SV_AddPureFile( const wsw::StringView &fileName ) {
 	assert( fileName.isZeroTerminated() );
 
 	if( !fileName.empty() ) {
-		if( const char *pakname = FS_PakNameForFile( fileName.data() ) ) {
-			Com_DPrintf( "Pure file: %s (%s)\n", pakname, fileName.data() );
-			SV_AddPurePak( pakname );
+		if( const char *pakName = FS_PakNameForFile( fileName.data() ) ) {
+			Com_DPrintf( "Pure file: %s (%s)\n", pakName, fileName.data() );
+			SV_AddPurePak( pakName );
 		}
 	}
 }
 
-static void SV_ReloadPureList( void ) {
+static void SV_ReloadPureList() {
 	Com_FreePureList( &svs.purelist );
 
 	// *pure.(pk3|pak)
-	char **paks = NULL;
+	char **paks = nullptr;
 	if( int numpaks = FS_GetExplicitPurePakList( &paks ) ) {
 		for( int i = 0; i < numpaks; i++ ) {
 			SV_AddPurePak( paks[i] );
@@ -1136,7 +1112,7 @@ static void SV_ReloadPureList( void ) {
 	}
 }
 
-void SV_SetServerConfigStrings( void ) {
+void SV_SetServerConfigStrings() {
 	wsw::StaticString<16> tmp;
 
 	(void)tmp.assignf( "%d\n", sv_maxclients->integer );
@@ -1230,12 +1206,7 @@ static void SV_SpawnServer( const char *server, bool devmap ) {
 * SV_InitGame
 * A brand new game has been started
 */
-void SV_InitGame( void ) {
-	int i;
-	edict_t *ent;
-	netadr_t address, ipv6_address;
-	bool socket_opened = false;
-
+void SV_InitGame() {
 	SV_NotifyClientOfStartedBuiltinServer();
 
 	if( svs.initialized ) {
@@ -1264,13 +1235,14 @@ void SV_InitGame( void ) {
 		Cvar_FullSet( "sv_maxclients", va( "%i", MAX_CLIENTS ), CVAR_SERVERINFO | CVAR_LATCH, true );
 	}
 
-	svs.spawncount = rand();
+	svs.spawncount = ::rand();
 	svs.clients = (client_t *)Q_malloc( sizeof( client_t ) * sv_maxclients->integer );
 	svs.client_entities.num_entities = sv_maxclients->integer * UPDATE_BACKUP * MAX_SNAP_ENTITIES;
 	svs.client_entities.entities = (entity_state_t *)Q_malloc( sizeof( entity_state_t ) * svs.client_entities.num_entities );
 
 	// init network stuff
 
+	netadr_t address {}, ipv6_address {};
 	address.type = NA_NOTRANSMIT;
 	ipv6_address.type = NA_NOTRANSMIT;
 
@@ -1281,6 +1253,7 @@ void SV_InitGame( void ) {
 		}
 	}
 
+	bool socket_opened = false;
 	if( dedicated->integer || sv_maxclients->integer > 1 ) {
 		// IPv4
 		NET_StringToAddress( sv_ip->string, &address );
@@ -1315,8 +1288,8 @@ void SV_InitGame( void ) {
 	// init game
 	SV_InitGameProgs();
 
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
-		ent = EDICT_NUM( i + 1 );
+	for( int i = 0; i < sv_maxclients->integer; i++ ) {
+		edict_t *ent = EDICT_NUM( i + 1 );
 		ent->s.number = i + 1;
 		svs.clients[i].edict = ent;
 	}
@@ -1336,28 +1309,21 @@ void SV_InitGame( void ) {
 * to totally exit after returning from this function.
 */
 static void SV_FinalMessage( const char *message, bool reconnect ) {
-	int i, j;
-	client_t *cl;
-
-	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ ) {
-		if( cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			continue;
+	IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_CONNECTING, .includeFakeClients = false } );
+	while( client_t *const client = iteratorOverClients.getNext() ) {
+		if( reconnect ) {
+			SV_SendServerCommand( client, "forcereconnect \"%s\"", message );
+		} else {
+			SV_SendServerCommand( client, "disconnect %u \"%s\" %u", (unsigned)ReconnectBehaviour::DontReconnect,
+								  message, (unsigned)ConnectionDropStage::TerminatedByServer );
 		}
-		if( cl->state >= CS_CONNECTING ) {
-			if( reconnect ) {
-				SV_SendServerCommand( cl, "forcereconnect \"%s\"", message );
-			} else {
-				SV_SendServerCommand( cl, "disconnect %u \"%s\" %u", (unsigned)ReconnectBehaviour::DontReconnect,
-									  message, (unsigned)ConnectionDropStage::TerminatedByServer );
-			}
 
-			SV_InitClientMessage( cl, &tmpMessage, NULL, 0 );
-			SV_AddReliableCommandsToMessage( cl, &tmpMessage );
+		SV_InitClientMessage( client, &tmpMessage, nullptr, 0 );
+		SV_AddReliableCommandsToMessage( client, &tmpMessage );
 
-			// send it twice
-			for( j = 0; j < 2; j++ )
-				SV_SendMessageToClient( cl, &tmpMessage );
-		}
+		// send it twice
+		SV_SendMessageToClient( client, &tmpMessage );
+		SV_SendMessageToClient( client, &tmpMessage );
 	}
 }
 
@@ -1429,9 +1395,6 @@ void SV_ShutdownGame( const char *finalmsg, bool reconnect ) {
 * command from the console or progs.
 */
 void SV_Map( const char *level, bool devmap ) {
-	client_t *cl;
-	int i;
-
 	if( svs.demo.file ) {
 		SV_Demo_Stop_f( CmdArgs {} );
 	}
@@ -1442,20 +1405,23 @@ void SV_Map( const char *level, bool devmap ) {
 	}
 
 	if( sv.state == ss_dead ) {
-		SV_InitGame(); // the game is just starting
-
+		// The game is just starting
+		SV_InitGame();
 	}
+
 	// remove all bots before changing map
-	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ ) {
-		if( cl->state && cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			SV_DropClient( cl, ReconnectBehaviour::DontReconnect, NULL );
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( client_t *const client = iteratorOverClients.getNext() ) {
+		if( client->isAFakeClient() ) {
+			SV_DropClient( client, ReconnectBehaviour::DontReconnect, nullptr );
 		}
 	}
 
 	// wsw : Medar : this used to be at SV_SpawnServer, but we need to do it before sending changing
 	// so we don't send frames after sending changing command
 	// leave slots at start for clients only
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
+	for( int i = 0; i < sv_maxclients->integer; i++ ) {
+		// TODO: Clean up iteration here as well
 		// needs to reconnect
 		if( svs.clients[i].state > CS_CONNECTING ) {
 			svs.clients[i].state = CS_CONNECTING;
@@ -1494,7 +1460,7 @@ void SV_UserinfoChanged( client_t *client ) {
 	assert( client );
 	assert( Info_Validate( client->userinfo ) );
 
-	if( !client->edict || !( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
+	if( !client->isAFakeClient() ) {
 		// force the IP key/value pair so the game can filter based on ip
 		if( !Info_SetValueForKey( client->userinfo, "socket", NET_SocketTypeToString( client->netchan.socket->type ) ) ) {
 			SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "%s", "Error: Couldn't set userinfo (socket)\n" );
@@ -1508,11 +1474,11 @@ void SV_UserinfoChanged( client_t *client ) {
 
 	// mm session
 	mm_uuid_t uuid = Uuid_ZeroUuid();
-	const char *val = Info_ValueForKey( client->userinfo, "cl_mm_session" );
-	if( val ) {
-		Uuid_FromString( val, &uuid );
+	const char *sessionValue = Info_ValueForKey( client->userinfo, "cl_mm_session" );
+	if( sessionValue ) {
+		Uuid_FromString( sessionValue, &uuid );
 	}
-	if( !val || !Uuid_Compare( uuid, client->mm_session ) ) {
+	if( !sessionValue || !Uuid_Compare( uuid, client->mm_session ) ) {
 		char uuid_buffer[UUID_BUFFER_SIZE];
 		Info_SetValueForKey( client->userinfo, "cl_mm_session", Uuid_ToString( uuid_buffer, client->mm_session ) );
 	}
@@ -1533,12 +1499,13 @@ void SV_UserinfoChanged( client_t *client ) {
 	}
 
 	// we assume that game module deals with setting a correct name
-	val = Info_ValueForKey( client->userinfo, "name" );
-	if( !val || !val[0] ) {
+	const char *nameValue = Info_ValueForKey( client->userinfo, "name" );
+	if( !nameValue || !nameValue[0] ) {
 		SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "%s", "Error: No name set" );
 		return;
 	}
-	Q_strncpyz( client->name, val, sizeof( client->name ) );
+
+	Q_strncpyz( client->name, nameValue, sizeof( client->name ) );
 }
 
 /*
@@ -1546,7 +1513,7 @@ void SV_UserinfoChanged( client_t *client ) {
 *
 * Only called at plat.exe startup, not for each game
 */
-void SV_Init( void ) {
+void SV_Init() {
 	assert( !sv_initialized );
 
 	memset( &svc, 0, sizeof( svc ) );
@@ -1666,7 +1633,7 @@ void SV_Init( void ) {
 		Cvar_ForceSet( "sv_fps", sv_pps->dvalue );
 	}
 
-	svc.autoUpdateMinute = rand() % 60;
+	svc.autoUpdateMinute = ::rand() % 60;
 
 	sv_snap_aggressive_sound_culling = Cvar_Get( SNAP_VAR_CULL_SOUND_WITH_PVS , "0", CVAR_SERVERINFO | CVAR_ARCHIVE );
 	sv_snap_raycast_players_culling = Cvar_Get( SNAP_VAR_USE_RAYCAST_CULLING, "1", CVAR_SERVERINFO | CVAR_ARCHIVE );
@@ -1737,7 +1704,7 @@ static void SV_GenerateWebSession( client_t *client ) {
 	const char *chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 	// A session has log(64) x 16 = 6 x 16 = 96 bits of information.
 	// A UUID has 128 bits of information so using a single UUID is fine.
-	static_assert( sizeof( svs.clients[0].session ) == 16, "" );
+	static_assert( sizeof( svs.clients[0].session ) == 16 );
 	const mm_uuid_t uuid = mm_uuid_t::Random();
 	char *p = client->session;
 
@@ -1765,8 +1732,8 @@ bool SV_ClientConnect( const socket_t *socket, const netadr_t *address,
 					   client_t *client, char *userinfo,
 					   int game_port, int challenge, bool fakeClient,
 					   mm_uuid_t ticket_id, mm_uuid_t session_id ) {
-	const int edictnum = ( client - svs.clients ) + 1;
-	edict_t *ent = EDICT_NUM( edictnum );
+	const int clientNum = (int)( client - svs.clients );
+	edict_t *const ent  = EDICT_NUM( clientNum + 1 );
 
 	// make sure the client state is reset before an mm connection callback gets called
 	memset( client, 0, sizeof( *client ) );
@@ -1783,56 +1750,55 @@ bool SV_ClientConnect( const socket_t *socket, const netadr_t *address,
 	// assert( ::strlen( Info_ValueForKey( userinfo, "cl_mm_session" ) ) == UUID_DATA_LENGTH );
 
 	// get the game a chance to reject this connection or modify the userinfo
-	if( !ge->ClientConnect( ent, userinfo, fakeClient ) ) {
-		return false;
-	}
+	if( ge->ClientConnect( ent, userinfo, fakeClient ) ) {
+		// the connection is accepted, set up the client slot
+		client->edict     = ent;
+		client->challenge = challenge; // save challenge for checksumming
 
-	// the connection is accepted, set up the client slot
-	client->edict = ent;
-	client->challenge = challenge; // save challenge for checksumming
+		client->mm_session = session_id;
+		client->mm_ticket  = ticket_id;
 
-	client->mm_session = session_id;
-	client->mm_ticket = ticket_id;
-
-	if( socket ) {
-		switch( socket->type ) {
-			case SOCKET_UDP:
-			case SOCKET_LOOPBACK:
-				client->reliable = false;
-				break;
-
-			default:
-				assert( false );
+		if( socket ) {
+			switch( socket->type ) {
+				case SOCKET_UDP:
+				case SOCKET_LOOPBACK:
+					client->reliable = false;
+					break;
+				default:
+					assert( false );
+			}
+		} else {
+			assert( fakeClient );
+			client->reliable = false;
 		}
-	} else {
-		assert( fakeClient );
-		client->reliable = false;
+
+		SV_ClientResetCommandBuffers( client );
+
+		// reset timeouts
+		client->lastPacketReceivedTime = svs.realtime;
+		client->lastconnect = Sys_Milliseconds();
+
+		// init the connection
+		client->state = CS_CONNECTING;
+
+		if( fakeClient ) {
+			client->netchan.remoteAddress.type = NA_NOTRANSMIT; // fake-clients can't transmit
+		} else {
+			Netchan_Setup( &client->netchan, socket, address, game_port );
+		}
+
+		// parse some info from the info strings
+		client->userinfoLatchTimeout = Sys_Milliseconds() + USERINFO_UPDATE_COOLDOWN_MSEC;
+		Q_strncpyz( client->userinfo, userinfo, sizeof( client->userinfo ) );
+		SV_UserinfoChanged( client );
+
+		SV_GenerateWebSession( client );
+		SV_Web_AddGameClient( client->session, clientNum, &client->netchan.remoteAddress );
+
+		return true;
 	}
 
-	SV_ClientResetCommandBuffers( client );
-
-	// reset timeouts
-	client->lastPacketReceivedTime = svs.realtime;
-	client->lastconnect = Sys_Milliseconds();
-
-	// init the connection
-	client->state = CS_CONNECTING;
-
-	if( fakeClient ) {
-		client->netchan.remoteAddress.type = NA_NOTRANSMIT; // fake-clients can't transmit
-	} else {
-		Netchan_Setup( &client->netchan, socket, address, game_port );
-	}
-
-	// parse some info from the info strings
-	client->userinfoLatchTimeout = Sys_Milliseconds() + USERINFO_UPDATE_COOLDOWN_MSEC;
-	Q_strncpyz( client->userinfo, userinfo, sizeof( client->userinfo ) );
-	SV_UserinfoChanged( client );
-
-	SV_GenerateWebSession( client );
-	SV_Web_AddGameClient( client->session, client - svs.clients, &client->netchan.remoteAddress );
-
-	return true;
+	return false;
 }
 
 /*
@@ -1854,7 +1820,7 @@ void SV_DropClient( client_t *drop, ReconnectBehaviour reconnectBehaviour, const
 		reason = string;
 	} else {
 		Q_strncpyz( string, "User disconnected", sizeof( string ) );
-		reason = NULL;
+		reason = nullptr;
 	}
 
 	// remove the rating of the client
@@ -1862,8 +1828,7 @@ void SV_DropClient( client_t *drop, ReconnectBehaviour reconnectBehaviour, const
 		// ge->RemoveRating( drop->edict );
 	}
 
-	// add the disconnect
-	if( drop->edict && ( drop->edict->r.svflags & SVF_FAKECLIENT ) ) {
+	if( drop->isAFakeClient() ) {
 		ge->ClientDisconnect( drop->edict, reason );
 		SV_ClientResetCommandBuffers( drop ); // make sure everything is clean
 	} else {
@@ -1879,8 +1844,7 @@ void SV_DropClient( client_t *drop, ReconnectBehaviour reconnectBehaviour, const
 			// this will remove the body, among other things
 			ge->ClientDisconnect( drop->edict, reason );
 		} else if( drop->name[0] ) {
-			Com_Printf( "Connecting client %s%s disconnected (%s%s)\n", drop->name, S_COLOR_WHITE, reason,
-						S_COLOR_WHITE );
+			Com_Printf( "Connecting client %s%s disconnected (%s%s)\n", drop->name, S_COLOR_WHITE, reason, S_COLOR_WHITE );
 		}
 	}
 
@@ -1910,12 +1874,6 @@ void SV_DropClient( client_t *drop, ReconnectBehaviour reconnectBehaviour, const
 * This will be sent on the initial connection and upon each server load.
 */
 static void HandleClientCommand_New( client_t *client, const CmdArgs & ) {
-	int playernum;
-	unsigned int numpure;
-	purelist_t *purefile;
-	edict_t *ent;
-	int sv_bitflags = 0;
-
 	Com_DPrintf( "New() from %s\n", client->name );
 
 	// if in CS_AWAITING we have sent the response packet the new once already,
@@ -1937,7 +1895,7 @@ static void HandleClientCommand_New( client_t *client, const CmdArgs & ) {
 	MSG_WriteInt32( &tmpMessage, svs.spawncount );
 	MSG_WriteInt16( &tmpMessage, (unsigned short)svc.snapFrameTime );
 
-	playernum = client - svs.clients;
+	const int playernum = client - svs.clients;
 	MSG_WriteInt16( &tmpMessage, playernum );
 
 	// send full levelname
@@ -1946,9 +1904,10 @@ static void HandleClientCommand_New( client_t *client, const CmdArgs & ) {
 	//
 	// game server
 	//
+	int sv_bitflags = 0;
 	if( sv.state == ss_game ) {
 		// set up the entity for the client
-		ent = EDICT_NUM( playernum + 1 );
+		edict_t *ent = EDICT_NUM( playernum + 1 );
 		ent->s.number = playernum + 1;
 		client->edict = ent;
 
@@ -1977,18 +1936,16 @@ static void HandleClientCommand_New( client_t *client, const CmdArgs & ) {
 	}
 
 	// always write purelist
-	numpure = Com_CountPureListFiles( svs.purelist );
+	const unsigned numpure = Com_CountPureListFiles( svs.purelist );
 	if( numpure > (short)0x7fff ) {
 		Com_Error( ERR_DROP, "Error: Too many pure files." );
 	}
 
 	MSG_WriteInt16( &tmpMessage, numpure );
 
-	purefile = svs.purelist;
-	while( purefile ) {
-		MSG_WriteString( &tmpMessage, purefile->filename );
-		MSG_WriteInt32( &tmpMessage, purefile->checksum );
-		purefile = purefile->next;
+	for( purelist_t *pureFile = svs.purelist; pureFile; pureFile = pureFile->next ) {
+		MSG_WriteString( &tmpMessage, pureFile->filename );
+		MSG_WriteInt32( &tmpMessage, pureFile->checksum );
 	}
 
 	SV_ClientResetCommandBuffers( client );
@@ -2010,39 +1967,37 @@ static void HandleClientCommand_Configstrings( client_t *client, const CmdArgs &
 
 	if( client->state != CS_CONNECTED ) {
 		svWarning() << "configstrings not valid -- already spawned";
-		return;
-	}
-
-	// handle the case of a level changing while a client was connecting
-	if( atoi( Cmd_Argv( 1 ) ) != svs.spawncount ) {
-		svWarning() << "HandleClientCommand_Configstrings from different level";
-		SV_SendServerCommand( client, "reconnect" );
-		return;
-	}
-
-	int start = atoi( Cmd_Argv( 2 ) );
-	if( start < 0 ) {
-		start = 0;
-	}
-
-	for(;; ) {
-		if( start >= MAX_CONFIGSTRINGS ) {
-			break;
-		}
-		if( client->reliableSequence - client->reliableAcknowledge >= MAX_RELIABLE_COMMANDS - 8 ) {
-			break;
-		}
-		if( const auto maybeConfigString = sv.configStrings.get( start ) ) {
-			SV_SendConfigString( client, start, *maybeConfigString );
-		}
-		start++;
-	}
-
-	// send next command
-	if( start == MAX_CONFIGSTRINGS ) {
-		SV_SendServerCommand( client, "cmd baselines %i 0", svs.spawncount );
 	} else {
-		SV_SendServerCommand( client, "cmd configstrings %i %i", svs.spawncount, start );
+		// handle the case of a level changing while a client was connecting
+		if( atoi( Cmd_Argv( 1 ) ) != svs.spawncount ) {
+			svWarning() << "HandleClientCommand_Configstrings from different level";
+			SV_SendServerCommand( client, "reconnect" );
+		} else {
+			int start = atoi( Cmd_Argv( 2 ) );
+			if( start < 0 ) {
+				start = 0;
+			}
+
+			for(;; ) {
+				if( start >= MAX_CONFIGSTRINGS ) {
+					break;
+				}
+				if( client->reliableSequence - client->reliableAcknowledge >= MAX_RELIABLE_COMMANDS - 8 ) {
+					break;
+				}
+				if( const auto maybeConfigString = sv.configStrings.get( start ) ) {
+					SV_SendConfigString( client, start, *maybeConfigString );
+				}
+				start++;
+			}
+
+			// send next command
+			if( start == MAX_CONFIGSTRINGS ) {
+				SV_SendServerCommand( client, "cmd baselines %i 0", svs.spawncount );
+			} else {
+				SV_SendServerCommand( client, "cmd configstrings %i %i", svs.spawncount, start );
+			}
+		}
 	}
 }
 
@@ -2051,71 +2006,64 @@ static void HandleClientCommand_Baselines( client_t *client, const CmdArgs &cmdA
 
 	if( client->state != CS_CONNECTED ) {
 		svWarning() << "baselines not valid -- already spawned";
-		return;
-	}
-
-	// handle the case of a level changing while a client was connecting
-	if( atoi( Cmd_Argv( 1 ) ) != svs.spawncount ) {
-		svWarning() << "HandleClientCommand_Baselines from different level";
-		HandleClientCommand_New( client, cmdArgs );
-		return;
-	}
-
-	int start = atoi( Cmd_Argv( 2 ) );
-	if( start < 0 ) {
-		start = 0;
-	}
-
-	entity_state_t nullstate;
-	memset( &nullstate, 0, sizeof( nullstate ) );
-
-	// write a packet full of data
-	SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
-
-	while( tmpMessage.cursize < FRAGMENT_SIZE * 3 && start < MAX_EDICTS ) {
-		if( const entity_state_t *base = &sv.baselines[start]; base->number ) {
-			MSG_WriteUint8( &tmpMessage, svc_spawnbaseline );
-			MSG_WriteDeltaEntity( &tmpMessage, &nullstate, base, true );
-		}
-		start++;
-	}
-
-	// send next command
-	if( start == MAX_EDICTS ) {
-		SV_SendServerCommand( client, "precache %i", svs.spawncount );
 	} else {
-		SV_SendServerCommand( client, "cmd baselines %i %i", svs.spawncount, start );
-	}
+		// handle the case of a level changing while a client was connecting
+		if( atoi( Cmd_Argv( 1 ) ) != svs.spawncount ) {
+			svWarning() << "HandleClientCommand_Baselines from different level";
+			HandleClientCommand_New( client, cmdArgs );
+		} else {
+			int start = atoi( Cmd_Argv( 2 ) );
+			if( start < 0 ) {
+				start = 0;
+			}
 
-	SV_AddReliableCommandsToMessage( client, &tmpMessage );
-	SV_SendMessageToClient( client, &tmpMessage );
+			entity_state_t nullstate;
+			memset( &nullstate, 0, sizeof( nullstate ) );
+
+			// write a packet full of data
+			SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
+
+			while( tmpMessage.cursize < FRAGMENT_SIZE * 3 && start < MAX_EDICTS ) {
+				if( const entity_state_t *base = &sv.baselines[start]; base->number ) {
+					MSG_WriteUint8( &tmpMessage, svc_spawnbaseline );
+					MSG_WriteDeltaEntity( &tmpMessage, &nullstate, base, true );
+				}
+				start++;
+			}
+
+			// send next command
+			if( start == MAX_EDICTS ) {
+				SV_SendServerCommand( client, "precache %i", svs.spawncount );
+			} else {
+				SV_SendServerCommand( client, "cmd baselines %i %i", svs.spawncount, start );
+			}
+
+			SV_AddReliableCommandsToMessage( client, &tmpMessage );
+			SV_SendMessageToClient( client, &tmpMessage );
+		}
+	}
 }
 
 static void HandleClientCommand_Begin( client_t *client, const CmdArgs &cmdArgs ) {
 	svDebug() << "Begin() from" << wsw::StringView( client->name );
 
-	// wsw : r1q2[start] : could be abused to respawn or cause spam/other mod-specific problems
 	if( client->state != CS_CONNECTED ) {
 		if( dedicated->integer ) {
 			svWarning() << "HandleClientCommand_Begin: 'Begin' from already spawned client" << wsw::StringView( client->name );
 		}
 		SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "Error: Begin while connected" );
-		return;
+	} else {
+		// handle the case of a level changing while a client was connecting
+		if( atoi( Cmd_Argv( 1 ) ) != svs.spawncount ) {
+			svWarning() << "HandleClientCommand_Begin from different level";
+			SV_SendServerCommand( client, "changing" );
+			SV_SendServerCommand( client, "reconnect" );
+		} else {
+			client->state = CS_SPAWNED;
+			// call the game begin function
+			ge->ClientBegin( client->edict );
+		}
 	}
-	// wsw : r1q2[end]
-
-	// handle the case of a level changing while a client was connecting
-	if( atoi( Cmd_Argv( 1 ) ) != svs.spawncount ) {
-		svWarning() << "HandleClientCommand_Begin from different level";
-		SV_SendServerCommand( client, "changing" );
-		SV_SendServerCommand( client, "reconnect" );
-		return;
-	}
-
-	client->state = CS_SPAWNED;
-
-	// call the game begin function
-	ge->ClientBegin( client->edict );
 }
 
 /*
@@ -2125,80 +2073,72 @@ static void HandleClientCommand_Begin( client_t *client, const CmdArgs &cmdArgs 
 * If nextdl packet's offet information is negative, download will be stopped
 */
 static void HandleClientCommand_NextDownload( client_t *client, const CmdArgs &cmdArgs ) {
-	int blocksize;
-	int offset;
-	uint8_t data[FRAGMENT_SIZE * 2];
-
 	if( !client->download.name ) {
 		Com_Printf( "nextdl message for client with no download active, from: %s\n", client->name );
-		return;
-	}
-
-	if( Q_stricmp( client->download.name, Cmd_Argv( 1 ) ) ) {
+	} else if( Q_stricmp( client->download.name, Cmd_Argv( 1 ) ) ) {
 		Com_Printf( "nextdl message for wrong filename, from: %s\n", client->name );
-		return;
-	}
+	} else {
+		const int offset = atoi( Cmd_Argv( 2 ) );
 
-	offset = atoi( Cmd_Argv( 2 ) );
-
-	if( offset > client->download.size ) {
-		Com_Printf( "nextdl message with too big offset, from: %s\n", client->name );
-		return;
-	}
-
-	if( offset == -1 ) {
-		Com_Printf( "Upload of %s to %s%s completed\n", client->download.name, client->name, S_COLOR_WHITE );
-		SV_ClientCloseDownload( client );
-		return;
-	}
-
-	if( offset < 0 ) {
-		Com_Printf( "Upload of %s to %s%s failed\n", client->download.name, client->name, S_COLOR_WHITE );
-		SV_ClientCloseDownload( client );
-		return;
-	}
-
-	if( !client->download.file ) {
-		Com_Printf( "Starting server upload of %s to %s\n", client->download.name, client->name );
-
-		client->download.size = FS_FOpenBaseFile( client->download.name, &client->download.file, FS_READ );
-		if( !client->download.file || client->download.size < 0 ) {
-			Com_Printf( "Error opening %s for uploading\n", client->download.name );
+		if( offset > client->download.size ) {
+			Com_Printf( "nextdl message with too big offset, from: %s\n", client->name );
+		} else if( offset < 0 ) {
+			if( offset == -1 ) {
+				Com_Printf( "Upload of %s to %s%s completed\n", client->download.name, client->name, S_COLOR_WHITE );
+			} else {
+				Com_Printf( "Upload of %s to %s%s failed\n", client->download.name, client->name, S_COLOR_WHITE );
+			}
 			SV_ClientCloseDownload( client );
-			return;
+		} else {
+			bool isFileValid = false;
+			if( !client->download.file ) {
+				Com_Printf( "Starting server upload of %s to %s\n", client->download.name, client->name );
+
+				client->download.size = FS_FOpenBaseFile( client->download.name, &client->download.file, FS_READ );
+				if( !client->download.file || client->download.size < 0 ) {
+					Com_Printf( "Error opening %s for uploading\n", client->download.name );
+					SV_ClientCloseDownload( client );
+				} else {
+					isFileValid = true;
+				}
+			}
+
+			if( isFileValid ) {
+				SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
+				SV_AddReliableCommandsToMessage( client, &tmpMessage );
+
+				uint8_t data[FRAGMENT_SIZE * 2];
+
+				int blocksize = client->download.size - offset;
+				// jalfixme: adapt download to user rate setting and sv_maxrate setting.
+				if( blocksize > (int)sizeof( data ) ) {
+					blocksize = (int)sizeof( data );
+				}
+				if( offset + blocksize > client->download.size ) {
+					blocksize = client->download.size - offset;
+				}
+				if( blocksize < 0 ) {
+					blocksize = 0;
+				}
+
+				if( blocksize > 0 ) {
+					FS_Seek( client->download.file, offset, FS_SEEK_SET );
+					blocksize = FS_Read( data, blocksize, client->download.file );
+				}
+
+				MSG_WriteUint8( &tmpMessage, svc_download );
+				MSG_WriteString( &tmpMessage, client->download.name );
+				MSG_WriteInt32( &tmpMessage, offset );
+				MSG_WriteInt32( &tmpMessage, blocksize );
+				if( blocksize > 0 ) {
+					MSG_CopyData( &tmpMessage, data, blocksize );
+				}
+				SV_SendMessageToClient( client, &tmpMessage );
+
+				client->download.timeout = svs.realtime + 10000;
+			}
 		}
 	}
-
-	SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
-	SV_AddReliableCommandsToMessage( client, &tmpMessage );
-
-	blocksize = client->download.size - offset;
-	// jalfixme: adapt download to user rate setting and sv_maxrate setting.
-	if( blocksize > (int)sizeof( data ) ) {
-		blocksize = (int)sizeof( data );
-	}
-	if( offset + blocksize > client->download.size ) {
-		blocksize = client->download.size - offset;
-	}
-	if( blocksize < 0 ) {
-		blocksize = 0;
-	}
-
-	if( blocksize > 0 ) {
-		FS_Seek( client->download.file, offset, FS_SEEK_SET );
-		blocksize = FS_Read( data, blocksize, client->download.file );
-	}
-
-	MSG_WriteUint8( &tmpMessage, svc_download );
-	MSG_WriteString( &tmpMessage, client->download.name );
-	MSG_WriteInt32( &tmpMessage, offset );
-	MSG_WriteInt32( &tmpMessage, blocksize );
-	if( blocksize > 0 ) {
-		MSG_CopyData( &tmpMessage, data, blocksize );
-	}
-	SV_SendMessageToClient( client, &tmpMessage );
-
-	client->download.timeout = svs.realtime + 10000;
 }
 
 /*
@@ -2273,116 +2213,98 @@ static bool SV_FilenameForDownloadRequest( const char *requestname, bool request
 * Responds to reliable download packet with reliable initdownload packet
 */
 static void HandleClientCommand_BeginDownload( client_t *client, const CmdArgs &cmdArgs ) {
-	const char *requestname;
-	const char *uploadname;
-	size_t alloc_size;
-	unsigned checksum;
-	char *url;
-	const char *errormsg = NULL;
-	bool allow, requestpak;
-	bool local_http = SV_Web_Running() && sv_uploads_http->integer != 0;
-
-	requestpak = ( atoi( Cmd_Argv( 1 ) ) == 1 );
-	requestname = Cmd_Argv( 2 );
+	const char *const requestname = Cmd_Argv( 2 );
+	const char *denyErrorMessage  = nullptr;
+	const char *uploadname        = nullptr;
 
 	if( !requestname[0] || !COM_ValidateRelativeFilename( requestname ) ) {
-		SV_DenyDownload( client, "Invalid filename" );
-		return;
-	}
+		denyErrorMessage = "Invalid filename";
+	} else {
+		const bool requestpak = atoi( Cmd_Argv( 1 ) ) == 1;
 
-	if( !SV_FilenameForDownloadRequest( requestname, requestpak, &uploadname, &errormsg ) ) {
-		assert( errormsg != NULL );
-		SV_DenyDownload( client, errormsg );
-		return;
-	}
+		if( !SV_FilenameForDownloadRequest( requestname, requestpak, &uploadname, &denyErrorMessage ) ) {
+			assert( denyErrorMessage );
+		} else {
+			if( FS_CheckPakExtension( uploadname ) ) {
+				bool foundPure = false;
 
-	if( FS_CheckPakExtension( uploadname ) ) {
-		allow = false;
-
-		// allow downloading paks from the pure list, if not spawned
-		if( client->state < CS_SPAWNED ) {
-			purelist_t *purefile;
-
-			purefile = svs.purelist;
-			while( purefile ) {
-				if( !strcmp( uploadname, purefile->filename ) ) {
-					allow = true;
-					break;
+				// allow downloading paks from the pure list, if not spawned
+				if( client->state < CS_SPAWNED ) {
+					for( purelist_t *purefile = svs.purelist; purefile; purefile = purefile->next ) {
+						if( !strcmp( uploadname, purefile->filename ) ) {
+							foundPure = true;
+							break;
+						}
+					}
 				}
-				purefile = purefile->next;
+
+				// game module has a change to allow extra downloads
+				if( !foundPure && !SV_GameAllowDownload( client, requestname, uploadname ) ) {
+					denyErrorMessage = "Downloading of this file is not allowed";
+				}
+			} else {
+				if( !SV_GameAllowDownload( client, requestname, uploadname ) ) {
+					denyErrorMessage = "Downloading of this file is not allowed";
+				}
+			}
+
+			if( !denyErrorMessage ) {
+				// we will just overwrite old download, if any
+				if( client->download.name ) {
+					SV_ClientCloseDownload( client );
+				}
+				client->download.size = FS_LoadBaseFile( uploadname, nullptr, nullptr, 0 );
+				if( client->download.size == -1 ) {
+					Com_Printf( "Error getting size of %s for uploading\n", uploadname );
+					client->download.size = 0;
+					denyErrorMessage = "Error getting file size";
+				}
+			}
+		}
+	}
+
+	if( denyErrorMessage ) {
+		SV_DenyDownload( client, denyErrorMessage );
+	} else {
+		const bool local_http   = SV_Web_Running() && sv_uploads_http->integer != 0;
+		const unsigned checksum = FS_ChecksumBaseFile( uploadname, false );
+
+		client->download.timeout = svs.realtime + 1000 * 60 * 60; // this is web download timeout
+
+		const size_t name_size = sizeof( char ) * ( strlen( uploadname ) + 1 );
+		client->download.name = (char *)Q_malloc( name_size );
+		Q_strncpyz( client->download.name, uploadname, name_size );
+
+		Com_Printf( "Offering %s to %s\n", client->download.name, client->name );
+
+		wsw::String url;
+		if( FS_CheckPakExtension( uploadname ) && ( local_http || sv_uploads_baseurl->string[0] != 0 ) ) {
+			// .pk3 and .pak download from the web
+			if( local_http ) {
+				url.assign( "files/" );
+				url.resize( url.size() + strlen( uploadname ) * 3 );
+				Q_urlencode_unsafechars( uploadname, url.data() + 6, url.size() + 1 - 6 );
+			} else {
+				url.append( sv_uploads_baseurl->string );
+				url.push_back( '/' );
+			}
+		} else if( SV_IsDemoDownloadRequest( requestname ) && ( local_http || sv_uploads_demos_baseurl->string[0] != 0 ) ) {
+			// demo file download from the web
+			if( local_http ) {
+				url.assign( "files/" );
+				url.resize( url.size() + strlen( uploadname ) * 3 );
+				Q_urlencode_unsafechars( uploadname, url.data() + 6, url.size() + 1 - 6 );
+			} else {
+				url.append( sv_uploads_demos_baseurl->string );
+				url.push_back( '/' );
 			}
 		}
 
-		// game module has a change to allow extra downloads
-		if( !allow && !SV_GameAllowDownload( client, requestname, uploadname ) ) {
-			SV_DenyDownload( client, "Downloading of this file is not allowed" );
-			return;
-		}
-	} else {
-		if( !SV_GameAllowDownload( client, requestname, uploadname ) ) {
-			SV_DenyDownload( client, "Downloading of this file is not allowed" );
-			return;
-		}
-	}
-
-	// we will just overwrite old download, if any
-	if( client->download.name ) {
-		SV_ClientCloseDownload( client );
-	}
-
-	client->download.size = FS_LoadBaseFile( uploadname, NULL, NULL, 0 );
-	if( client->download.size == -1 ) {
-		Com_Printf( "Error getting size of %s for uploading\n", uploadname );
-		client->download.size = 0;
-		SV_DenyDownload( client, "Error getting file size" );
-		return;
-	}
-
-	checksum = FS_ChecksumBaseFile( uploadname, false );
-	client->download.timeout = svs.realtime + 1000 * 60 * 60; // this is web download timeout
-
-	alloc_size = sizeof( char ) * ( strlen( uploadname ) + 1 );
-	client->download.name = (char *)Q_malloc( alloc_size );
-	Q_strncpyz( client->download.name, uploadname, alloc_size );
-
-	Com_Printf( "Offering %s to %s\n", client->download.name, client->name );
-
-	if( FS_CheckPakExtension( uploadname ) && ( local_http || sv_uploads_baseurl->string[0] != 0 ) ) {
-		// .pk3 and .pak download from the web
-		if( local_http ) {
-			goto local_download;
-		} else {
-			alloc_size = sizeof( char ) * ( strlen( sv_uploads_baseurl->string ) + 1 );
-			url = (char *)Q_malloc( alloc_size );
-			Q_snprintfz( url, alloc_size, "%s/", sv_uploads_baseurl->string );
-		}
-	} else if( SV_IsDemoDownloadRequest( requestname ) && ( local_http || sv_uploads_demos_baseurl->string[0] != 0 ) ) {
-		// demo file download from the web
-		if( local_http ) {
-			local_download:
-			alloc_size = sizeof( char ) * ( 6 + strlen( uploadname ) * 3 + 1 );
-			url = (char *)Q_malloc( alloc_size );
-			Q_snprintfz( url, alloc_size, "files/" );
-			Q_urlencode_unsafechars( uploadname, url + 6, alloc_size - 6 );
-		} else {
-			alloc_size = sizeof( char ) * ( strlen( sv_uploads_demos_baseurl->string ) + 1 );
-			url = (char *)Q_malloc( alloc_size );
-			Q_snprintfz( url, alloc_size, "%s/", sv_uploads_demos_baseurl->string );
-		}
-	} else {
-		url = NULL;
-	}
-
-	// start the download
-	SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
-	SV_SendServerCommand( client, "initdownload \"%s\" %i %u %i \"%s\"", client->download.name,
-						  client->download.size, checksum, local_http ? 1 : 0, ( url ? url : "" ) );
-	SV_AddReliableCommandsToMessage( client, &tmpMessage );
-	SV_SendMessageToClient( client, &tmpMessage );
-
-	if( url ) {
-		Q_free( url );
-		url = NULL;
+		SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
+		SV_SendServerCommand( client, "initdownload \"%s\" %i %u %i \"%s\"", client->download.name,
+							  client->download.size, checksum, local_http ? 1 : 0, url.data() );
+		SV_AddReliableCommandsToMessage( client, &tmpMessage );
+		SV_SendMessageToClient( client, &tmpMessage );
 	}
 }
 
@@ -2394,38 +2316,33 @@ static void HandleClientCommand_Disconnect( client_t *client, const CmdArgs & ) 
 	SV_DropClient( client, ReconnectBehaviour::DontReconnect, NULL );
 }
 
-
 static void HandleClientCommand_Info( client_t *client, const CmdArgs & ) {
 	Info_Print( Cvar_Serverinfo() );
 }
 
 static void HandleClientCommand_Userinfo( client_t *client, const CmdArgs &cmdArgs ) {
-	const char *info;
-	int64_t time;
-
-	info = Cmd_Argv( 1 );
+	const char *info = Cmd_Argv( 1 );
 	if( !Info_Validate( info ) ) {
 		SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "%s", "Error: Invalid userinfo" );
-		return;
-	}
-
-	time = Sys_Milliseconds();
-	if( client->userinfoLatchTimeout > time ) {
-		Q_strncpyz( client->userinfoLatched, info, sizeof( client->userinfo ) );
 	} else {
-		Q_strncpyz( client->userinfo, info, sizeof( client->userinfo ) );
+		const int64_t time = Sys_Milliseconds();
+		if( client->userinfoLatchTimeout > time ) {
+			Q_strncpyz( client->userinfoLatched, info, sizeof( client->userinfo ) );
+		} else {
+			Q_strncpyz( client->userinfo, info, sizeof( client->userinfo ) );
 
-		client->userinfoLatched[0] = '\0';
-		client->userinfoLatchTimeout = time + USERINFO_UPDATE_COOLDOWN_MSEC;
+			client->userinfoLatched[0] = '\0';
+			client->userinfoLatchTimeout = time + USERINFO_UPDATE_COOLDOWN_MSEC;
 
-		SV_UserinfoChanged( client );
+			SV_UserinfoChanged( client );
+		}
 	}
 }
 
 static void HandleClientCommand_NoDelta( client_t *client, const CmdArgs & ) {
-	client->nodelta = true;
+	client->nodelta       = true;
 	client->nodelta_frame = 0;
-	client->lastframe = -1; // jal : I'm not sure about this. Seems like it's missing but...
+	client->lastframe     = -1; // jal : I'm not sure about this. Seems like it's missing but...
 }
 
 static void HandleClientCommand_Multiview( client_t *client, const CmdArgs &cmdArgs ) {
@@ -2434,9 +2351,6 @@ static void HandleClientCommand_Multiview( client_t *client, const CmdArgs &cmdA
 		return;
 	}
 
-	// (Temporarily) disallow multi-view clients.
-	// It still seems to be useful in future
-#if 0
 	if( !ge->ClientMultiviewChanged( client->edict, mv ) ) {
 		return;
 	}
@@ -2454,7 +2368,6 @@ static void HandleClientCommand_Multiview( client_t *client, const CmdArgs &cmdA
 		client->mv = false;
 		sv.num_mv_clients--;
 	}
-#endif
 }
 
 typedef struct {
@@ -2512,22 +2425,19 @@ static void SV_ExecuteUserCommand( client_t *client, uint64_t clientCommandNum, 
 * SV_FindNextUserCommand - Returns the next valid usercmd_t in execution list
 */
 usercmd_t *SV_FindNextUserCommand( client_t *client ) {
-	usercmd_t *ucmd;
-	int64_t higherTime = 0;
-	unsigned int i;
+	// Ucmds can never have a higher timestamp than server time, unless cheating
+	int64_t bestFittingTime = svs.gametime;
+	usercmd_t *ucmd         = nullptr;
 
-	higherTime = svs.gametime; // ucmds can never have a higher timestamp than server time, unless cheating
-	ucmd = NULL;
 	if( client ) {
-		for( i = client->UcmdExecuted + 1; i <= client->UcmdReceived; i++ ) {
+		for( unsigned ucmdNum = client->UcmdExecuted + 1; ucmdNum <= client->UcmdReceived; ucmdNum++ ) {
+			usercmd_t *const ucmdForNum = &client->ucmds[ucmdNum & CMD_MASK];
 			// skip backups if already executed
-			if( client->UcmdTime >= client->ucmds[i & CMD_MASK].serverTimeStamp ) {
-				continue;
-			}
-
-			if( ucmd == NULL || client->ucmds[i & CMD_MASK].serverTimeStamp < higherTime ) {
-				higherTime = client->ucmds[i & CMD_MASK].serverTimeStamp;
-				ucmd = &client->ucmds[i & CMD_MASK];
+			if( client->UcmdTime < ucmdForNum->serverTimeStamp ) {
+				if( !ucmd || ucmdForNum->serverTimeStamp < bestFittingTime ) {
+					bestFittingTime = ucmdForNum->serverTimeStamp;
+					ucmd            = ucmdForNum;
+				}
 			}
 		}
 	}
@@ -2539,36 +2449,32 @@ usercmd_t *SV_FindNextUserCommand( client_t *client ) {
 * SV_ExecuteClientThinks - Execute all pending usercmd_t
 */
 void SV_ExecuteClientThinks( int clientNum ) {
-	unsigned int msec;
-	int64_t minUcmdTime;
-	int timeDelta;
-	client_t *client;
-	usercmd_t *ucmd;
-
+	// TODO: These guards should be assertions
 	if( clientNum >= sv_maxclients->integer || clientNum < 0 ) {
 		return;
 	}
 
-	client = svs.clients + clientNum;
+	client_t *const client = svs.clients + clientNum;
 	if( client->state < CS_SPAWNED ) {
 		return;
 	}
 
-	if( client->edict->r.svflags & SVF_FAKECLIENT ) {
+	if( client->isAFakeClient() ) {
 		return;
 	}
 
 	// don't let client command time delay too far away in the past
-	minUcmdTime = ( svs.gametime > 999 ) ? ( svs.gametime - 999 ) : 0;
+	int64_t minUcmdTime = ( svs.gametime > 999 ) ? ( svs.gametime - 999 ) : 0;
 	if( client->UcmdTime < minUcmdTime ) {
 		client->UcmdTime = minUcmdTime;
 	}
 
-	while( ( ucmd = SV_FindNextUserCommand( client ) ) != NULL ) {
-		msec = ucmd->serverTimeStamp - client->UcmdTime;
+	usercmd_t *ucmd = nullptr;
+	while( ( ucmd = SV_FindNextUserCommand( client ) ) != nullptr ) {
+		unsigned msec = ucmd->serverTimeStamp - client->UcmdTime;
 		Q_clamp( msec, 1, 200 );
 		ucmd->msec = msec;
-		timeDelta = 0;
+		int timeDelta = 0;
 		if( client->lastframe > 0 ) {
 			timeDelta = -(int)( svs.gametime - ucmd->serverTimeStamp );
 		}
@@ -2586,49 +2492,45 @@ void SV_ExecuteClientThinks( int clientNum ) {
 * SV_ParseMoveCommand
 */
 static void SV_ParseMoveCommand( client_t *client, msg_t *msg ) {
-	unsigned int i, ucmdHead, ucmdFirst, ucmdCount;
-	usercmd_t nullcmd;
-	int lastframe;
-
-	lastframe = MSG_ReadInt32( msg );
-
+	const int lastframe = MSG_ReadInt32( msg );
 	// read the id of the first ucmd we will receive
-	ucmdHead = (unsigned int)MSG_ReadInt32( msg );
+	const auto ucmdHead = (unsigned)MSG_ReadInt32( msg );
 	// read the number of ucmds we will receive
-	ucmdCount = (unsigned int)MSG_ReadUint8( msg );
+	const auto ucmdCount = (unsigned)MSG_ReadUint8( msg );
 
 	if( ucmdCount > CMD_MASK ) {
 		SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "%s", "Error: Ucmd overflow" );
-		return;
-	}
+	} else {
+		const unsigned ucmdFirst = ucmdHead > ucmdCount ? ucmdHead - ucmdCount : 0;
+		client->UcmdReceived = ucmdHead < 1 ? 0 : ucmdHead - 1;
 
-	ucmdFirst = ucmdHead > ucmdCount ? ucmdHead - ucmdCount : 0;
-	client->UcmdReceived = ucmdHead < 1 ? 0 : ucmdHead - 1;
-
-	// read the user commands
-	for( i = ucmdFirst; i < ucmdHead; i++ ) {
-		if( i == ucmdFirst ) { // first one isn't delta compressed
-			memset( &nullcmd, 0, sizeof( nullcmd ) );
-			// jalfixme: check for too old overflood
-			MSG_ReadDeltaUsercmd( msg, &nullcmd, &client->ucmds[i & CMD_MASK] );
-		} else {
-			MSG_ReadDeltaUsercmd( msg, &client->ucmds[( i - 1 ) & CMD_MASK], &client->ucmds[i & CMD_MASK] );
+		// read the user commands
+		for( unsigned i = ucmdFirst; i < ucmdHead; i++ ) {
+			if( i == ucmdFirst ) {
+				// first one isn't delta compressed
+				usercmd_t nullcmd;
+				memset( &nullcmd, 0, sizeof( nullcmd ) );
+				// jalfixme: check for too old overflood
+				MSG_ReadDeltaUsercmd( msg, &nullcmd, &client->ucmds[i & CMD_MASK] );
+			} else {
+				MSG_ReadDeltaUsercmd( msg, &client->ucmds[( i - 1 ) & CMD_MASK], &client->ucmds[i & CMD_MASK] );
+			}
 		}
-	}
 
-	if( client->state != CS_SPAWNED ) {
-		client->lastframe = -1;
-		return;
-	}
-
-	// calc ping
-	if( lastframe != client->lastframe ) {
-		client->lastframe = lastframe;
-		if( client->lastframe > 0 ) {
-			// FIXME: Medar: ping is in gametime, should be in realtime
-			//client->frame_latency[client->lastframe&(LATENCY_COUNTS-1)] = svs.gametime - (client->frames[client->lastframe & UPDATE_MASK].sentTimeStamp;
-			// this is more accurate. A little bit hackish, but more accurate
-			client->frame_latency[client->lastframe & ( LATENCY_COUNTS - 1 )] = svs.gametime - ( client->ucmds[client->UcmdReceived & CMD_MASK].serverTimeStamp + svc.snapFrameTime );
+		if( client->state != CS_SPAWNED ) {
+			client->lastframe = -1;
+		} else {
+			// calc ping
+			if( lastframe != client->lastframe ) {
+				client->lastframe = lastframe;
+				if( client->lastframe > 0 ) {
+					// FIXME: Medar: ping is in gametime, should be in realtime
+					//client->frame_latency[client->lastframe&(LATENCY_COUNTS-1)] = svs.gametime - (client->frames[client->lastframe & UPDATE_MASK].sentTimeStamp;
+					// this is more accurate. A little bit hackish, but more accurate
+					client->frame_latency[client->lastframe & ( LATENCY_COUNTS - 1 )] =
+						svs.gametime - ( client->ucmds[client->UcmdReceived & CMD_MASK].serverTimeStamp + svc.snapFrameTime );
+				}
+			}
 		}
 	}
 }
@@ -2638,44 +2540,36 @@ static void SV_ParseMoveCommand( client_t *client, msg_t *msg ) {
 * The current message is parsed for the given client
 */
 void SV_ParseClientMessage( client_t *client, msg_t *msg ) {
-	char *s;
-	bool move_issued;
-	int64_t cmdNum;
-
+	// TODO: Should be an assertion
 	if( !msg ) {
 		return;
 	}
 
 	SV_UpdateActivity();
 
+	char *s;
+	bool move_issued = false;
+	int64_t cmdNum;
+
 	// only allow one move command
 	move_issued = false;
 	while( msg->readcount < msg->cursize ) {
-		int c;
-
-		c = MSG_ReadUint8( msg );
-		switch( c ) {
-			default:
-				Com_Printf( "SV_ParseClientMessage: unknown command char\n" );
+		switch( const int c = MSG_ReadUint8( msg ); c ) {
+			default: {
+				Com_Printf( "SV_ParseClientMessage: unknown command char: %d\n", c );
 				SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "%s", "Error: Unknown command char" );
 				return;
-
-			case clc_nop:
-				break;
-
-			case clc_move:
-			{
+			} break;
+			case clc_nop: {
+			} break;
+			case clc_move: {
 				if( move_issued ) {
 					return; // someone is trying to cheat...
-
 				}
 				move_issued = true;
 				SV_ParseMoveCommand( client, msg );
-			}
-				break;
-
-			case clc_svcack:
-			{
+			} break;
+			case clc_svcack: {
 				if( client->reliable ) {
 					Com_Printf( "SV_ParseClientMessage: svack from reliable client\n" );
 					SV_DropClient( client, ReconnectBehaviour::DontReconnect, "%s", "Error: svack from reliable client" );
@@ -2687,10 +2581,8 @@ void SV_ParseClientMessage( client_t *client, msg_t *msg ) {
 					return;
 				}
 				client->reliableAcknowledge = cmdNum;
-			}
-				break;
-
-			case clc_clientcommand:
+			} break;
+			case clc_clientcommand: {
 				cmdNum = 0;
 				if( !client->reliable ) {
 					cmdNum = MSG_ReadIntBase128( msg );
@@ -2705,24 +2597,16 @@ void SV_ParseClientMessage( client_t *client, msg_t *msg ) {
 				if( client->state == CS_ZOMBIE ) {
 					return; // disconnect command
 				}
+			} break;
+			case clc_extension: {
+				[[maybe_unused]] int ext = MSG_ReadUint8( msg );  // extension id
+				MSG_ReadUint8( msg );        // version number
+				[[maybe_unused]] int len = MSG_ReadInt16( msg ); // command length
+
+				// unsupported
+				MSG_SkipData( msg, len );
 				break;
-
-			case clc_extension:
-				if( 1 ) {
-					int ext, len;
-
-					ext = MSG_ReadUint8( msg );  // extension id
-					MSG_ReadUint8( msg );        // version number
-					len = MSG_ReadInt16( msg ); // command length
-
-					switch( ext ) {
-						default:
-							// unsupported
-							MSG_SkipData( msg, len );
-							break;
-					}
-				}
-				break;
+			} break;
 		}
 	}
 
@@ -2742,14 +2626,13 @@ void SV_FlushRedirect( int sv_redirected, const char *outputbuf, const void *ext
 }
 
 void SV_AddGameCommand( client_t *client, const char *cmd ) {
-	int index;
-
+	// TODO: Should be an assertion
 	if( !client ) {
 		return;
 	}
 
 	client->gameCommandCurrent++;
-	index = client->gameCommandCurrent & ( MAX_RELIABLE_COMMANDS - 1 );
+	const int index = client->gameCommandCurrent & ( MAX_RELIABLE_COMMANDS - 1 );
 	Q_strncpyz( client->gameCommands[index].command, cmd, sizeof( client->gameCommands[index].command ) );
 	if( client->lastSentFrameNum ) {
 		client->gameCommands[index].framenum = client->lastSentFrameNum + 1;
@@ -2765,14 +2648,18 @@ void SV_AddGameCommand( client_t *client, const char *cmd ) {
 * not have future snapshot_t executed before it is executed
 */
 void SV_AddServerCommand( client_t *client, const wsw::StringView &cmd ) {
+	// TODO: Should be an assertion
+	assert( client );
 	if( !client ) {
 		return;
 	}
 
-	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
+	// TODO: Don't call for fake clients?
+	if( client->isAFakeClient() ) {
 		return;
 	}
 
+	// TODO: Don't call with such params
 	const auto len = cmd.length();
 	if( !len ) {
 		return;
@@ -2805,11 +2692,10 @@ void SV_AddServerCommand( client_t *client, const wsw::StringView &cmd ) {
 	// we check == instead of >= so a broadcast print added by SV_DropClient() doesn't cause a recursive drop client
 	if( client->reliableSequence - client->reliableAcknowledge == MAX_RELIABLE_COMMANDS + 1 ) {
 		SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "%s", "Error: Too many pending reliable server commands" );
-		return;
+	} else {
+		const auto index = client->reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
+		client->reliableCommands[index].assign( cmd );
 	}
-
-	const auto index = client->reliableSequence & ( MAX_RELIABLE_COMMANDS - 1 );
-	client->reliableCommands[index].assign( cmd );
 }
 
 /*
@@ -2832,27 +2718,19 @@ void SV_SendServerCommand( client_t *cl, const char *format, ... ) {
 	}
 
 	const wsw::StringView cmd( buffer, (size_t)charsWritten );
-	if( cl != NULL ) {
-		if( cl->state < CS_CONNECTING ) {
-			return;
+	if( cl ) {
+		if( cl->state >= CS_CONNECTING ) {
+			SV_AddServerCommand( cl, cmd );
 		}
-		SV_AddServerCommand( cl, cmd );
-		return;
-	}
-
-	// send the data to all relevant clients
-	const auto maxClients = sv_maxclients->integer;
-	for( int i = 0; i < maxClients; ++i ) {
-		auto *const client = svs.clients + i;
-		if( client->state < CS_CONNECTING ) {
-			continue;
+	} else {
+		IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+		while( client_t *client = iteratorOverClients.getNext() ) {
+			SV_AddServerCommand( client, cmd );
 		}
-		SV_AddServerCommand( client, cmd );
-	}
-
-	// add to demo
-	if( svs.demo.file ) {
-		SV_AddServerCommand( &svs.demo.client, cmd );
+		// add to demo
+		if( svs.demo.file ) {
+			SV_AddServerCommand( &svs.demo.client, cmd );
+		}
 	}
 }
 
@@ -2893,26 +2771,20 @@ void SV_SendConfigString( client_t *cl, int index, const wsw::StringView &string
 	if( string.length() < kMaxNonFragmentedConfigStringLen ) {
 		assert( string.isZeroTerminated() );
 		SV_SendServerCommand( cl, "cs %i \"%s\"", index, string.data() );
-		return;
-	}
-
-	if( cl ) {
-		if( cl->state >= CS_CONNECTING ) {
-			SV_AddFragmentedConfigString( cl, index, string );
+	} else {
+		if( cl ) {
+			if( cl->state >= CS_CONNECTING ) {
+				SV_AddFragmentedConfigString( cl, index, string );
+			}
+		} else {
+			IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+			while( client_t *client = iteratorOverClients.getNext() ) {
+				SV_AddFragmentedConfigString( client, index, string );
+			}
+			if( svs.demo.file ) {
+				SV_AddFragmentedConfigString( &svs.demo.client, index, string );
+			}
 		}
-		return;
-	}
-
-	const auto maxClients = sv_maxclients->integer;
-	for( int i = 0; i < maxClients; ++i ) {
-		auto *const client = svs.clients + i;
-		if( client->state >= CS_CONNECTING ) {
-			SV_AddFragmentedConfigString( client, index, string );
-		}
-	}
-
-	if( svs.demo.file ) {
-		SV_AddFragmentedConfigString( &svs.demo.client, index, string );
 	}
 }
 
@@ -2922,9 +2794,8 @@ void SV_SendConfigString( client_t *cl, int index, const wsw::StringView &string
 * (re)send all server commands the client hasn't acknowledged yet
 */
 void SV_AddReliableCommandsToMessage( client_t *client, msg_t *msg ) {
-	unsigned int i;
-
-	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
+	// TODO: Don't call for fake clients
+	if( client->isAFakeClient() ) {
 		return;
 	}
 
@@ -2934,20 +2805,20 @@ void SV_AddReliableCommandsToMessage( client_t *client, msg_t *msg ) {
 	}
 
 	// write any unacknowledged serverCommands
-	for( i = client->reliableAcknowledge + 1; i <= client->reliableSequence; i++ ) {
+	for( unsigned i = client->reliableAcknowledge + 1; i <= client->reliableSequence; i++ ) {
 		const auto &cmd = client->reliableCommands[i & ( MAX_RELIABLE_COMMANDS - 1 )];
-		if( cmd.empty() ) {
-			continue;
-		}
-		MSG_WriteUint8( msg, svc_servercmd );
-		if( !client->reliable ) {
-			MSG_WriteInt32( msg, i );
-		}
-		MSG_WriteString( msg, cmd.data() );
-		if( sv_debug_serverCmd->integer ) {
-			Com_Printf( "SV_AddServerCommandsToMessage(%i):%s\n", i, cmd.data() );
+		if( !cmd.empty() ) {
+			MSG_WriteUint8( msg, svc_servercmd );
+			if( !client->reliable ) {
+				MSG_WriteInt32( msg, i );
+			}
+			MSG_WriteString( msg, cmd.data() );
+			if( sv_debug_serverCmd->integer ) {
+				Com_Printf( "SV_AddServerCommandsToMessage(%i):%s\n", i, cmd.data() );
+			}
 		}
 	}
+
 	client->reliableSent = client->reliableSequence;
 	if( client->reliable ) {
 		client->reliableAcknowledge = client->reliableSent;
@@ -2960,54 +2831,42 @@ void SV_AddReliableCommandsToMessage( client_t *client, msg_t *msg ) {
 * Sends a command to all connected clients. Ignores client->state < CS_SPAWNED check
 */
 void SV_BroadcastCommand( const char *format, ... ) {
-	client_t *client;
-	int i;
-	va_list argptr;
-	char string[1024];
-
+	// TODO: Should be an assertion
 	if( !sv.state ) {
 		return;
 	}
+
+	va_list argptr;
+	char string[1024];
 
 	va_start( argptr, format );
 	Q_vsnprintfz( string, sizeof( string ), format, argptr );
 	va_end( argptr );
 
-	for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
-		if( client->state < CS_CONNECTING ) {
-			continue;
-		}
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( client_t *client = iteratorOverClients.getNext() ) {
 		SV_SendServerCommand( client, string );
 	}
 }
 
-bool SV_SendClientsFragments( void ) {
-	client_t *client;
-	int i;
+bool SV_SendClientsFragments() {
 	bool sent = false;
 
 	// send a message to each connected client
-	for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
-		if( client->state == CS_FREE || client->state == CS_ZOMBIE ) {
-			continue;
-		}
-		if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			continue;
-		}
-		if( !client->netchan.unsentFragments ) {
-			continue;
-		}
-
-		if( !Netchan_TransmitNextFragment( &client->netchan ) ) {
-			Com_Printf( "Error sending fragment to %s: %s\n", NET_AddressToString( &client->netchan.remoteAddress ),
-						NET_ErrorString() );
-			if( client->reliable ) {
-				SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "Error sending fragment: %s\n", NET_ErrorString() );
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = false } );
+	while( client_t *const client = iteratorOverClients.getNext() ) {
+		if( client->netchan.unsentFragments ) {
+			if( !Netchan_TransmitNextFragment( &client->netchan ) ) {
+				const char *errorString   = NET_ErrorString();
+				const char *addressString = NET_AddressToString( &client->netchan.remoteAddress );
+				Com_Printf( "Error sending fragment to %s: %s\n", addressString, errorString );
+				if( client->reliable ) {
+					SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "Error sending fragment: %s\n", errorString );
+				}
+			} else {
+				sent = true;
 			}
-			continue;
 		}
-
-		sent = true;
 	}
 
 	return sent;
@@ -3030,7 +2889,8 @@ bool SV_Netchan_Transmit( netchan_t *netchan, msg_t *msg ) {
 }
 
 void SV_InitClientMessage( client_t *client, msg_t *msg, uint8_t *data, size_t size ) {
-	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
+	// TODO: Should not call for fake clients
+	if( client->isAFakeClient() ) {
 		return;
 	}
 
@@ -3049,8 +2909,8 @@ void SV_InitClientMessage( client_t *client, msg_t *msg, uint8_t *data, size_t s
 
 bool SV_SendMessageToClient( client_t *client, msg_t *msg ) {
 	assert( client );
-
-	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
+	// TODO: Do not call for fake clients
+	if( client->isAFakeClient() ) {
 		return true;
 	}
 
@@ -3063,17 +2923,9 @@ bool SV_SendMessageToClient( client_t *client, msg_t *msg ) {
 * SV_ResetClientFrameCounters
 * This is used for a temporary sanity check I'm doing.
 */
-void SV_ResetClientFrameCounters( void ) {
-	int i;
-	client_t *client;
-	for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
-		if( !client->state ) {
-			continue;
-		}
-		if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			continue;
-		}
-
+void SV_ResetClientFrameCounters() {
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( client_t *const client = iteratorOverClients.getNext() ) {
 		client->lastSentFrameNum = 0;
 	}
 }
@@ -3112,9 +2964,7 @@ void SV_BuildClientFrameSnap( client_t *client, int snapHintFlags ) {
 }
 
 static bool SV_SendClientDatagram( client_t *client ) {
-	if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
-		return true;
-	}
+	assert( !client->isAFakeClient() );
 
 	SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
 
@@ -3145,40 +2995,31 @@ static bool SV_SendClientDatagram( client_t *client ) {
 	return SV_SendMessageToClient( client, &tmpMessage );
 }
 
-void SV_SendClientMessages( void ) {
-	int i;
-	client_t *client;
-
-	// send a message to each connected client
-	for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
-		if( client->state == CS_FREE || client->state == CS_ZOMBIE ) {
-			continue;
-		}
-
-		if( client->edict && ( client->edict->r.svflags & SVF_FAKECLIENT ) ) {
+void SV_SendClientMessages() {
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( client_t *const client = iteratorOverClients.getNext() ) {
+		if( client->isAFakeClient() ) {
 			client->lastSentFrameNum = sv.framenum;
-			continue;
-		}
-
-		SV_UpdateActivity();
-
-		if( client->state == CS_SPAWNED ) {
-			if( !SV_SendClientDatagram( client ) ) {
-				Com_Printf( "Error sending message to %s: %s\n", client->name, NET_ErrorString() );
-				if( client->reliable ) {
-					SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "Error sending message: %s\n", NET_ErrorString() );
-				}
-			}
 		} else {
-			// send pending reliable commands, or send heartbeats for not timing out
-			if( client->reliableSequence > client->reliableAcknowledge ||
-				svs.realtime - client->lastPacketSentTime > 1000 ) {
-				SV_InitClientMessage( client, &tmpMessage, NULL, 0 );
-				SV_AddReliableCommandsToMessage( client, &tmpMessage );
-				if( !SV_SendMessageToClient( client, &tmpMessage ) ) {
+			SV_UpdateActivity();
+
+			if( client->state == CS_SPAWNED ) {
+				if( !SV_SendClientDatagram( client ) ) {
 					Com_Printf( "Error sending message to %s: %s\n", client->name, NET_ErrorString() );
 					if( client->reliable ) {
 						SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "Error sending message: %s\n", NET_ErrorString() );
+					}
+				}
+			} else {
+				// send pending reliable commands, or send heartbeats for not timing out
+				if( client->reliableSequence > client->reliableAcknowledge || svs.realtime - client->lastPacketSentTime > 1000 ) {
+					SV_InitClientMessage( client, &tmpMessage, nullptr, 0 );
+					SV_AddReliableCommandsToMessage( client, &tmpMessage );
+					if( !SV_SendMessageToClient( client, &tmpMessage ) ) {
+						Com_Printf( "Error sending message to %s: %s\n", client->name, NET_ErrorString() );
+						if( client->reliable ) {
+							SV_DropClient( client, ReconnectBehaviour::OfUserChoice, "Error sending message: %s\n", NET_ErrorString() );
+						}
 					}
 				}
 			}
@@ -3265,88 +3106,97 @@ static void SNAP_WritePlayerstateToClient( msg_t *msg, const player_state_t *ops
 	MSG_WriteDeltaPlayerState( msg, ops, ps );
 }
 
+[[nodiscard]]
+static bool isValidPendingCommand( const client_t *client, const game_command_t *cmd, int64_t frameNum ) {
+	if( cmd->command[0] && cmd->framenum + 256 >= frameNum && cmd->framenum <= frameNum ) {
+		if( client->lastframe >= 0 && cmd->framenum > client->lastframe ) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static void SNAP_WriteMultiPOVCommands( const ginfo_t *gi, const client_t *client, msg_t *msg, int64_t frameNum ) {
-	int positions[MAX_CLIENTS];
+	int64_t positions[MAX_CLIENTS];
+	// how many clients in snapshot
+	int maxnumtargets = 0;
 
 	// find the first command to send from every client
-	int maxnumtargets = 0;
-	for( int i = 0; i < gi->max_clients; i++ ) {
-		const client_t *cl = gi->clients + i;
-
-		if( cl->state < CS_SPAWNED || ( ( !cl->edict || ( cl->edict->r.svflags & SVF_NOCLIENT ) ) && cl != client ) ) {
-			continue;
-		}
-
-		maxnumtargets++;
-		for( positions[i] = cl->gameCommandCurrent - MAX_RELIABLE_COMMANDS + 1;
-			 positions[i] <= cl->gameCommandCurrent; positions[i]++ ) {
-			const int index = positions[i] & ( MAX_RELIABLE_COMMANDS - 1 );
-
-			// we need to check for too new commands too, because gamecommands for the next snap are generated
-			// all the time, and we might want to create a server demo frame or something in between snaps
-			if( cl->gameCommands[index].command[0] && cl->gameCommands[index].framenum + 256 >= frameNum &&
-				cl->gameCommands[index].framenum <= frameNum &&
-				( client->lastframe >= 0 && cl->gameCommands[index].framenum > client->lastframe ) ) {
-				break;
+	IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_SPAWNED, .includeFakeClients = true } );
+	while( auto maybeClientAndNum = iteratorOverClients.getNextWithIndex() ) {
+		auto [cl, i] = *maybeClientAndNum;
+		if( !cl->isAHiddenClient() || ( cl == client ) ) {
+			positions[i] = cl->gameCommandCurrent - MAX_RELIABLE_COMMANDS + 1;
+			for(; positions[i] <= cl->gameCommandCurrent; positions[i]++ ) {
+				const auto *cmd = &cl->gameCommands[positions[i] & ( MAX_RELIABLE_COMMANDS - 1 )];
+				// we need to check for too new commands too, because gamecommands for the next snap are generated
+				// all the time, and we might want to create a server demo frame or something in between snaps
+				if( isValidPendingCommand( cl, cmd, frameNum ) ) {
+					break;
+				}
 			}
+			maxnumtargets++;
 		}
 	}
 
-	const char *command;
-	// send all messages, combining similar messages together to save space
-	do {
+	for(;; ) {
 		int numtargets = 0, maxtarget = 0;
-		int64_t framenum = 0;
+		int64_t pickedCmdFrameNum = 0;
+		// TODO: This can be a single dword
 		uint8_t targets[MAX_CLIENTS / 8];
 
-		command = nullptr;
+		const char *pickedCmdText = nullptr;
 		memset( targets, 0, sizeof( targets ) );
 
 		// we find the message with the earliest framenum, and collect all recipients for that
-		for( int i = 0; i < gi->max_clients; i++ ) {
-			const client_t *cl = gi->clients + i;
+		iteratorOverClients.rewind();
+		while( auto maybeClientAndNum = iteratorOverClients.getNextWithIndex() ) {
+			auto [cl, i] = *maybeClientAndNum;
+			if( !cl->isAHiddenClient() || ( cl == client ) ) {
+				if( positions[i] <= cl->gameCommandCurrent ) {
+					const auto &cmd = cl->gameCommands[positions[i] & ( MAX_RELIABLE_COMMANDS - 1 )];
 
-			if( cl->state < CS_SPAWNED || ( ( !cl->edict || ( cl->edict->r.svflags & SVF_NOCLIENT ) ) && cl != client ) ) {
-				continue;
-			}
+					// If it's the same command in the same frame
+					if( pickedCmdText && !strcmp( cmd.command, pickedCmdText ) && pickedCmdFrameNum == cmd.framenum ) {
+						targets[i >> 3] |= 1 << ( i & 7 );
+						maxtarget = i + 1;
+						numtargets++;
+					} else if( !pickedCmdText || cmd.framenum < pickedCmdFrameNum ) {
+						// Either we're picking a new command or switching to a new command
+						// TODO: If we switch to a new command, is it guaranteed that the previous command is already written?
+						pickedCmdText = cmd.command;
+						pickedCmdFrameNum = cmd.framenum;
+						// Reset targets for a single recipient so far
+						memset( targets, 0, sizeof( targets ) );
+						targets[i >> 3] |= 1 << ( i & 7 );
+						maxtarget = i + 1;
+						numtargets = 1;
+					}
 
-			if( positions[i] > cl->gameCommandCurrent ) {
-				continue;
-			}
-
-			const int index = positions[i] & ( MAX_RELIABLE_COMMANDS - 1 );
-
-			if( command && !strcmp( cl->gameCommands[index].command, command ) &&
-				framenum == cl->gameCommands[index].framenum ) {
-				targets[i >> 3] |= 1 << ( i & 7 );
-				maxtarget = i + 1;
-				numtargets++;
-			} else if( !command || cl->gameCommands[index].framenum < framenum ) {
-				command = cl->gameCommands[index].command;
-				framenum = cl->gameCommands[index].framenum;
-				memset( targets, 0, sizeof( targets ) );
-				targets[i >> 3] |= 1 << ( i & 7 );
-				maxtarget = i + 1;
-				numtargets = 1;
-			}
-
-			if( numtargets == maxnumtargets ) {
-				break;
+					// We have collected all clients for this command
+					if( numtargets == maxnumtargets ) {
+						break;
+					}
+				}
 			}
 		}
 
+		if( !pickedCmdText ) {
+			// We haven't manage to find a command to send to at least a single client, stop at this.
+			break;
+		}
+
 		// send it
-		if( command ) {
-			// never write a command if it's of a higher framenum
-			if( frameNum >= framenum ) {
-				// do not allow the message buffer to overflow (can happen on flood updates)
-				if( msg->cursize + strlen( command ) + 512 > msg->maxsize ) {
-					continue;
-				}
+		// never write a command if it's of a higher framenum
+		if( frameNum >= pickedCmdFrameNum ) {
+			assert( frameNum - pickedCmdFrameNum < std::numeric_limits<int16_t>::max() );
+			// do not allow the message buffer to overflow (can happen on flood updates)
+			// TODO: Should it be a break?
+			if( msg->cursize + strlen( pickedCmdText ) + 512 <= msg->maxsize ) {
+				MSG_WriteInt16( msg, (int16_t)( frameNum - pickedCmdFrameNum ) );
+				MSG_WriteString( msg, pickedCmdText );
 
-				MSG_WriteInt16( msg, frameNum - framenum );
-				MSG_WriteString( msg, command );
-
+				// TODO: Just write a dword
 				// 0 means everyone
 				if( numtargets == maxnumtargets ) {
 					MSG_WriteUint8( msg, 0 );
@@ -3356,14 +3206,15 @@ static void SNAP_WriteMultiPOVCommands( const ginfo_t *gi, const client_t *clien
 					MSG_WriteData( msg, targets, bytes );
 				}
 			}
+		}
 
-			for( int i = 0; i < maxtarget; i++ ) {
-				if( targets[i >> 3] & ( 1 << ( i & 7 ) ) ) {
-					positions[i]++;
-				}
+		// Advance positions for targets included for this command
+		for( int i = 0; i < maxtarget; i++ ) {
+			if( targets[i >> 3] & ( 1 << ( i & 7 ) ) ) {
+				positions[i]++;
 			}
 		}
-	} while( command );
+	};
 }
 
 void SNAP_WriteFrameSnapToClient( const ginfo_t *gi, client_t *client, msg_t *msg, int64_t frameNum, int64_t gameTime,
@@ -3382,20 +3233,18 @@ void SNAP_WriteFrameSnapToClient( const ginfo_t *gi, client_t *client, msg_t *ms
 	}
 
 	const client_snapshot_t *oldframe;
-	// TODO: Clean up these conditions
 	if( client->lastframe <= 0 || client->lastframe > frameNum || client->nodelta ) {
 		// client is asking for a not compressed retransmit
 		oldframe = nullptr;
-	}
-		//else if( frameNum >= client->lastframe + (UPDATE_BACKUP - 3) )
-	else if( frameNum >= client->lastframe + UPDATE_MASK ) {
+	} else if( frameNum >= client->lastframe + UPDATE_MASK ) {
 		// client hasn't gotten a good message through in a long time
 		oldframe = nullptr;
 	} else {
 		// we have a valid message to delta from
 		oldframe = &client->snapShots[client->lastframe & UPDATE_MASK];
 		if( oldframe->multipov != frame->multipov ) {
-			oldframe = nullptr;        // don't delta compress a frame of different POV type
+			// don't delta compress a frame of different POV type
+			oldframe = nullptr;
 		}
 	}
 
@@ -3432,25 +3281,18 @@ void SNAP_WriteFrameSnapToClient( const ginfo_t *gi, client_t *client, msg_t *ms
 	if( frame->multipov ) {
 		SNAP_WriteMultiPOVCommands( gi, client, msg, frameNum );
 	} else {
-		for( int i = client->gameCommandCurrent - MAX_RELIABLE_COMMANDS + 1; i <= client->gameCommandCurrent; i++ ) {
-			const int index = i & ( MAX_RELIABLE_COMMANDS - 1 );
-
-			// check that it is valid command and that has not already been sent
-			// we can only allow commands from certain amount of old frames, so the short won't overflow
-			if( !client->gameCommands[index].command[0] || client->gameCommands[index].framenum + 256 < frameNum ||
-				client->gameCommands[index].framenum > frameNum ||
-				( client->lastframe >= 0 && client->gameCommands[index].framenum <= (unsigned)client->lastframe ) ) {
-				continue;
+		for( int64_t cmdNum = client->gameCommandCurrent - MAX_RELIABLE_COMMANDS + 1; cmdNum <= client->gameCommandCurrent; cmdNum++ ) {
+			const auto *cmd = &client->gameCommands[cmdNum & ( MAX_RELIABLE_COMMANDS - 1 )];
+			if( isValidPendingCommand( client, cmd, frameNum ) ) {
+				// TODO: Should this really be a break?
+				// do not allow the message buffer to overflow (can happen on flood updates)
+				if( msg->cursize + strlen( cmd->command ) + 512 <= msg->maxsize ) {
+					// send it
+					assert( frameNum - cmd->framenum < std::numeric_limits<int16_t>::max() );
+					MSG_WriteInt16( msg, (int16_t)( frameNum - cmd->framenum ) );
+					MSG_WriteString( msg, cmd->command );
+				}
 			}
-
-			// do not allow the message buffer to overflow (can happen on flood updates)
-			if( msg->cursize + strlen( client->gameCommands[index].command ) + 512 > msg->maxsize ) {
-				continue;
-			}
-
-			// send it
-			MSG_WriteInt16( msg, frameNum - client->gameCommands[index].framenum );
-			MSG_WriteString( msg, client->gameCommands[index].command );
 		}
 	}
 	MSG_WriteInt16( msg, -1 );
@@ -3537,8 +3379,9 @@ public:
 		memset( added, 0, sizeof( added ) );
 	}
 
-	const int *begin() const { assert( isSorted ); return nums; }
-	const int *end() const { assert( isSorted ); return nums + numEnts; }
+	// TODO: Span
+	[[nodiscard]] const int *begin() const { assert( isSorted ); return nums; }
+	[[nodiscard]] const int *end() const { assert( isSorted ); return nums + numEnts; }
 
 	void AddEntNum( int num );
 
@@ -3572,6 +3415,7 @@ void SnapEntNumsList::Sort()  {
 		}
 	}
 
+	assert( std::is_sorted( nums, nums + numEnts ) );
 	isSorted = true;
 }
 
@@ -3761,21 +3605,23 @@ static void SNAP_BuildSnapEntitiesList( cmodel_state_t *cms, ginfo_t *gi,
 										edict_t *clent, vec3_t vieworg, vec3_t skyorg,
 										uint8_t *fatpvs, client_snapshot_t *frame,
 										SnapEntNumsList &list, int snapHintFlags ) {
-	int leafnum, clientarea;
-	int clusternum = -1;
+	int clientarea;
+	int clusternum;
 
 	// find the client's PVS
 	if( frame->allentities ) {
 		clientarea = -1;
+		clusternum = -1;
 	} else {
-		leafnum = CM_PointLeafnum( cms, vieworg );
+		const int leafnum = CM_PointLeafnum( cms, vieworg );
 		clusternum = CM_LeafCluster( cms, leafnum );
 		clientarea = CM_LeafArea( cms, leafnum );
 	}
 
 	frame->clientarea = clientarea;
-	frame->areabytes = CM_WriteAreaBits( cms, frame->areabits );
+	frame->areabytes  = CM_WriteAreaBits( cms, frame->areabits );
 
+	bool handledOutsideTheWorldCase = false;
 	if( clent ) {
 		SNAP_FatPVS( cms, vieworg, fatpvs );
 
@@ -3789,57 +3635,62 @@ static void SNAP_BuildSnapEntitiesList( cmodel_state_t *cms, ginfo_t *gi,
 
 			// FIXME we should send all the entities who's POV we are sending if frame->multipov
 			list.AddEntNum( entNum );
-			return;
+			handledOutsideTheWorldCase = true;
 		}
 	}
 
-	// no need of merging when we are sending the whole level
-	if( !frame->allentities && clientarea >= 0 ) {
-		// make a pass checking for sky portal and portal entities and merge PVS in case of finding any
-		if( skyorg ) {
-			CM_MergeVisSets( cms, skyorg, fatpvs, frame->areabits + clientarea * CM_AreaRowSize( cms ) );
-		}
+	if( !handledOutsideTheWorldCase ) {
+		// no need of merging when we are sending the whole level
+		if( !frame->allentities && clientarea >= 0 ) {
+			// make a pass checking for sky portal and portal entities and merge PVS in case of finding any
+			if( skyorg ) {
+				CM_MergeVisSets( cms, skyorg, fatpvs, frame->areabits + clientarea * CM_AreaRowSize( cms ) );
+			}
 
-		for( int entNum = 1; entNum < gi->num_edicts; entNum++ ) {
-			edict_t *ent = EDICT_NUM( entNum );
-			if( ent->r.svflags & SVF_PORTAL ) {
-				// merge visibility sets if portal
-				if( SNAP_SnapCullEntity( cms, ent, clent, frame, vieworg, fatpvs, snapHintFlags ) ) {
-					continue;
-				}
-
-				if( !VectorCompare( ent->s.origin, ent->s.origin2 ) ) {
-					CM_MergeVisSets( cms, ent->s.origin2, fatpvs, frame->areabits + clientarea * CM_AreaRowSize( cms ) );
+			for( int entNum = 1; entNum < gi->num_edicts; entNum++ ) {
+				edict_t *const ent = EDICT_NUM( entNum );
+				if( ent->r.svflags & SVF_PORTAL ) {
+					// merge visibility sets if portal
+					if( !SNAP_SnapCullEntity( cms, ent, clent, frame, vieworg, fatpvs, snapHintFlags ) ) {
+						// TODO: This condition should be outer
+						if( !VectorCompare( ent->s.origin, ent->s.origin2 ) ) {
+							CM_MergeVisSets( cms, ent->s.origin2, fatpvs, frame->areabits + clientarea * CM_AreaRowSize( cms ) );
+						}
+					}
 				}
 			}
 		}
-	}
 
-	// add the entities to the list
-	for( int entNum = 1; entNum < gi->num_edicts; entNum++ ) {
-		edict_t *ent = EDICT_NUM( entNum );
+		// add the entities to the list
+		for( int entNum = 1; entNum < gi->num_edicts; entNum++ ) {
+			edict_t *const ent = EDICT_NUM( entNum );
 
-		// fix number if broken
-		if( ent->s.number != entNum ) {
-			Com_Printf( "FIXING ENT->S.NUMBER: %i %i!!!\n", ent->s.number, entNum );
-			ent->s.number = entNum;
-		}
+			// fix number if broken
+			if( ent->s.number != entNum ) {
+				Com_Printf( "FIXING ENT->S.NUMBER: %i %i!!!\n", ent->s.number, entNum );
+				ent->s.number = entNum;
+			}
 
-		// always add the client entity, even if SVF_NOCLIENT
-		if( ( ent != clent ) && SNAP_SnapCullEntity( cms, ent, clent, frame, vieworg, fatpvs, snapHintFlags ) ) {
-			continue;
-		}
+			bool shouldAdd = true;
+			// always add the client entity, even if SVF_NOCLIENT
+			if( ent != clent ) {
+				if( SNAP_SnapCullEntity( cms, ent, clent, frame, vieworg, fatpvs, snapHintFlags ) ) {
+					shouldAdd = false;
+				}
+			}
 
-		// add it
-		list.AddEntNum( entNum );
+			if( shouldAdd ) {
+				list.AddEntNum( entNum );
 
-		if( ent->r.svflags & SVF_FORCEOWNER ) {
-			// make sure owner number is valid too
-			if( ent->s.ownerNum > 0 && ent->s.ownerNum < gi->num_edicts ) {
-				list.AddEntNum( ent->s.ownerNum );
-			} else {
-				Com_Printf( "FIXING ENT->S.OWNERNUM: %i %i!!!\n", ent->s.type, ent->s.ownerNum );
-				ent->s.ownerNum = 0;
+				if( ent->r.svflags & SVF_FORCEOWNER ) {
+					// make sure owner number is valid too
+					if( ent->s.ownerNum > 0 && ent->s.ownerNum < gi->num_edicts ) {
+						list.AddEntNum( ent->s.ownerNum );
+					} else {
+						Com_Printf( "FIXING ENT->S.OWNERNUM: %i %i!!!\n", ent->s.type, ent->s.ownerNum );
+						ent->s.ownerNum = 0;
+					}
+				}
 			}
 		}
 	}
@@ -3860,6 +3711,7 @@ void SNAP_BuildClientFrameSnap( cmodel_state_t *cms, ginfo_t *gi, int64_t frameN
 	assert( scoreboardData );
 
 	edict_t *clent = client->edict;
+	// TODO: Should it happen?
 	if( clent && !clent->r.client ) {   // allow nullptr ent for server record
 		return;     // not in game yet
 	}
@@ -3879,10 +3731,10 @@ void SNAP_BuildClientFrameSnap( cmodel_state_t *cms, ginfo_t *gi, int64_t frameN
 	frame->UcmdExecuted = client->UcmdExecuted;
 
 	if( client->mv ) {
-		frame->multipov = true;
+		frame->multipov    = true;
 		frame->allentities = true;
 	} else {
-		frame->multipov = false;
+		frame->multipov    = false;
 		frame->allentities = false;
 	}
 
@@ -3938,19 +3790,9 @@ void SNAP_BuildClientFrameSnap( cmodel_state_t *cms, ginfo_t *gi, int64_t frameN
 	}
 
 	// build up the list of visible entities
-	SnapEntNumsList list;
-	SNAP_BuildSnapEntitiesList( cms, gi, clent, org, fatvis->skyorg, fatvis->pvs, frame, list, snapHintFlags );
-	list.Sort();
-
-	if( developer->integer ) {
-		int olde = -1;
-		for( int e : list ) {
-			if( olde >= e ) {
-				Com_Printf( "WARNING 'SV_BuildClientFrameSnap': Unsorted entities list\n" );
-			}
-			olde = e;
-		}
-	}
+	SnapEntNumsList sortedEntNumsList;
+	SNAP_BuildSnapEntitiesList( cms, gi, clent, org, fatvis->skyorg, fatvis->pvs, frame, sortedEntNumsList, snapHintFlags );
+	sortedEntNumsList.Sort();
 
 	// store current match state information
 	frame->gameState = *gameState;
@@ -3984,14 +3826,14 @@ void SNAP_BuildClientFrameSnap( cmodel_state_t *cms, ginfo_t *gi, int64_t frameN
 	}
 
 	// dump the entities list
-	int ne = client_entities->next_entities;
+	unsigned nextEntities = client_entities->next_entities;
 	frame->num_entities = 0;
-	frame->first_entity = ne;
+	frame->first_entity = (int)nextEntities;
 
-	for( int e : list ) {
+	for( const int entNum : sortedEntNumsList ) {
 		// add it to the circular client_entities array
-		const edict_t *ent = EDICT_NUM( e );
-		entity_state_t *state = &client_entities->entities[ne % client_entities->num_entities];
+		const edict_t *ent    = EDICT_NUM( entNum );
+		entity_state_t *state = &client_entities->entities[nextEntities % client_entities->num_entities];
 
 		*state = ent->s;
 		state->svflags = ent->r.svflags;
@@ -4002,10 +3844,10 @@ void SNAP_BuildClientFrameSnap( cmodel_state_t *cms, ginfo_t *gi, int64_t frameN
 		}
 
 		frame->num_entities++;
-		ne++;
+		nextEntities++;
 	}
 
-	client_entities->next_entities = ne;
+	client_entities->next_entities = nextEntities;
 }
 
 static void SNAP_FreeClientFrame( client_snapshot_t *frame ) {
@@ -4023,10 +3865,15 @@ void SNAP_FreeClientFrames( client_t *client ) {
 	}
 }
 
-static void SV_AddInfoServer_f( char *address, bool steam ) {
-	int i;
+static void SV_AddInfoServer_f( const char *addressString, bool steam ) {
+	// TODO: Don't call for such arguments
+	if( !addressString || !addressString[0] ) {
+		return;
+	}
 
-	if( !address || !address[0] ) {
+	netadr_t address {};
+	if( !NET_StringToAddress( addressString, &address ) ) {
+		Com_Printf( "'SV_AddInfoServer_f' Bad info server address: %s\n", addressString );
 		return;
 	}
 
@@ -4035,39 +3882,34 @@ static void SV_AddInfoServer_f( char *address, bool steam ) {
 		return;
 	}
 
-	//never go public when not acting as a game server
+	// TODO: Don't call in this state
+	// never go public when not acting as a game server
 	if( sv.state > ss_game ) {
 		return;
 	}
 
-	for( i = 0; i < MAX_INFO_SERVERS; i++ ) {
-		auto *const server = &sv_infoServers[i];
-
-		if( server->address.type != NA_NOTRANSMIT ) {
-			continue;
+	std::optional<int> freeSlot;
+	for( int slotNum = 0; slotNum < MAX_INFO_SERVERS; slotNum++ ) {
+		auto *const server = &sv_infoServers[slotNum];
+		if( server->address.type == NA_NOTRANSMIT ) {
+			freeSlot = slotNum;
+			break;
 		}
-
-		if( !NET_StringToAddress( address, &server->address ) ) {
-			Com_Printf( "'SV_AddInfoServer_f' Bad info server address: %s\n", address );
-			return;
-		}
-
-		if( NET_GetAddressPort( &server->address ) == 0 ) {
-			NET_SetAddressPort( &server->address, PORT_INFO_SERVER );
-		}
-
-		server->steam = steam;
-
-		Com_Printf( "Added new info server #%i at %s\n", i, NET_AddressToString( &server->address ) );
-		return;
 	}
 
-	Com_Printf( "'SV_AddInfoServer_f' List of info servers is already full\n" );
+	if( freeSlot != std::nullopt ) {
+		if( NET_GetAddressPort( &address ) == 0 ) {
+			NET_SetAddressPort( &address, PORT_INFO_SERVER );
+		}
+		sv_infoServers[*freeSlot].address = address;
+		sv_infoServers[*freeSlot].steam   = steam;
+		Com_Printf( "Added new info server #%i at %s\n", *freeSlot, NET_AddressToString( &address ) );
+	} else {
+		Com_Printf( "'SV_AddInfoServer_f' List of info servers is already full\n" );
+	}
 }
 
-static void SV_ResolveInfoServers( void ) {
-	char *iserver, *ilist;
-
+static void SV_ResolveInfoServers() {
 	// wsw : jal : initialize info servers list
 	memset( sv_infoServers, 0, sizeof( sv_infoServers ) );
 
@@ -4080,37 +3922,29 @@ static void SV_ResolveInfoServers( void ) {
 		return;
 	}
 
-	ilist = sv_infoservers->string;
-	if( *ilist ) {
-		while( ilist ) {
-			iserver = COM_Parse( &ilist );
-			if( !iserver[0] ) {
-				break;
-			}
-
-			SV_AddInfoServer_f( iserver, false );
-		}
+	wsw::StringSplitter stringSplitter( wsw::StringView( sv_infoservers->string ) );
+	while( const std::optional<wsw::StringView> address = stringSplitter.getNext() ) {
+		wsw::String ztAddress( address->data(), address->size() );
+		SV_AddInfoServer_f( ztAddress.c_str(), false );
 	}
 
 	svc.lastInfoServerResolve = Sys_Milliseconds();
 }
 
-void SV_InitInfoServers( void ) {
+void SV_InitInfoServers() {
 	SV_ResolveInfoServers();
 
 	svc.nextHeartbeat = Sys_Milliseconds() + HEARTBEAT_SECONDS * 1000; // wait a while before sending first heartbeat
 }
 
-void SV_UpdateInfoServers( void ) {
+void SV_UpdateInfoServers() {
 	if( svc.lastInfoServerResolve + TTL_INFO_SERVERS < Sys_Milliseconds() ) {
 		SV_ResolveInfoServers();
 	}
 }
 
-void SV_InfoServerHeartbeat( void ) {
-	int64_t time = Sys_Milliseconds();
-	int i;
-
+void SV_InfoServerHeartbeat() {
+	const int64_t time = Sys_Milliseconds();
 	if( svc.nextHeartbeat > time ) {
 		return;
 	}
@@ -4126,33 +3960,25 @@ void SV_InfoServerHeartbeat( void ) {
 		return;
 	}
 
-	for( i = 0; i < MAX_INFO_SERVERS; i++ ) {
-		auto *server = &sv_infoServers[i];
-
-		if( server->address.type != NA_NOTRANSMIT ) {
-			socket_t *socket;
-
+	for( const auto &server : sv_infoServers ) {
+		if( server.address.type != NA_NOTRANSMIT ) {
 			if( dedicated && dedicated->integer ) {
-				Com_Printf( "Sending heartbeat to %s\n", NET_AddressToString( &server->address ) );
+				Com_Printf( "Sending heartbeat to %s\n", NET_AddressToString( &server.address ) );
 			}
 
-			socket = ( server->address.type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
-
-			if( server->steam ) {
+			socket_t *const socket = ( server.address.type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
+			if( server.steam ) {
 				uint8_t steamHeartbeat = 'q';
-				NET_SendPacket( socket, &steamHeartbeat, sizeof( steamHeartbeat ), &server->address );
+				NET_SendPacket( socket, &steamHeartbeat, sizeof( steamHeartbeat ), &server.address );
 			} else {
 				// warning: "DarkPlaces" is a protocol name here, not a game name. Do not replace it.
-				Netchan_OutOfBandPrint( socket, &server->address, "heartbeat DarkPlaces\n" );
+				Netchan_OutOfBandPrint( socket, &server.address, "heartbeat DarkPlaces\n" );
 			}
 		}
 	}
 }
 
-void SV_InfoServerSendQuit( void ) {
-	int i;
-	const char quitMessage[] = "b\n";
-
+void SV_InfoServerSendQuit() {
 	if( !sv_public->integer || ( sv_maxclients->integer == 1 ) ) {
 		return;
 	}
@@ -4162,77 +3988,68 @@ void SV_InfoServerSendQuit( void ) {
 		return;
 	}
 
-	for( i = 0; i < MAX_INFO_SERVERS; i++ ) {
-		auto *const server = &sv_infoServers[i];
-
-		if( server->steam && ( server->address.type != NA_NOTRANSMIT ) ) {
-			socket_t *socket = ( server->address.type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
+	for( auto &server : sv_infoServers ) {
+		if( server.steam && ( server.address.type != NA_NOTRANSMIT ) ) {
+			socket_t *socket = ( server.address.type == NA_IP6 ? &svs.socket_udp6 : &svs.socket_udp );
 
 			if( dedicated && dedicated->integer ) {
-				Com_Printf( "Sending quit to %s\n", NET_AddressToString( &server->address ) );
+				Com_Printf( "Sending quit to %s\n", NET_AddressToString( &server.address ) );
 			}
 
-			NET_SendPacket( socket, ( const uint8_t * )quitMessage, sizeof( quitMessage ), &server->address );
+			const char quitMessage[] = "b\n";
+			NET_SendPacket( socket, ( const uint8_t * )quitMessage, sizeof( quitMessage ), &server.address );
 		}
 	}
 }
 
 static char *SV_LongInfoString( bool fullStatus ) {
-	char tempstr[1024] = { 0 };
-	const char *gametype;
 	static char status[MAX_MSGLEN - 16];
-	int i, bots, count;
-	client_t *cl;
-	size_t statusLength;
-	size_t tempstrLength;
 
 	Q_strncpyz( status, Cvar_Serverinfo(), sizeof( status ) );
 
 	// convert "g_gametype" to "gametype"
-	gametype = Info_ValueForKey( status, "g_gametype" );
-	if( gametype ) {
+	if( const char *gametype = Info_ValueForKey( status, "g_gametype" ) ) {
 		Info_RemoveKey( status, "g_gametype" );
 		Info_SetValueForKey( status, "gametype", gametype );
 	}
 
-	statusLength = strlen( status );
+	size_t statusLength = strlen( status );
 
-	bots = 0;
-	count = 0;
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
-		cl = &svs.clients[i];
-		if( cl->state >= CS_CONNECTED ) {
-			if( cl->edict->r.svflags & SVF_FAKECLIENT ) {
-				bots++;
-			}
-			count++;
+	int bots = 0;
+	int count = 0;
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( const client_t *client = iteratorOverClients.getNext() ) {
+		if( client->isAFakeClient() ) {
+			bots++;
 		}
+		count++;
 	}
 
+	char tempstr[1024] = { 0 };
 	if( bots ) {
 		Q_snprintfz( tempstr, sizeof( tempstr ), "\\bots\\%i", bots );
 	}
+
 	Q_snprintfz( tempstr + strlen( tempstr ), sizeof( tempstr ) - strlen( tempstr ), "\\clients\\%i%s", count, fullStatus ? "\n" : "" );
-	tempstrLength = strlen( tempstr );
+	size_t tempstrLength = strlen( tempstr );
 	if( statusLength + tempstrLength >= sizeof( status ) ) {
 		return status; // can't hold any more
 	}
+
 	Q_strncpyz( status + statusLength, tempstr, sizeof( status ) - statusLength );
 	statusLength += tempstrLength;
 
 	if( fullStatus ) {
-		for( i = 0; i < sv_maxclients->integer; i++ ) {
-			cl = &svs.clients[i];
-			if( cl->state >= CS_CONNECTED ) {
-				Q_snprintfz( tempstr, sizeof( tempstr ), "%i %i \"%s\" %i\n",
-							 cl->edict->r.client->m_frags, cl->ping, cl->name, cl->edict->s.team );
-				tempstrLength = strlen( tempstr );
-				if( statusLength + tempstrLength >= sizeof( status ) ) {
-					break; // can't hold any more
-				}
-				Q_strncpyz( status + statusLength, tempstr, sizeof( status ) - statusLength );
-				statusLength += tempstrLength;
+		iteratorOverClients.rewind();
+		while( const client_t *client = iteratorOverClients.getNext() ) {
+			Q_snprintfz( tempstr, sizeof( tempstr ), "%i %i \"%s\" %i\n",
+						 client->edict->r.client->m_frags, client->ping, client->name, client->edict->s.team );
+			tempstrLength = strlen( tempstr );
+			if( statusLength + tempstrLength >= sizeof( status ) ) {
+				break; // can't hold any more
 			}
+			Q_strncpyz( status + statusLength, tempstr, sizeof( status ) - statusLength );
+			statusLength += tempstrLength;
 		}
 	}
 
@@ -4243,32 +4060,29 @@ static char *SV_LongInfoString( bool fullStatus ) {
 * SV_ShortInfoString
 * Generates a short info string for broadcast scan replies
 */
+static char *SV_ShortInfoString( void ) {
 #define MAX_STRING_SVCINFOSTRING 180
 #define MAX_SVCINFOSTRING_LEN ( MAX_STRING_SVCINFOSTRING - 4 )
-static char *SV_ShortInfoString( void ) {
 	static char string[MAX_STRING_SVCINFOSTRING];
-	char hostname[64];
-	char entry[20];
-	size_t len;
-	int i, count, bots;
-	int maxcount;
-	const char *password;
 
-	bots = 0;
-	count = 0;
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
-		if( svs.clients[i].state >= CS_CONNECTED ) {
-			if( svs.clients[i].edict->r.svflags & SVF_FAKECLIENT ) {
-				bots++;
-			} else {
-				count++;
-			}
+	int bots = 0;
+	int count = 0;
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( const client_t *client = iteratorOverClients.getNext() ) {
+		if( client->isAFakeClient() ) {
+			bots++;
+		} else {
+			count++;
 		}
 	}
-	maxcount = sv_maxclients->integer - bots;
+
+	const int maxcount = sv_maxclients->integer - bots;
 
 	//format:
 	//" \377\377\377\377info\\n\\server_name\\m\\map name\\u\\clients/maxclients\\g\\gametype\\s\\skill\\EOT "
+
+	char entry[20];
+	char hostname[64];
 
 	Q_strncpyz( hostname, sv_hostname->string, sizeof( hostname ) );
 	Q_snprintfz( string, sizeof( string ),
@@ -4279,7 +4093,7 @@ static char *SV_ShortInfoString( void ) {
 				 maxcount > 99 ? 99 : maxcount
 	);
 
-	len = strlen( string );
+	size_t len = strlen( string );
 	Q_snprintfz( entry, sizeof( entry ), "g\\\\%6s\\\\", Cvar_String( "g_gametype" ) );
 	if( MAX_SVCINFOSTRING_LEN - len > strlen( entry ) ) {
 		Q_strncatz( string, entry, sizeof( string ) );
@@ -4301,8 +4115,7 @@ static char *SV_ShortInfoString( void ) {
 		len = strlen( string );
 	}
 
-	password = Cvar_String( "password" );
-	if( password[0] != '\0' ) {
+	if( Cvar_String( "password" )[0] != '\0' ) {
 		Q_snprintfz( entry, sizeof( entry ), "p\\\\1\\\\" );
 		if( MAX_SVCINFOSTRING_LEN - len > strlen( entry ) ) {
 			Q_strncatz( string, entry, sizeof( string ) );
@@ -4341,18 +4154,13 @@ static void HandleOobCommand_Ping( const socket_t *socket, const netadr_t *addre
 }
 
 static void HandleOobCommand_Info( const socket_t *socket, const netadr_t *address, const CmdArgs &cmdArgs ) {
-	int i, count;
-	char *string;
-	bool allow_empty = false, allow_full = false;
-
 	if( sv_showInfoQueries->integer ) {
 		Com_Printf( "Info Packet %s\n", NET_AddressToString( address ) );
 	}
 
 	// KoFFiE: When not public and coming from a LAN address
 	//         assume broadcast and respond anyway, otherwise ignore
-	if( ( ( !sv_public->integer ) && ( !NET_IsLANAddress( address ) ) ) ||
-		( sv_maxclients->integer == 1 ) ) {
+	if( ( ( !sv_public->integer ) && ( !NET_IsLANAddress( address ) ) ) || ( sv_maxclients->integer == 1 ) ) {
 		return;
 	}
 
@@ -4371,18 +4179,17 @@ static void HandleOobCommand_Info( const socket_t *socket, const netadr_t *addre
 	}
 
 	// check for full/empty filtered states
-	for( i = 0; i < Cmd_Argc(); i++ ) {
+	bool allow_empty = false, allow_full = false;
+	for( int i = 0; i < Cmd_Argc(); i++ ) {
 		if( !Q_stricmp( Cmd_Argv( i ), "full" ) ) {
 			allow_full = true;
-		}
-
-		if( !Q_stricmp( Cmd_Argv( i ), "empty" ) ) {
+		} else if( !Q_stricmp( Cmd_Argv( i ), "empty" ) ) {
 			allow_empty = true;
 		}
 	}
 
-	count = 0;
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
+	int count = 0;
+	for( int i = 0; i < sv_maxclients->integer; i++ ) {
 		if( svs.clients[i].state >= CS_CONNECTED ) {
 			count++;
 		}
@@ -4396,23 +4203,19 @@ static void HandleOobCommand_Info( const socket_t *socket, const netadr_t *addre
 		return;
 	}
 
-	string = SV_ShortInfoString();
-	if( string ) {
+	if( const char *string = SV_ShortInfoString() ) {
 		Netchan_OutOfBandPrint( socket, address, "info\n%s", string );
 	}
 }
 
 static void SVC_SendInfoString( const socket_t *socket, const netadr_t *address, const char *requestType, const char *responseType, bool fullStatus, const CmdArgs &cmdArgs ) {
-	char *string;
-
 	if( sv_showInfoQueries->integer ) {
 		Com_Printf( "%s Packet %s\n", requestType, NET_AddressToString( address ) );
 	}
 
 	// KoFFiE: When not public and coming from a LAN address
 	//         assume broadcast and respond anyway, otherwise ignore
-	if( ( ( !sv_public->integer ) && ( !NET_IsLANAddress( address ) ) ) ||
-		( sv_maxclients->integer == 1 ) ) {
+	if( ( ( !sv_public->integer ) && ( !NET_IsLANAddress( address ) ) ) || ( sv_maxclients->integer == 1 ) ) {
 		return;
 	}
 
@@ -4426,8 +4229,7 @@ static void SVC_SendInfoString( const socket_t *socket, const netadr_t *address,
 	//	return;
 
 	// send the same string that we would give for a status OOB command
-	string = SV_LongInfoString( fullStatus );
-	if( string ) {
+	if( const char *string = SV_LongInfoString( fullStatus ) ) {
 		Netchan_OutOfBandPrint( socket, address, "%s\n\\challenge\\%s%s", responseType, Cmd_Argv( 1 ), string );
 	}
 }
@@ -4482,96 +4284,28 @@ static void HandleOobCommand_GetChallenge( const socket_t *socket, const netadr_
 	Netchan_OutOfBandPrint( socket, address, "challenge %i", svs.challenges[index].challenge );
 }
 
-static void SendRejectPacket( const socket_t *socket, const netadr_t *address, const char *message, ReconnectBehaviour reconnectBehaviour ) {
-	// The two initial numeric values are for compatibility with old (pre-2.6) clients
-	Netchan_OutOfBandPrint( socket, address, "reject\n0\n0\n%s\n%u\n%u\n%u\n", ( message ? message : "" ),
-							(unsigned)APP_PROTOCOL_VERSION, (unsigned)ConnectionDropStage::EstablishingFailed, (unsigned)reconnectBehaviour );
+static const char *ValidateChallenge( const netadr_t *address, int challenge ) {
+	for( auto &entry : svs.challenges ) {
+		if( NET_CompareBaseAddress( address, &entry.adr ) ) {
+			if( challenge == entry.challenge ) {
+				// wsw : r1q2 : reset challenge
+				entry.challenge = 0;
+				entry.time      = 0;
+				NET_InitAddress( &entry.adr, NA_NOTRANSMIT );
+				return nullptr;
+			}
+			return "Bad challenge";
+		}
+	}
+	return "No challenge for address";
 }
 
-static void HandleOobCommand_Connect( const socket_t *socket, const netadr_t *address, const CmdArgs &cmdArgs ) {
-	Com_DPrintf( "HandleOobCommand_Connect(%s)\n", Cmd_Args() );
-
-	const int version = atoi( Cmd_Argv( 1 ) );
-	if( version != APP_PROTOCOL_VERSION ) {
-		if( version <= 6 ) { // before reject packet was added
-			Netchan_OutOfBandPrint( socket, address, "print\nServer is version %4.2f. Protocol %3i\n",
-									APP_VERSION, APP_PROTOCOL_VERSION );
-		} else {
-			wsw::StaticString<128> buffer;
-			buffer << wsw::StringView( "Server and client don't have the same version: expected=" );
-			buffer << APP_PROTOCOL_VERSION << wsw::StringView( ", got" ) << version;
-			SendRejectPacket( socket, address, buffer.data(), ReconnectBehaviour::DontReconnect );
-		}
-		Com_DPrintf( "    rejected connect from protocol %i\n", version );
-		return;
-	}
-
-	if( !Info_Validate( Cmd_Argv( 4 ) ) ) {
-		SendRejectPacket( socket, address, "Invalid userinfo string", ReconnectBehaviour::DontReconnect );
-		Com_DPrintf( "Connection from %s refused: invalid userinfo string\n", NET_AddressToString( address ) );
-		return;
-	}
-
-	char userinfo[MAX_INFO_STRING];
-	Q_strncpyz( userinfo, Cmd_Argv( 4 ), sizeof( userinfo ) );
-
-	// force the IP key/value pair so the game can filter based on ip
-	if( !Info_SetValueForKey( userinfo, "socket", NET_SocketTypeToString( socket->type ) ) ) {
-		SendRejectPacket( socket, address, "Couldn't set userinfo (socket)", ReconnectBehaviour::OfUserChoice );
-		Com_DPrintf( "Connection from %s refused: couldn't set userinfo (socket)\n", NET_AddressToString( address ) );
-		return;
-	}
-	if( !Info_SetValueForKey( userinfo, "ip", NET_AddressToString( address ) ) ) {
-		SendRejectPacket( socket, address, "Couldn't set userinfo (ip)", ReconnectBehaviour::OfUserChoice );
-		Com_DPrintf( "Connection from %s refused: couldn't set userinfo (ip)\n", NET_AddressToString( address ) );
-		return;
-	}
-
-	mm_uuid_t session_id, ticket_id;
-	if( Cmd_Argc() >= 7 ) {
-		// we have extended information, ticket-id and session-id
-		Com_Printf( "Extended information %s\n", Cmd_Argv( 6 ) );
-		if( !Uuid_FromString( Cmd_Argv( 6 ), &ticket_id ) ) {
-			ticket_id = session_id = Uuid_ZeroUuid();
-		} else {
-			const char *session_id_str = Info_ValueForKey( userinfo, "cl_mm_session" );
-			if( !Uuid_FromString( session_id_str, &session_id ) ) {
-				ticket_id = session_id = Uuid_ZeroUuid();
-			}
-		}
-	} else {
-		ticket_id = session_id = Uuid_ZeroUuid();
-	}
-
-	const int challenge = atoi( Cmd_Argv( 3 ) );
-
-	int i;
-	// see if the challenge is valid
-	for( i = 0; i < MAX_CHALLENGES; i++ ) {
-		if( NET_CompareBaseAddress( address, &svs.challenges[i].adr ) ) {
-			if( challenge == svs.challenges[i].challenge ) {
-				svs.challenges[i].challenge = 0; // wsw : r1q2 : reset challenge
-				svs.challenges[i].time = 0;
-				NET_InitAddress( &svs.challenges[i].adr, NA_NOTRANSMIT );
-				break; // good
-			}
-			SendRejectPacket( socket, address, "Bad challenge", ReconnectBehaviour::OfUserChoice );
-			return;
-		}
-	}
-	if( i == MAX_CHALLENGES ) {
-		SendRejectPacket( socket, address, "No challenge for address", ReconnectBehaviour::OfUserChoice );
-		return;
-	}
-
+static bool CheckIPConnectionLimit( const netadr_t *address ) {
 	//r1: limit connections from a single IP
 	if( sv_iplimit->integer ) {
 		int previousclients = 0;
-		for( i = 0; i < sv_maxclients->integer; i++ ) {
-			client_t *cl = svs.clients + i;
-			if( cl->state == CS_FREE ) {
-				continue;
-			}
+		IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_ZOMBIE, .includeFakeClients = false } );
+		while( const client_t *cl = iteratorOverClients.getNext() ) {
 			if( NET_CompareBaseAddress( address, &cl->netchan.remoteAddress ) ) {
 				//r1: zombies are less dangerous
 				if( cl->state == CS_ZOMBIE ) {
@@ -4583,82 +4317,171 @@ static void HandleOobCommand_Connect( const socket_t *socket, const netadr_t *ad
 		}
 
 		if( previousclients >= sv_iplimit->integer * 2 ) {
-			SendRejectPacket( socket, address, "Too many connections from your host", ReconnectBehaviour::DontReconnect );
-			Com_DPrintf( "%s:connect rejected : too many connections\n", NET_AddressToString( address ) );
-			return;
+			return false;
 		}
 	}
+	// Check passed
+	return true;
+}
 
-	const int game_port = atoi( Cmd_Argv( 2 ) );
-	client_t *newcl = NULL;
+struct NoMatchingSlot {};
+struct TooSoon {};
 
-	// if there is already a slot for this ip, reuse it
-	int64_t time = Sys_Milliseconds();
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
-		client_t *const cl = svs.clients + i;
-		if( cl->state == CS_FREE ) {
-			continue;
+static std::variant<NoMatchingSlot, TooSoon, int> FindExistingClientSlotForConnection( const netadr_t *address, int game_port ) {
+	const int64_t time = Sys_Milliseconds();
+	IteratorOverClients iteratorOverClients( { .minAcceptableState = CS_ZOMBIE, .includeFakeClients = false } );
+	while( auto maybeClientAndNum = iteratorOverClients.getNextWithIndex() ) {
+		auto [cl, i] = *maybeClientAndNum;
+		bool matchesAddress = false;
+		if( NET_CompareAddress( address, &cl->netchan.remoteAddress ) ) {
+			matchesAddress = true;
+		} else if( NET_CompareBaseAddress( address, &cl->netchan.remoteAddress ) && cl->netchan.game_port == game_port ) {
+			matchesAddress = true;
 		}
-		if( NET_CompareAddress( address, &cl->netchan.remoteAddress ) ||
-			( NET_CompareBaseAddress( address, &cl->netchan.remoteAddress ) && cl->netchan.game_port == game_port ) ) {
-			if( !NET_IsLocalAddress( address ) &&
-				( time - cl->lastconnect ) < (unsigned)( sv_reconnectlimit->integer * 1000 ) ) {
-				Com_DPrintf( "%s:reconnect rejected : too soon\n", NET_AddressToString( address ) );
-				return;
+		if( matchesAddress ) {
+			if( !NET_IsLocalAddress( address ) && ( time - cl->lastconnect ) < (unsigned)( sv_reconnectlimit->integer * 1000 ) ) {
+				return TooSoon {};
 			}
-			Com_Printf( "%s:reconnect\n", NET_AddressToString( address ) );
+			return i;
+		}
+	}
+	return NoMatchingSlot {};
+}
+
+static client_t *FindClientToAssignNewConnection() {
+	client_t *newcl = nullptr;
+	for( int i = 0; i < sv_maxclients->integer; i++ ) {
+		client_t *cl = svs.clients + i;
+		if( cl->state == CS_FREE ) {
 			newcl = cl;
 			break;
 		}
 	}
-
-	// find a client slot
 	if( !newcl ) {
-		for( i = 0; i < sv_maxclients->integer; i++ ) {
+		for( int i = 0; i < sv_maxclients->integer; i++ ) {
 			client_t *cl = svs.clients + i;
-			if( cl->state == CS_FREE ) {
-				newcl = cl;
-				break;
-			}
 			// overwrite fakeclient if no free spots found
+			// TODO: The game module should decide what bot to kick
 			if( cl->state && cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
 				newcl = cl;
 			}
 		}
-		if( !newcl ) {
-			SendRejectPacket( socket, address, "The server is full", ReconnectBehaviour::OfUserChoice );
-			Com_DPrintf( "Server is full. Rejected a connection.\n" );
-			return;
-		}
-		if( newcl->state && newcl->edict && ( newcl->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			SV_DropClient( newcl, ReconnectBehaviour::DontReconnect, "%s", "Need room for a real player" );
+		if( newcl ) {
+			if( newcl->state && newcl->edict && ( newcl->edict->r.svflags & SVF_FAKECLIENT ) ) {
+				SV_DropClient( newcl, ReconnectBehaviour::DontReconnect, "%s", "Need room for a real player" );
+			}
 		}
 	}
+	return newcl;
+}
 
-	// get the game a chance to reject this connection or modify the userinfo
-	if( !SV_ClientConnect( socket, address, newcl, userinfo, game_port, challenge, false, ticket_id, session_id ) ) {
-		std::optional<ReconnectBehaviour> reconnectBehavior;
-		if( const auto maybeRawBehavior = wsw::toNum<unsigned>( Info_ValueForKey( userinfo, "rejbehavior" ) ) ) {
-			for( const ReconnectBehaviour behaviourValue : kReconnectBehaviourValues ) {
-				if( (unsigned)behaviourValue == *maybeRawBehavior ) {
-					reconnectBehavior = behaviourValue;
-					break;
+static void SendRejectPacket( const socket_t *socket, const netadr_t *address, const char *message, ReconnectBehaviour reconnectBehaviour ) {
+	// The two initial numeric values are for compatibility with old (pre-2.6) clients
+	Netchan_OutOfBandPrint( socket, address, "reject\n0\n0\n%s\n%u\n%u\n%u\n", ( message ? message : "" ),
+							(unsigned)APP_PROTOCOL_VERSION, (unsigned)ConnectionDropStage::EstablishingFailed, (unsigned)reconnectBehaviour );
+}
+
+static void HandleOobCommand_Connect( const socket_t *socket, const netadr_t *address, const CmdArgs &cmdArgs ) {
+	Com_DPrintf( "HandleOobCommand_Connect(%s)\n", Cmd_Args() );
+
+	if( const int version = atoi( Cmd_Argv( 1 ) ); version != APP_PROTOCOL_VERSION ) {
+		if( version <= 6 ) { // before reject packet was added
+			Netchan_OutOfBandPrint( socket, address, "print\nServer is version %4.2f. Protocol %3i\n",
+									APP_VERSION, APP_PROTOCOL_VERSION );
+		} else {
+			wsw::StaticString<128> buffer;
+			buffer << wsw::StringView( "Server and client don't have the same version: expected=" );
+			buffer << APP_PROTOCOL_VERSION << wsw::StringView( ", got" ) << version;
+			SendRejectPacket( socket, address, buffer.data(), ReconnectBehaviour::DontReconnect );
+		}
+		Com_DPrintf( "    rejected connect from protocol %i\n", version );
+	} else {
+		if( !Info_Validate( Cmd_Argv( 4 ) ) ) {
+			SendRejectPacket( socket, address, "Invalid userinfo string", ReconnectBehaviour::DontReconnect );
+			Com_DPrintf( "Connection from %s refused: invalid userinfo string\n", NET_AddressToString( address ) );
+		} else {
+			char userinfo[MAX_INFO_STRING];
+			Q_strncpyz( userinfo, Cmd_Argv( 4 ), sizeof( userinfo ) );
+
+			// force the IP key/value pair so the game can filter based on ip
+			if( !Info_SetValueForKey( userinfo, "socket", NET_SocketTypeToString( socket->type ) ) ) {
+				SendRejectPacket( socket, address, "Couldn't set userinfo (socket)", ReconnectBehaviour::OfUserChoice );
+				Com_DPrintf( "Connection from %s refused: couldn't set userinfo (socket)\n", NET_AddressToString( address ) );
+			} else if( !Info_SetValueForKey( userinfo, "ip", NET_AddressToString( address ) ) ) {
+				SendRejectPacket( socket, address, "Couldn't set userinfo (ip)", ReconnectBehaviour::OfUserChoice );
+				Com_DPrintf( "Connection from %s refused: couldn't set userinfo (ip)\n", NET_AddressToString( address ) );
+			} else {
+				mm_uuid_t session_id, ticket_id;
+				if( Cmd_Argc() >= 7 ) {
+					// we have extended information, ticket-id and session-id
+					Com_Printf( "Extended information %s\n", Cmd_Argv( 6 ) );
+					if( !Uuid_FromString( Cmd_Argv( 6 ), &ticket_id ) ) {
+						ticket_id = session_id = Uuid_ZeroUuid();
+					} else {
+						const char *session_id_str = Info_ValueForKey( userinfo, "cl_mm_session" );
+						if( !Uuid_FromString( session_id_str, &session_id ) ) {
+							ticket_id = session_id = Uuid_ZeroUuid();
+						}
+					}
+				} else {
+					ticket_id = session_id = Uuid_ZeroUuid();
+				}
+
+				const int challenge = atoi( Cmd_Argv( 3 ) );
+				if( const char *challengeErrorString = ValidateChallenge( address, challenge ) ) {
+					SendRejectPacket( socket, address, challengeErrorString, ReconnectBehaviour::OfUserChoice );
+				} else {
+					if( !CheckIPConnectionLimit( address ) ) {
+						SendRejectPacket( socket, address, "Too many connections from your host", ReconnectBehaviour::DontReconnect );
+						Com_DPrintf( "%s:connect rejected : too many connections\n", NET_AddressToString( address ) );
+					} else {
+						const int game_port = atoi( Cmd_Argv( 2 ) );
+						// if there is already a slot for this ip, reuse it
+						std::variant<NoMatchingSlot, TooSoon, int> findResult = FindExistingClientSlotForConnection( address, game_port );
+						if( std::holds_alternative<TooSoon>( findResult ) ) {
+							Com_DPrintf( "%s:reconnect rejected : too soon\n", NET_AddressToString( address ) );
+						} else {
+							client_t *newcl     = nullptr;
+							if( const int *slot = std::get_if<int>( &findResult ) ) {
+								Com_Printf( "%s:reconnect\n", NET_AddressToString( address ) );
+								newcl = svs.clients + *slot;
+							} else {
+								newcl = FindClientToAssignNewConnection();
+							}
+							if( !newcl ) {
+								SendRejectPacket( socket, address, "The server is full", ReconnectBehaviour::OfUserChoice );
+								Com_DPrintf( "Server is full. Rejected a connection.\n" );
+							} else {
+								// get the game a chance to reject this connection or modify the userinfo
+								if( !SV_ClientConnect( socket, address, newcl, userinfo, game_port, challenge, false, ticket_id, session_id ) ) {
+									std::optional<ReconnectBehaviour> reconnectBehavior;
+									if( const auto maybeRawBehavior = wsw::toNum<unsigned>( Info_ValueForKey( userinfo, "rejbehavior" ) ) ) {
+										for( const ReconnectBehaviour behaviourValue : kReconnectBehaviourValues ) {
+											if( (unsigned)behaviourValue == *maybeRawBehavior ) {
+												reconnectBehavior = behaviourValue;
+												break;
+											}
+										}
+									}
+
+									const char *rejmsg = Info_ValueForKey( userinfo, "rejmsg" );
+									if( !rejmsg ) {
+										rejmsg = "Game module rejected connection";
+									}
+
+									SendRejectPacket( socket, address, rejmsg, reconnectBehavior.value() );
+									Com_DPrintf( "Game rejected a connection.\n" );
+								} else {
+									// send the connect packet to the client
+									Netchan_OutOfBandPrint( socket, address, "client_connect\n%s", newcl->session );
+								}
+							}
+						}
+					}
 				}
 			}
 		}
-
-		const char *rejmsg = Info_ValueForKey( userinfo, "rejmsg" );
-		if( !rejmsg ) {
-			rejmsg = "Game module rejected connection";
-		}
-
-		SendRejectPacket( socket, address, rejmsg, reconnectBehavior.value() );
-		Com_DPrintf( "Game rejected a connection.\n" );
-		return;
 	}
-
-	// send the connect packet to the client
-	Netchan_OutOfBandPrint( socket, address, "client_connect\n%s", newcl->session );
 }
 
 /*
@@ -4683,42 +4506,38 @@ int SVC_FakeConnect( const char *fakeUserinfo, const char *fakeSocketType, const
 	Q_strncpyz( userinfo, fakeUserinfo, sizeof( userinfo ) );
 
 	// force the IP key/value pair so the game can filter based on ip
-	if( !Info_SetValueForKey( userinfo, "socket", fakeSocketType ) ) {
-		return -1;
-	}
-	if( !Info_SetValueForKey( userinfo, "ip", fakeIP ) ) {
-		return -1;
-	}
+	if( Info_SetValueForKey( userinfo, "socket", fakeSocketType ) && Info_SetValueForKey( userinfo, "ip", fakeIP ) ) {
+		// find a client slot
+		client_t *newcl = nullptr;
+		for( int i = 0; i < sv_maxclients->integer; i++ ) {
+			client_t *cl = svs.clients + i;
+			if( cl->state == CS_FREE ) {
+				newcl = cl;
+				break;
+			}
+		}
 
-	// find a client slot
-	client_t *newcl = NULL;
-	for( int i = 0; i < sv_maxclients->integer; i++ ) {
-		client_t *cl = svs.clients + i;
-		if( cl->state == CS_FREE ) {
-			newcl = cl;
-			break;
+		if( !newcl ) {
+			Com_DPrintf( "Rejected a connection.\n" );
+		} else {
+			netadr_t address;
+			NET_InitAddress( &address, NA_NOTRANSMIT );
+			// get the game a chance to reject this connection or modify the userinfo
+			mm_uuid_t session_id = Uuid_ZeroUuid();
+			mm_uuid_t ticket_id  = Uuid_ZeroUuid();
+			if( !SV_ClientConnect( nullptr, &address, newcl, userinfo, -1, -1, true, session_id, ticket_id ) ) {
+				Com_DPrintf( "Game rejected a connection.\n" );
+			} else {
+				// directly call the game begin function
+				newcl->state = CS_SPAWNED;
+				ge->ClientBegin( newcl->edict );
+
+				return NUM_FOR_EDICT( newcl->edict );
+			}
 		}
 	}
-	if( !newcl ) {
-		Com_DPrintf( "Rejected a connection.\n" );
-		return -1;
-	}
 
-	netadr_t address;
-	NET_InitAddress( &address, NA_NOTRANSMIT );
-	// get the game a chance to reject this connection or modify the userinfo
-	mm_uuid_t session_id = Uuid_ZeroUuid();
-	mm_uuid_t ticket_id  = Uuid_ZeroUuid();
-	if( !SV_ClientConnect( NULL, &address, newcl, userinfo, -1, -1, true, session_id, ticket_id ) ) {
-		Com_DPrintf( "Game rejected a connection.\n" );
-		return -1;
-	}
-
-	// directly call the game begin function
-	newcl->state = CS_SPAWNED;
-	ge->ClientBegin( newcl->edict );
-
-	return NUM_FOR_EDICT( newcl->edict );
+	return -1;
 }
 
 static int Rcon_Auth( const CmdArgs &cmdArgs ) {
@@ -4824,73 +4643,70 @@ void SV_ConnectionlessPacket( const socket_t *socket, const netadr_t *address, m
 
 static void SV_Demo_WriteMessage( msg_t *msg ) {
 	assert( svs.demo.file );
-	if( !svs.demo.file ) {
-		return;
+	if( svs.demo.file ) {
+		SNAP_RecordDemoMessage( svs.demo.file, msg, 0 );
 	}
-
-	SNAP_RecordDemoMessage( svs.demo.file, msg, 0 );
 }
 
-static void SV_Demo_WriteStartMessages( void ) {
+static void SV_Demo_WriteStartMessages() {
 	SNAP_BeginDemoRecording( svs.demo.file, svs.spawncount, svc.snapFrameTime, sv.mapname, SV_BITFLAGS_RELIABLE,
 							 svs.purelist, sv.configStrings, sv.baselines );
 }
 
-void SV_Demo_WriteSnap( void ) {
-	int i;
-	msg_t msg;
-	uint8_t msg_buffer[MAX_MSGLEN];
-
+void SV_Demo_WriteSnap() {
 	if( !svs.demo.file ) {
 		return;
 	}
 
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
-		if( svs.clients[i].state >= CS_SPAWNED && svs.clients[i].edict &&
-			!( svs.clients[i].edict->r.svflags & SVF_NOCLIENT ) ) {
+	bool hasActivePlayers = false;
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( client_t *client = iteratorOverClients.getNext() ) {
+		// TODO: Should this condition be an iterator parameter?
+		if( !client->isAHiddenClient() ) {
+			hasActivePlayers = true;
 			break;
 		}
 	}
-	if( i == sv_maxclients->integer ) { // FIXME
+	if( !hasActivePlayers ) {
 		Com_Printf( "No players left, stopping server side demo recording\n" );
 		SV_Demo_Stop_f( CmdArgs {} );
-		return;
+	} else {
+		msg_t msg;
+		uint8_t msg_buffer[MAX_MSGLEN];
+		MSG_Init( &msg, msg_buffer, sizeof( msg_buffer ) );
+
+		SV_BuildClientFrameSnap( &svs.demo.client, 0 );
+
+		SV_WriteFrameSnapToClient( &svs.demo.client, &msg );
+
+		SV_AddReliableCommandsToMessage( &svs.demo.client, &msg );
+
+		SV_Demo_WriteMessage( &msg );
+
+		svs.demo.duration = svs.gametime - svs.demo.basetime;
+		svs.demo.client.lastframe = sv.framenum; // FIXME: is this needed?
 	}
-
-	MSG_Init( &msg, msg_buffer, sizeof( msg_buffer ) );
-
-	SV_BuildClientFrameSnap( &svs.demo.client, 0 );
-
-	SV_WriteFrameSnapToClient( &svs.demo.client, &msg );
-
-	SV_AddReliableCommandsToMessage( &svs.demo.client, &msg );
-
-	SV_Demo_WriteMessage( &msg );
-
-	svs.demo.duration = svs.gametime - svs.demo.basetime;
-	svs.demo.client.lastframe = sv.framenum; // FIXME: is this needed?
 }
 
-static void SV_Demo_InitClient( void ) {
+static void SV_Demo_InitClient() {
 	memset( &svs.demo.client, 0, sizeof( svs.demo.client ) );
 
-	svs.demo.client.mv = true;
+	svs.demo.client.mv       = true;
 	svs.demo.client.reliable = true;
 
 	svs.demo.client.reliableAcknowledge = 0;
-	svs.demo.client.reliableSequence = 0;
-	svs.demo.client.reliableSent = 0;
+	svs.demo.client.reliableSequence    = 0;
+	svs.demo.client.reliableSent        = 0;
+
 	for( auto &cmd: svs.demo.client.reliableCommands ) {
 		cmd.clear();
 	}
 
 	svs.demo.client.lastframe = sv.framenum - 1;
-	svs.demo.client.nodelta = false;
+	svs.demo.client.nodelta   = false;
 }
 
 void SV_Demo_Start_f( const CmdArgs &cmdArgs ) {
-	int demofilename_size, i;
-
 	if( Cmd_Argc() < 2 ) {
 		Com_Printf( "Usage: serverrecord <demoname>\n" );
 		return;
@@ -4906,68 +4722,67 @@ void SV_Demo_Start_f( const CmdArgs &cmdArgs ) {
 		return;
 	}
 
-	for( i = 0; i < sv_maxclients->integer; i++ ) {
-		if( svs.clients[i].state >= CS_SPAWNED && svs.clients[i].edict &&
-			!( svs.clients[i].edict->r.svflags & SVF_NOCLIENT ) ) {
+	bool hasActivePlayers = false;
+	IteratorOverClients iteratorOverClients( { .includeFakeClients = true } );
+	while( client_t *client = iteratorOverClients.getNext() ) {
+		// TODO: Should this condition be an iterator parameter?
+		if( !client->isAHiddenClient() ) {
+			hasActivePlayers = true;
 			break;
 		}
 	}
-	if( i == sv_maxclients->integer ) {
+	if( !hasActivePlayers ) {
 		Com_Printf( "No players in game, can't record a demo\n" );
-		return;
+	} else {
+		//
+		// open the demo file
+		//
+
+		// real name
+		size_t demofilename_size = sizeof( char ) * ( strlen( SV_DEMO_DIR ) + 1 + strlen( Cmd_Args() ) + strlen( APP_DEMO_EXTENSION_STR ) + 1 );
+		svs.demo.filename = (char *)Q_malloc( demofilename_size );
+
+		Q_snprintfz( svs.demo.filename, demofilename_size, "%s/%s", SV_DEMO_DIR, Cmd_Args() );
+
+		COM_SanitizeFilePath( svs.demo.filename );
+
+		if( !COM_ValidateRelativeFilename( svs.demo.filename ) ) {
+			Q_free( svs.demo.filename );
+			svs.demo.filename = nullptr;
+			Com_Printf( "Invalid filename.\n" );
+		} else {
+			COM_DefaultExtension( svs.demo.filename, APP_DEMO_EXTENSION_STR, demofilename_size );
+
+			// temp name
+			demofilename_size = sizeof( char ) * ( strlen( svs.demo.filename ) + strlen( ".rec" ) + 1 );
+			svs.demo.tempname = (char *)Q_malloc( demofilename_size );
+			Q_snprintfz( svs.demo.tempname, demofilename_size, "%s.rec", svs.demo.filename );
+
+			// open it
+			if( FS_FOpenFile( svs.demo.tempname, &svs.demo.file, FS_WRITE | SNAP_DEMO_GZ ) == -1 ) {
+				Com_Printf( "Error: Couldn't open file: %s\n", svs.demo.tempname );
+				Q_free( svs.demo.filename );
+				svs.demo.filename = nullptr;
+				Q_free( svs.demo.tempname );
+				svs.demo.tempname = nullptr;
+			} else {
+				Com_Printf( "Recording server demo: %s\n", svs.demo.filename );
+
+				SV_Demo_InitClient();
+
+				// write serverdata, configstrings and baselines
+				svs.demo.duration = 0;
+				svs.demo.basetime = svs.gametime;
+				svs.demo.localtime = time( nullptr );
+				SV_Demo_WriteStartMessages();
+
+				// write one nodelta frame
+				svs.demo.client.nodelta = true;
+				SV_Demo_WriteSnap();
+				svs.demo.client.nodelta = false;
+			}
+		}
 	}
-
-	//
-	// open the demo file
-	//
-
-	// real name
-	demofilename_size =
-		sizeof( char ) * ( strlen( SV_DEMO_DIR ) + 1 + strlen( Cmd_Args() ) + strlen( APP_DEMO_EXTENSION_STR ) + 1 );
-	svs.demo.filename = (char *)Q_malloc( demofilename_size );
-
-	Q_snprintfz( svs.demo.filename, demofilename_size, "%s/%s", SV_DEMO_DIR, Cmd_Args() );
-
-	COM_SanitizeFilePath( svs.demo.filename );
-
-	if( !COM_ValidateRelativeFilename( svs.demo.filename ) ) {
-		Q_free( svs.demo.filename );
-		svs.demo.filename = NULL;
-		Com_Printf( "Invalid filename.\n" );
-		return;
-	}
-
-	COM_DefaultExtension( svs.demo.filename, APP_DEMO_EXTENSION_STR, demofilename_size );
-
-	// temp name
-	demofilename_size = sizeof( char ) * ( strlen( svs.demo.filename ) + strlen( ".rec" ) + 1 );
-	svs.demo.tempname = (char *)Q_malloc( demofilename_size );
-	Q_snprintfz( svs.demo.tempname, demofilename_size, "%s.rec", svs.demo.filename );
-
-	// open it
-	if( FS_FOpenFile( svs.demo.tempname, &svs.demo.file, FS_WRITE | SNAP_DEMO_GZ ) == -1 ) {
-		Com_Printf( "Error: Couldn't open file: %s\n", svs.demo.tempname );
-		Q_free( svs.demo.filename );
-		svs.demo.filename = NULL;
-		Q_free( svs.demo.tempname );
-		svs.demo.tempname = NULL;
-		return;
-	}
-
-	Com_Printf( "Recording server demo: %s\n", svs.demo.filename );
-
-	SV_Demo_InitClient();
-
-	// write serverdata, configstrings and baselines
-	svs.demo.duration = 0;
-	svs.demo.basetime = svs.gametime;
-	svs.demo.localtime = time( NULL );
-	SV_Demo_WriteStartMessages();
-
-	// write one nodelta frame
-	svs.demo.client.nodelta = true;
-	SV_Demo_WriteSnap();
-	svs.demo.client.nodelta = false;
 }
 
 static void SV_Demo_Stop( bool cancel, bool silent ) {
@@ -5026,9 +4841,9 @@ static void SV_Demo_Stop( bool cancel, bool silent ) {
 	SNAP_FreeClientFrames( &svs.demo.client );
 
 	Q_free( svs.demo.filename );
-	svs.demo.filename = NULL;
+	svs.demo.filename = nullptr;
 	Q_free( svs.demo.tempname );
-	svs.demo.tempname = NULL;
+	svs.demo.tempname = nullptr;
 }
 
 void SV_Demo_Stop_f( const CmdArgs &cmdArgs ) {
@@ -5039,199 +4854,157 @@ void SV_Demo_Cancel_f( const CmdArgs &cmdArgs ) {
 	SV_Demo_Stop( true, atoi( Cmd_Argv( 1 ) ) != 0 );
 }
 
-void SV_Demo_Purge_f( const CmdArgs &cmdArgs ) {
-	char *buffer;
-	char *p, *s, num[8];
-	char path[256];
-	size_t extlen, length, bufSize;
-	unsigned int i, numdemos, numautodemos, maxautodemos;
+[[nodiscard]]
+static bool isAutoRecordDemoName( const wsw::StringView &fileName, const wsw::StringView &extension ) {
+	assert( fileName.endsWith( extension ) );
+	constexpr wsw::StringView suffixTemplate( "_auto0000" );
+	if( fileName.size() < extension.size() + suffixTemplate.size() ) {
+		return false;
+	}
+	if( const auto maybeAutoSuffix = fileName.dropRight( extension.size() ).takeRightExact( suffixTemplate.size() ) ) {
+		constexpr wsw::StringView autoPrefix( "_auto"_asView );
+		if( maybeAutoSuffix->startsWith( autoPrefix ) ) {
+			const wsw::StringView numSuffix = maybeAutoSuffix->drop( autoPrefix.size() );
+			if( const std::optional<unsigned> maybeNum = wsw::toNum<unsigned>( numSuffix ) ) {
+				if( *maybeNum >= 0 && *maybeNum < 9999 ) {
+					// TODO: Is this check really needed?
+					if( wsw::StaticString<32> chars( "%04u", *maybeNum ); chars.asView() == numSuffix ) {
+						return true;
+					}
+				}
+			}
+		}
+	}
+	return false;
+}
 
+void SV_Demo_Purge_f( const CmdArgs &cmdArgs ) {
 	if( Cmd_Argc() > 2 ) {
 		Com_Printf( "Usage: serverrecordpurge [maxautodemos]\n" );
 		return;
 	}
 
-	maxautodemos = 0;
+	unsigned maxautodemos = 0;
 	if( Cmd_Argc() == 2 ) {
-		maxautodemos = atoi( Cmd_Argv( 1 ) );
+		maxautodemos = (unsigned)atoi( Cmd_Argv( 1 ) );
 	}
 
-	numdemos = FS_GetFileListExt( SV_DEMO_DIR, APP_DEMO_EXTENSION_STR, NULL, &bufSize, 0, 0 );
-	if( !numdemos ) {
-		return;
-	}
+	const wsw::StringView demoDir( SV_DEMO_DIR );
+	const wsw::StringView extension( APP_DEMO_EXTENSION_STR );
+	wsw::String path;
 
-	extlen = strlen( APP_DEMO_EXTENSION_STR );
-	buffer = (char *)Q_malloc( bufSize );
-	FS_GetFileList( SV_DEMO_DIR, APP_DEMO_EXTENSION_STR, buffer, bufSize, 0, 0 );
-
-	numautodemos = 0;
-	s = buffer;
-	for( i = 0; i < numdemos; i++, s += length + 1 ) {
-		length = strlen( s );
-		if( length < strlen( "_auto9999" ) + extlen ) {
-			continue;
+	wsw::fs::SearchResultHolder searchResultHolder;
+	if( const auto maybeSearchResult = searchResultHolder.findDirFiles( demoDir, extension ) ) {
+		unsigned numAutoDemos = 0;
+		for( const wsw::StringView &fileName: *maybeSearchResult ) {
+			if( isAutoRecordDemoName( fileName, extension ) ) {
+				numAutoDemos++;
+			}
 		}
-
-		p = s + length - strlen( "_auto9999" ) - extlen;
-		if( strncmp( p, "_auto", strlen( "_auto" ) ) ) {
-			continue;
-		}
-
-		p += strlen( "_auto" );
-		Q_snprintfz( num, sizeof( num ), "%04i", atoi( p ) );
-		if( strncmp( p, num, 4 ) ) {
-			continue;
-		}
-
-		numautodemos++;
-	}
-
-	if( numautodemos <= maxautodemos ) {
-		Q_free( buffer );
-		return;
-	}
-
-	s = buffer;
-	for( i = 0; i < numdemos; i++, s += length + 1 ) {
-		length = strlen( s );
-		if( length < strlen( "_auto9999" ) + extlen ) {
-			continue;
-		}
-
-		p = s + length - strlen( "_auto9999" ) - extlen;
-		if( strncmp( p, "_auto", strlen( "_auto" ) ) ) {
-			continue;
-		}
-
-		p += strlen( "_auto" );
-		Q_snprintfz( num, sizeof( num ), "%04i", atoi( p ) );
-		if( strncmp( p, num, 4 ) ) {
-			continue;
-		}
-
-		Q_snprintfz( path, sizeof( path ), "%s/%s", SV_DEMO_DIR, s );
-		Com_Printf( "Removing old autorecord demo: %s\n", path );
-		if( !FS_RemoveFile( path ) ) {
-			Com_Printf( "Error, couldn't remove file: %s\n", path );
-			continue;
-		}
-
-		if( --numautodemos == maxautodemos ) {
-			break;
+		if( numAutoDemos > maxautodemos ) {
+			// TODO: In the current state we don't guarantee stability of results, so we have to redo the checks
+			for( const wsw::StringView &fileName: *maybeSearchResult ) {
+				if( isAutoRecordDemoName( fileName, extension ) ) {
+					path.clear();
+					path.append( demoDir.data(), demoDir.size() );
+					path.push_back( '/' );
+					path.append( fileName.data(), fileName.size() );
+					svNotice() << "Removing old autorecord demo:" << path;
+					if( !FS_RemoveFile( path.data() ) ) {
+						svNotice() << "Couldn't remove file\n" << path;
+					} else {
+						numAutoDemos--;
+						if( !numAutoDemos ) {
+							break;
+						}
+					}
+				}
+			}
 		}
 	}
-
-	Q_free( buffer );
 }
 
 #define DEMOS_PER_VIEW  30
 
 void HandleClientCommand_Demolist( client_t *client, const CmdArgs &cmdArgs ) {
-	char message[MAX_STRING_CHARS];
-	char numpr[16];
-	char buffer[MAX_STRING_CHARS];
-	char *s, *p;
-	size_t j, length, length_escaped, pos, extlen;
-	int numdemos, i, start = -1, end, k;
-
 	if( client->state < CS_SPAWNED ) {
 		return;
 	}
 
 	if( Cmd_Argc() > 2 ) {
-		SV_AddGameCommand( client, "pr \"Usage: demolist [starting position]\n\"" );
+		SV_AddGameCommand( client, "pr \"Usage: demolist [from-position]\n\"" );
 		return;
 	}
 
+	int from = -1;
 	if( Cmd_Argc() == 2 ) {
-		start = atoi( Cmd_Argv( 1 ) ) - 1;
-		if( start < 0 ) {
-			SV_AddGameCommand( client, "pr \"Usage: demolist [starting position]\n\"" );
+		from = atoi(Cmd_Argv( 1 ) ) - 1;
+		if( from < 0 ) {
+			SV_AddGameCommand( client, "pr \"Usage: demolist [from-position]\n\"" );
 			return;
 		}
 	}
 
-	Q_strncpyz( message, "pr \"Available demos:\n----------------\n", sizeof( message ) );
+	wsw::String message;
+	message.append( "pr \"Available demos:\n----------------\n" );
 
-	numdemos = FS_GetFileList( SV_DEMO_DIR, APP_DEMO_EXTENSION_STR, NULL, 0, 0, 0 );
-	if( numdemos ) {
-		if( start < 0 ) {
-			start = wsw::max( 0, numdemos - DEMOS_PER_VIEW );
-		} else if( start > numdemos - 1 ) {
-			start = numdemos - 1;
-		}
+	const wsw::StringView demoDir( SV_DEMO_DIR );
+	const wsw::StringView extension( APP_DEMO_EXTENSION_STR );
 
-		if( start > 0 ) {
-			Q_strncatz( message, "...\n", sizeof( message ) );
-		}
-
-		end = start + DEMOS_PER_VIEW;
-		if( end > numdemos ) {
-			end = numdemos;
-		}
-
-		extlen = strlen( APP_DEMO_EXTENSION_STR );
-
-		i = start;
-		do {
-			if( ( k = FS_GetFileList( SV_DEMO_DIR, APP_DEMO_EXTENSION_STR, buffer, sizeof( buffer ), i, end ) ) == 0 ) {
-				i++;
-				continue;
+	wsw::fs::SearchResultHolder searchResultHolder;
+	if( const auto maybeSearchResult = searchResultHolder.findDirFiles( demoDir, extension ) ) {
+		// Could be zero for a successful call as well (a success means there were no FS error)
+		if( const auto numDemos = (int)maybeSearchResult->getNumFiles() ) {
+			if( from < 0 ) {
+				from = wsw::max( 0, numDemos - DEMOS_PER_VIEW );
+			} else if( from > numDemos - 1 ) {
+				from = numDemos - 1;
 			}
 
-			for( s = buffer; k > 0; k--, s += length + 1, i++ ) {
-				length = strlen( s );
-
-				length_escaped = length;
-				p = s;
-				while( ( p = strchr( p, '\\' ) ) )
-					length_escaped++;
-
-				Q_snprintfz( numpr, sizeof( numpr ), "%i: ", i + 1 );
-				if( strlen( message ) + strlen( numpr ) + length_escaped - extlen + 1 + 5 >= sizeof( message ) ) {
-					Q_strncatz( message, "\"", sizeof( message ) );
-					SV_AddGameCommand( client, message );
-
-					Q_strncpyz( message, "pr \"", sizeof( message ) );
-					if( strlen( "demoget " ) + strlen( numpr ) + length_escaped - extlen + 1 + 5 >= sizeof( message ) ) {
-						continue;
+			int skippedCount = 0;
+			int writtenCount = 0;
+			for( const wsw::StringView fileName: *maybeSearchResult ) {
+				// TODO: Can something better be used?
+				if( skippedCount < from ) {
+					skippedCount++;
+				} else if( writtenCount == DEMOS_PER_VIEW ) {
+					message.append( "...\n" );
+					break;
+				} else {
+					// Should not happen?
+					assert( !fileName.contains( '"' ) );
+					// TODO: Don't append extension
+					if( fileName.length() < MAX_STRING_CHARS ) {
+						if( fileName.length() + message.length() >= MAX_STRING_CHARS ) {
+							message.push_back( '"' );
+							SV_AddGameCommand( client, message.data() );
+							message.append( "pr \"" );
+						}
+						const wsw::StringView withoutExtension = fileName.dropRight( extension.length() );
+						message.append( std::to_string( from + writtenCount + 1 ) );
+						message.append( ": " );
+						message.append( withoutExtension.data(), withoutExtension.length() );
+						message.push_back( '\n' );
+						writtenCount++;
+					} else {
+						svWarning() << "The name of demo" << fileName << "is too long";
 					}
 				}
-
-				Q_strncatz( message, numpr, sizeof( message ) );
-				pos = strlen( message );
-				for( j = 0; j < length - extlen; j++ ) {
-					assert( s[j] != '\\' );
-					if( s[j] == '"' ) {
-						message[pos++] = '\\';
-					}
-					message[pos++] = s[j];
-				}
-				message[pos++] = '\n';
-				message[pos] = '\0';
 			}
-		} while( i < end );
-
-		if( end < numdemos ) {
-			Q_strncatz( message, "...\n", sizeof( message ) );
+		} else {
+			message.append( "None\n" );
 		}
 	} else {
-		Q_strncatz( message, "none\n", sizeof( message ) );
+		message.append( "Server demo retrieval error\n" );
 	}
 
-	Q_strncatz( message, "\"", sizeof( message ) );
-
-	SV_AddGameCommand( client, message );
+	if( !message.empty() ) {
+		message.push_back( '"' );
+		SV_AddGameCommand( client, message.data() );
+	}
 }
 
 void HandleClientCommand_Demoget( client_t *client, const CmdArgs &cmdArgs ) {
-	int num, numdemos;
-	char message[MAX_STRING_CHARS];
-	char buffer[MAX_STRING_CHARS];
-	char *s, *p;
-	size_t j, length, length_escaped, pos, pos_bak, msglen;
-
 	if( client->state < CS_SPAWNED ) {
 		return;
 	}
@@ -5239,62 +5012,49 @@ void HandleClientCommand_Demoget( client_t *client, const CmdArgs &cmdArgs ) {
 		return;
 	}
 
-	Q_strncpyz( message, "demoget \"", sizeof( message ) );
-	Q_strncatz( message, SV_DEMO_DIR, sizeof( message ) );
-	msglen = strlen( message );
-	message[msglen++] = '/';
+	const wsw::StringView demoDir( SV_DEMO_DIR );
+	const wsw::StringView extension( APP_DEMO_EXTENSION_STR );
 
-	pos = pos_bak = msglen;
+	wsw::String message;
+	message.append( "demoget \"");
+	message.append( demoDir.data(), demoDir.size() );
+	message.push_back( '/' );
 
-	numdemos = FS_GetFileList( SV_DEMO_DIR, APP_DEMO_EXTENSION_STR, NULL, 0, 0, 0 );
-	if( numdemos ) {
-		if( Cmd_Argv( 1 )[0] == '.' ) {
-			num = numdemos - strlen( Cmd_Argv( 1 ) );
-		} else {
-			num = atoi( Cmd_Argv( 1 ) ) - 1;
-		}
-		Q_clamp( num, 0, numdemos - 1 );
+	bool found = false;
 
-		numdemos = FS_GetFileList( SV_DEMO_DIR, APP_DEMO_EXTENSION_STR, buffer, sizeof( buffer ), num, num + 1 );
-		if( numdemos ) {
-			s = buffer;
-			length = strlen( buffer );
+	wsw::fs::SearchResultHolder searchResultHolder;
+	if( const auto maybeSearchResult = searchResultHolder.findDirFiles( demoDir, extension ) ) {
+		if( const auto numDemos = (int)maybeSearchResult->getNumFiles() ) {
+			const int num = wsw::clamp<int>( atoi( Cmd_Argv( 1 ) ) - 1, 0, numDemos - 1 );
 
-			length_escaped = length;
-			p = s;
-			while( ( p = strchr( p, '\\' ) ) )
-				length_escaped++;
-
-			if( msglen + length_escaped + 1 + 5 < sizeof( message ) ) {
-				for( j = 0; j < length; j++ ) {
-					assert( s[j] != '\\' );
-					if( s[j] == '"' ) {
-						message[pos++] = '\\';
-					}
-					message[pos++] = s[j];
+			int skippedCount = 0;
+			// TODO: Can we do something better
+			for( const wsw::StringView &fileName: *maybeSearchResult ) {
+				if( skippedCount < num ) {
+					skippedCount++;
+				} else {
+					message.append( fileName.data(), fileName.size() );
+					found = true;
+					break;
 				}
 			}
 		}
 	}
 
-	if( pos == pos_bak ) {
-		return;
+	if( found ) {
+		message.push_back( '"' );
+		SV_AddGameCommand( client, message.data() );
 	}
-
-	message[pos++] = '"';
-	message[pos] = '\0';
-
-	SV_AddGameCommand( client, message );
 }
 
 bool SV_IsDemoDownloadRequest( const char *request ) {
-	const char *ext;
-	const char *demoDir = SV_DEMO_DIR;
-	const size_t demoDirLen = strlen( demoDir );
-
 	if( !request ) {
 		return false;
 	}
+
+	const char *demoDir     = SV_DEMO_DIR;
+	const size_t demoDirLen = strlen( demoDir );
+
 	if( strlen( request ) <= demoDirLen + 1 + strlen( APP_DEMO_EXTENSION_STR ) ) {
 		// should at least contain demo dir name and demo file extension
 		return false;
@@ -5305,7 +5065,7 @@ bool SV_IsDemoDownloadRequest( const char *request ) {
 		return false;
 	}
 
-	ext = COM_FileExtension( request );
+	const char *ext = COM_FileExtension( request );
 	if( !ext || Q_stricmp( ext, APP_DEMO_EXTENSION_STR ) ) {
 		// wrong extension
 		return false;
@@ -5356,15 +5116,12 @@ static client_t *SV_FindPlayer( const char *s ) {
 * gamemap: just start the map
 */
 static void SV_Map_f( const CmdArgs &cmdArgs ) {
-	const char *map;
-	char mapname[MAX_QPATH];
-	bool found = false;
-
 	if( Cmd_Argc() < 2 ) {
 		Com_Printf( "Usage: %s <map>\n", Cmd_Argv( 0 ) );
 		return;
 	}
 
+	const char *map;
 	// if map "<map>" is used Cmd_Args() will return the "" as well.
 	if( Cmd_Argc() == 2 ) {
 		map = Cmd_Argv( 1 );
@@ -5380,6 +5137,8 @@ static void SV_Map_f( const CmdArgs &cmdArgs ) {
 		return;
 	}
 
+	bool found = false;
+	char mapname[MAX_QPATH];
 	Q_strncpyz( mapname, map, sizeof( mapname ) );
 	if( ML_ValidateFilename( mapname ) ) {
 		COM_StripExtension( mapname );
@@ -5400,90 +5159,26 @@ static void SV_Map_f( const CmdArgs &cmdArgs ) {
 				found = true;
 			}
 		}
-
-		if( !found ) {
-			Com_Printf( "Couldn't find map: %s\n", map );
-			return;
-		}
 	}
 
-	if( FS_GetNotifications() & FS_NOTIFY_NEWPAKS ) {
-		FS_RemoveNotifications( FS_NOTIFY_NEWPAKS );
-		sv.state = ss_dead; // don't save current level when changing
-	} else if( !Q_stricmp( Cmd_Argv( 0 ), "map" ) || !Q_stricmp( Cmd_Argv( 0 ), "devmap" ) ) {
-		sv.state = ss_dead; // don't save current level when changing
+	if( !found ) {
+		Com_Printf( "Couldn't find map: %s\n", map );
+	} else {
+		if( FS_GetNotifications() & FS_NOTIFY_NEWPAKS ) {
+			FS_RemoveNotifications( FS_NOTIFY_NEWPAKS );
+			sv.state = ss_dead; // don't save current level when changing
+		} else if( !Q_stricmp( Cmd_Argv( 0 ), "map" ) || !Q_stricmp( Cmd_Argv( 0 ), "devmap" ) ) {
+			sv.state = ss_dead; // don't save current level when changing
+		}
+
+		SV_UpdateInfoServers();
+
+		// start up the next map
+		SV_Map( mapname, !Q_stricmp( Cmd_Argv( 0 ), "devmap" ) );
+
+		// archive server state
+		Q_strncpyz( svs.mapcmd, mapname, sizeof( svs.mapcmd ) );
 	}
-
-	SV_UpdateInfoServers();
-
-	// start up the next map
-	SV_Map( mapname, !Q_stricmp( Cmd_Argv( 0 ), "devmap" ) );
-
-	// archive server state
-	Q_strncpyz( svs.mapcmd, mapname, sizeof( svs.mapcmd ) );
-}
-
-void SV_Status_f( const CmdArgs & ) {
-	int i, j, l;
-	client_t *cl;
-	const char *s;
-	int ping;
-	if( !svs.clients ) {
-		Com_Printf( "No server running.\n" );
-		return;
-	}
-	Com_Printf( "map              : %s\n", sv.mapname );
-
-	Com_Printf( "num score ping name            lastmsg address               port   rate  \n" );
-	Com_Printf( "--- ----- ---- --------------- ------- --------------------- ------ ------\n" );
-	for( i = 0, cl = svs.clients; i < sv_maxclients->integer; i++, cl++ ) {
-		if( !cl->state ) {
-			continue;
-		}
-		Com_Printf( "%3i ", i );
-		Com_Printf( "%5i ", cl->edict->r.client->m_frags );
-
-		if( cl->state == CS_CONNECTED ) {
-			Com_Printf( "CNCT " );
-		} else if( cl->state == CS_ZOMBIE ) {
-			Com_Printf( "ZMBI " );
-		} else if( cl->state == CS_CONNECTING ) {
-			Com_Printf( "AWAI " );
-		} else {
-			ping = cl->ping < 9999 ? cl->ping : 9999;
-			Com_Printf( "%4i ", ping );
-		}
-
-		s = COM_RemoveColorTokens( cl->name );
-		Com_Printf( "%s", s );
-		l = 16 - (int)strlen( s );
-		for( j = 0; j < l; j++ )
-			Com_Printf( " " );
-
-		Com_Printf( "%7i ", (int)(svs.realtime - cl->lastPacketReceivedTime) );
-
-		s = NET_AddressToString( &cl->netchan.remoteAddress );
-		Com_Printf( "%s", s );
-		l = 21 - (int)strlen( s );
-		for( j = 0; j < l; j++ )
-			Com_Printf( " " );
-		Com_Printf( " " ); // always add at least one space between the columns because IPv6 addresses are long
-
-		Com_Printf( "%5i", cl->netchan.game_port );
-		// wsw : jal : print real rate in use
-		Com_Printf( "  " );
-		if( cl->edict && ( cl->edict->r.svflags & SVF_FAKECLIENT ) ) {
-			Com_Printf( "BOT" );
-		} else {
-			Com_Printf( "%5i", 99999 );
-		}
-		Com_Printf( " " );
-		if( cl->mv ) {
-			Com_Printf( "MV" );
-		}
-		Com_Printf( "\n" );
-	}
-	Com_Printf( "\n" );
 }
 
 static void SV_Heartbeat_f( const CmdArgs & ) {
@@ -5496,34 +5191,24 @@ static void SV_Serverinfo_f( const CmdArgs & ) {
 }
 
 static void SV_DumpUser_f( const CmdArgs &cmdArgs ) {
-	client_t *client;
 	if( Cmd_Argc() != 2 ) {
 		Com_Printf( "Usage: info <userid>\n" );
-		return;
+	} else {
+		if( client_t *client = SV_FindPlayer( Cmd_Argv( 1 ) ) ) {
+			Com_Printf( "userinfo\n" );
+			Com_Printf( "--------\n" );
+			Info_Print( client->userinfo );
+		}
 	}
-
-	client = SV_FindPlayer( Cmd_Argv( 1 ) );
-	if( !client ) {
-		return;
-	}
-
-	Com_Printf( "userinfo\n" );
-	Com_Printf( "--------\n" );
-	Info_Print( client->userinfo );
 }
 
 static void SV_KillServer_f( const CmdArgs & ) {
-	if( !svs.initialized ) {
-		return;
+	if( svs.initialized ) {
+		SV_ShutdownGame( "Server was killed", false );
 	}
-
-	SV_ShutdownGame( "Server was killed", false );
 }
 
 static void SV_CvarCheck_f( const CmdArgs &cmdArgs ) {
-	client_t *client;
-	int i;
-
 	if( !svs.initialized ) {
 		return;
 	}
@@ -5534,29 +5219,21 @@ static void SV_CvarCheck_f( const CmdArgs &cmdArgs ) {
 	}
 
 	if( !Q_stricmp( Cmd_Argv( 1 ), "all" ) ) {
-		for( i = 0, client = svs.clients; i < sv_maxclients->integer; i++, client++ ) {
-			if( !client->state ) {
-				continue;
-			}
-
+		IteratorOverClients iteratorOverClients( { .includeFakeClients = false } );
+		while( client_t *const client = iteratorOverClients.getNext() ) {
 			SV_SendServerCommand( client, "cvarinfo \"%s\"", Cmd_Argv( 2 ) );
 		}
-
-		return;
+	} else {
+		if( client_t *const client = SV_FindPlayer( Cmd_Argv( 1 ) ) ) {
+			SV_SendServerCommand( client, "cvarinfo \"%s\"", Cmd_Argv( 2 ) );
+		} else {
+			Com_Printf( "%s is not valid client id\n", Cmd_Argv( 1 ) );
+		}
 	}
-
-	client = SV_FindPlayer( Cmd_Argv( 1 ) );
-	if( !client ) {
-		Com_Printf( "%s is not valid client id\n", Cmd_Argv( 1 ) );
-		return;
-	}
-
-	SV_SendServerCommand( client, "cvarinfo \"%s\"", Cmd_Argv( 2 ) );
 }
 
-void SV_InitOperatorCommands( void ) {
+void SV_InitOperatorCommands() {
 	SV_Cmd_Register( "heartbeat"_asView, SV_Heartbeat_f );
-	SV_Cmd_Register( "status"_asView, SV_Status_f );
 	SV_Cmd_Register( "serverinfo"_asView, SV_Serverinfo_f );
 	SV_Cmd_Register( "dumpuser"_asView, SV_DumpUser_f );
 
@@ -5575,9 +5252,8 @@ void SV_InitOperatorCommands( void ) {
 	SV_Cmd_Register( "cvarcheck"_asView, SV_CvarCheck_f );
 }
 
-void SV_ShutdownOperatorCommands( void ) {
+void SV_ShutdownOperatorCommands() {
 	SV_Cmd_Unregister( "heartbeat"_asView );
-	SV_Cmd_Unregister( "status"_asView );
 	SV_Cmd_Unregister( "serverinfo"_asView );
 	SV_Cmd_Unregister( "dumpuser"_asView );
 
@@ -5619,46 +5295,42 @@ void SV_MOTD_SetMOTD( const char *motd ) {
 	}
 }
 
-void SV_MOTD_LoadFromFile( void ) {
-	char *f;
+void SV_MOTD_LoadFromFile() {
+	char *f = nullptr;
 
-	FS_LoadFile( sv_MOTDFile->string, (void **)&f, NULL, 0 );
+	FS_LoadFile( sv_MOTDFile->string, (void **)&f, nullptr, 0 );
 	if( !f ) {
 		Com_Printf( "Couldn't load MOTD file: %s\n", sv_MOTDFile->string );
 		Cvar_ForceSet( "sv_MOTDFile", "" );
 		SV_MOTD_SetMOTD( "" );
-		return;
-	}
-
-	if( strchr( f, '"' ) ) { // FIXME: others?
-		Com_Printf( "Warning: MOTD file contains illegal characters.\n" );
-		Cvar_ForceSet( "sv_MOTDFile", "" );
-		SV_MOTD_SetMOTD( "" );
 	} else {
-		SV_MOTD_SetMOTD( f );
-	}
+		if( strchr( f, '"' ) ) { // FIXME: others?
+			Com_Printf( "Warning: MOTD file contains illegal characters.\n" );
+			Cvar_ForceSet( "sv_MOTDFile", "" );
+			SV_MOTD_SetMOTD( "" );
+		} else {
+			SV_MOTD_SetMOTD( f );
+		}
 
-	FS_FreeFile( f );
+		FS_FreeFile( f );
+	}
 }
 
-void SV_MOTD_Update( void ) {
-	if( !sv_MOTD->integer ) {
-		return;
-	}
-
-	if( sv_MOTDString->string[0] ) {
-		SV_MOTD_SetMOTD( sv_MOTDString->string );
-	} else if( sv_MOTDFile->string[0] ) {
-		SV_MOTD_LoadFromFile();
-	} else {
-		SV_MOTD_SetMOTD( "" );
+void SV_MOTD_Update() {
+	if( sv_MOTD->integer ) {
+		if( sv_MOTDString->string[0] ) {
+			SV_MOTD_SetMOTD( sv_MOTDString->string );
+		} else if( sv_MOTDFile->string[0] ) {
+			SV_MOTD_LoadFromFile();
+		} else {
+			SV_MOTD_SetMOTD( "" );
+		}
 	}
 }
 
 void HandleClientCommand_Motd( client_t *client, const CmdArgs &cmdArgs ) {
-	int flag = ( Cmd_Argc() > 1 ? 1 : 0 );
-
 	if( sv_MOTD->integer && svs.motd && svs.motd[0] ) {
+		const int flag = ( Cmd_Argc() > 1 ? 1 : 0 );
 		SV_AddGameCommand( client, va( "motd %d \"%s\n\"", flag, svs.motd ) );
 	}
 }

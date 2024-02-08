@@ -1,5 +1,6 @@
 /*
 Copyright (C) 1997-2001 Id Software, Inc.
+Copyright (c) ZeniMax Media Inc.
 
 This program is free software; you can redistribute it and/or
 modify it under the terms of the GNU General Public License
@@ -569,6 +570,30 @@ void SnapPlane( vec3_t normal, vec_t *dist ) {
 	if( fabs( *dist - Q_rint( *dist ) ) < PLANE_DIST_EPSILON ) {
 		*dist = Q_rint( *dist );
 	}
+}
+
+// Copied from Q2 re-release code
+void VectorSlerp( const float *a, float t, const float *b, float *d ) {
+	assert( std::fabs( VectorLengthFast( a ) - 1.0f < 1e-3f ) );
+	assert( std::fabs( VectorLengthFast( b ) - 1.0f < 1e-3f ) );
+	const float dot = DotProduct( a, b );
+
+	float aFactor, bFactor;
+	if( std::fabs( dot ) <= 0.9995f ) [[likely]] {
+		const float ang       = std::acos( dot );
+		const float sinOmega  = std::sin( ang );
+		const float sinAOmega = std::sin( ( 1.0f - t ) * ang );
+		const float sinBOmega = std::sin( t * ang );
+		aFactor               = sinAOmega / sinOmega;
+		bFactor               = sinBOmega / sinOmega;
+	} else {
+		aFactor = 1.0f - t;
+		bFactor = t;
+	}
+
+	d[0] = aFactor * a[0] + bFactor * b[0];
+	d[1] = aFactor * a[1] + bFactor * b[1];
+	d[2] = aFactor * a[2] + bFactor * b[2];
 }
 
 template <unsigned N>

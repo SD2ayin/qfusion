@@ -140,6 +140,11 @@ void Frontend::set2DMode( bool enable ) {
 	}
 }
 
+void Frontend::set2DScissor( int x, int y, int w, int h ) {
+	assert( rf.in2D );
+	RB_Scissor( x, y, w, h );
+}
+
 static const drawSurf_cb r_drawSurfCb[ST_MAX_TYPES] =
 	{
 		/* ST_NONE */

@@ -14,19 +14,11 @@ class WswImageResponse : public QQuickImageResponse {
 	Q_OBJECT
 
 	friend class WswImageProvider;
-
-	const QByteArray m_name;
-	const QSize m_requestedSize;
-
-	QImage m_image;
-
-	[[nodiscard]]
-	bool loadSvg( const QByteArray &fileData );
-	[[nodiscard]]
-	bool loadOther( const QByteArray &fileData, const char *ext );
 public:
-	WswImageResponse( const QString &name, const QSize &requestedSize )
-		: m_name( name.toUtf8() ), m_requestedSize( requestedSize ) {}
+	enum Options { NoOptions = 0x0, Grayscale = 0x1 };
+
+	WswImageResponse( const QString &name, const QSize &requestedSize, Options options = NoOptions )
+		: m_name( name.toUtf8() ), m_requestedSize( requestedSize ), m_options( options ) {}
 
 	Q_SIGNAL void ready();
 
@@ -34,6 +26,20 @@ public:
 
 	[[nodiscard]]
 	auto textureFactory() const -> QQuickTextureFactory * override;
+
+private:
+	const QByteArray m_name;
+	const QSize m_requestedSize;
+
+	QImage m_image;
+	const Options m_options;
+
+	[[nodiscard]]
+	auto loadSvg( const QByteArray &fileData ) -> QImage;
+	[[nodiscard]]
+	auto loadOther( const QByteArray &fileData, const wsw::StringView &ext ) -> QImage;
+	[[nodiscard]]
+	auto convertToGrayscale( QImage &&image ) -> QImage;
 };
 
 class WswImageProvider : public QQuickAsyncImageProvider {

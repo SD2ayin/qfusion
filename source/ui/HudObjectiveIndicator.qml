@@ -10,6 +10,8 @@ Item {
     visible: indicatorState.enabled
     implicitWidth: collapsedHeight + extraExclusiveModeWidth
     implicitHeight: collapsedHeight + barHeight + 1.5 * barMargin
+    
+    property var commonDataModel
 
     readonly property real extraExclusiveModeWidth: useExclusiveMode ?
         Math.max((indicatorState.iconNum ? 144 : 144 - 32), 16 + textMetrics.width) : 0
@@ -30,9 +32,9 @@ Item {
     property bool useExclusiveMode
     // The indicatorState.stringNum property does not singal updates!
     // TODO: Expose indicator states as QAbstractItemModel?
-    property bool canUseExclusiveMode: indicatorState && Hud.dataModel.getIndicatorStatusString(indicatorState.stringNum) != ""
+    property bool canUseExclusiveMode: indicatorState && root.commonDataModel.getIndicatorStatusString(indicatorState.stringNum) != ""
     onIndicatorStateChanged: {
-        canUseExclusiveMode = indicatorState && Hud.dataModel.getIndicatorStatusString(indicatorState.stringNum) != ""
+        canUseExclusiveMode = indicatorState && root.commonDataModel.getIndicatorStatusString(indicatorState.stringNum) != ""
     }
 
     TextMetrics {
@@ -114,12 +116,12 @@ Item {
             Layout.alignment: Qt.AlignVCenter
             smooth: true
             mipmap: true
-            source: Hud.dataModel.getIndicatorIconPath(indicatorState.iconNum)
+            source: root.commonDataModel.getIndicatorIconPath(indicatorState.iconNum)
         }
 
         Label {
             id: statusStringLabel
-            text: Hud.dataModel.getIndicatorStatusString(indicatorState.stringNum)
+            text: root.commonDataModel.getIndicatorStatusString(indicatorState.stringNum)
             visible: useExclusiveMode
             Layout.alignment: Qt.AlignVCenter
             font.weight: Font.Bold

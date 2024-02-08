@@ -8,6 +8,8 @@ FocusScope {
     implicitWidth: 300
     implicitHeight: Math.max(addButton.implicitHeight, textField.implicitHeight, clearButton.implicitHeight)
 
+    property int maxHudNameLength
+
     signal additionRequested(string text)
 
     function close() {
@@ -43,7 +45,7 @@ FocusScope {
         font.pointSize: 12
         font.letterSpacing: 1.25
         font.capitalization: Font.AllUppercase
-        maximumLength: UI.hudEditorModel.maxHudNameLength
+        maximumLength: root.maxHudNameLength
         validator: RegExpValidator { regExp: /[0-9a-zA-Z_]+/ }
         onEditingFinished: {
             if (text.length > 0) {

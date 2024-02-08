@@ -66,8 +66,8 @@ Item {
                             font.weight: Font.Bold
                             font.capitalization: Font.AllUppercase
                             font.letterSpacing: 1.25
-                            color: UI.hudDataModel.getWeaponColor(entry["weapon"])
-                            text: UI.hudDataModel.getWeaponShortName(entry["weapon"])
+                            color: UI.hudCommonDataModel.getWeaponColor(entry["weapon"])
+                            text: UI.hudCommonDataModel.getWeaponShortName(entry["weapon"])
                         }
                         Label {
                             id: valuesLabel

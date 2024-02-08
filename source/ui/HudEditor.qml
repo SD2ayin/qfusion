@@ -10,6 +10,8 @@ Item {
     id: root
     clip: false
 
+    property var hudEditorModel
+
     readonly property real fieldWidth: field.width
     readonly property real fieldHeight: field.height
 
@@ -50,13 +52,13 @@ Item {
             color: Qt.rgba(1.0, 1.0, 1.0, 0.03)
         }
         HudEditorAnchorsMarker {
-            displayedAnchors: UI.hudEditorModel.displayedFieldAnchors
+            displayedAnchors: hudEditorModel.displayedFieldAnchors
         }
     }
 
     Repeater {
         id: itemsRepeater
-        model: UI.hudEditorModel.getLayoutModel()
+        model: hudEditorModel.getLayoutModel()
 
         property int numInstantiatedItems: 0
         readonly property bool canArrangeItems: numInstantiatedItems === count
@@ -152,7 +154,15 @@ Item {
                 } else if (anchorItemIndex < 0) {
                     anchorItem = field
                 } else {
-                    anchorItem = toolboxRepeater.itemAt(kind - 1)
+                    // We can not longer just address by kind for mini models, also that was fragile
+                    for (let i = 0; i < toolboxRepeater.count; ++i) {
+                        let item = toolboxRepeater.itemAt(i)
+                        if (item.kind == kind) {
+                            anchorItem = item
+                            break
+                        }
+                    }
+                    console.assert(anchorItem)
                 }
                 return getQmlAnchorOfItem(selfAnchors, anchorItemAnchors, anchorBit, anchorItem)
             }
@@ -160,9 +170,9 @@ Item {
             function handleCoordChanges() {
                 if (itemsRepeater.canArrangeItems) {
                     if (mouseArea.drag.active) {
-                        UI.hudEditorModel.trackDragging(index, element.x, element.y)
+                        hudEditorModel.trackDragging(index, element.x, element.y)
                     } else {
-                        UI.hudEditorModel.updateElementPosition(index, element.x, element.y)
+                        hudEditorModel.updateElementPosition(index, element.x, element.y)
                     }
                 }
             }
@@ -179,12 +189,12 @@ Item {
                 hoverEnabled: false
                 drag.onActiveChanged: {
                     if (!drag.active) {
-                        UI.hudEditorModel.finishDragging(index)
+                        hudEditorModel.finishDragging(index)
                     }
                 }
                 onContainsMouseChanged: {
                     if (!containsMouse) {
-                        UI.hudEditorModel.clearDisplayedMarkers(index)
+                        hudEditorModel.clearDisplayedMarkers(index)
                     }
                 }
             }
@@ -214,11 +224,12 @@ Item {
     // Toolbox items must be siblings of hud items so they are instantiated within the same parent
     Repeater {
         id: toolboxRepeater
-        model: UI.hudEditorModel.getToolboxModel()
+        model: hudEditorModel.getToolboxModel()
         delegate: Item {
             id: toolboxItem
             width: model.size.width
             height: model.size.height
+            property int kind: model.kind
             Shape {
                 anchors.fill: parent
                 ShapePath {
@@ -259,7 +270,7 @@ Item {
                 toolboxNextX += toolboxItem.width + toolboxXSpacing
                 toolboxRowHeightSoFar = Math.max(toolboxItem.height, toolboxRowHeightSoFar)
                 toolboxMaxXSoFar = Math.max(toolboxNextX, toolboxMaxXSoFar)
-                UI.hudEditorModel.updatePlaceholderPosition(index, toolboxItem.x, toolboxItem.y)
+                hudEditorModel.updatePlaceholderPosition(index, toolboxItem.x, toolboxItem.y)
             }
         }
     }

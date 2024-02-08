@@ -17,13 +17,21 @@ class StringConfigVar;
 
 namespace wsw::ui {
 
-class HudDataModel;
+class HudCommonDataModel;
+class HudPovDataModel;
 
 class InventoryModel : public QAbstractListModel {
-	friend class HudDataModel;
+	friend class HudPovDataModel;
 
+	Q_OBJECT
+public:
+	InventoryModel();
+
+	Q_PROPERTY( int numInventoryItems MEMBER kNumInventoryItems CONSTANT );
+private:
 	enum Role {
-		HasWeapon = Qt::UserRole + 1,
+		Displayed = Qt::UserRole + 1,
+		HasWeapon,
 		Active,
 		IconPath,
 		Color,
@@ -33,20 +41,14 @@ class InventoryModel : public QAbstractListModel {
 
 	struct Entry {
 		int weaponNum, weakCount, strongCount;
-		bool hasWeapon;
+		bool displayed, hasWeapon, active;
 	};
 
-	wsw::StaticVector<Entry, 10> m_entries;
-	int m_activeWeaponNum { 0 };
+	static constexpr unsigned kNumInventoryItems { 10 };
+	wsw::StaticVector<Entry, kNumInventoryItems> m_entries;
+	QVector<int> m_changedRolesStorage;
 
-	void checkPropertyChanges();
-
-	static inline const QVector<int> kWeakAmmoRoleAsVector { WeakAmmoCount };
-	static inline const QVector<int> kStrongAmmoRoleAsVector { StrongAmmoCount };
-	static inline const QVector<int> kActiveAsRole { Active };
-	static inline const QVector<int> kAllMutableRolesAsVector { HasWeapon, Active, WeakAmmoCount, StrongAmmoCount };
-
-	void resetWithEntries( const wsw::StaticVector<Entry, 10> &entries );
+	void checkPropertyChanges( unsigned viewStateIndex );
 
 	[[nodiscard]]
 	auto roleNames() const -> QHash<int, QByteArray> override;
@@ -57,7 +59,7 @@ class InventoryModel : public QAbstractListModel {
 };
 
 class TeamListModel : public QAbstractListModel {
-	friend class HudDataModel;
+	friend class HudPovDataModel;
 
 	enum Role {
 		Health,
@@ -110,7 +112,7 @@ class TeamListModel : public QAbstractListModel {
 };
 
 class FragsFeedModel : public QAbstractListModel {
-	friend class HudDataModel;
+	friend class HudCommonDataModel;
 
 	enum Role { Victim = Qt::UserRole + 1, Attacker, IconPath };
 
@@ -121,9 +123,9 @@ class FragsFeedModel : public QAbstractListModel {
 		std::optional<int> victimTeamColor, attackerTeamColor;
 	};
 
-	HudDataModel *const m_hudDataModel;
+	HudCommonDataModel *const m_hudDataModel;
 
-	explicit FragsFeedModel( HudDataModel *hudDataModel ) : m_hudDataModel( hudDataModel ) {}
+	explicit FragsFeedModel( HudCommonDataModel *hudDataModel ) : m_hudDataModel( hudDataModel ) {}
 
 	// TODO: Use a circular buffer / StaticDeque (check whether it's really functional)?
 	wsw::StaticVector<Entry, 4> m_entries;
@@ -147,7 +149,7 @@ class FragsFeedModel : public QAbstractListModel {
 };
 
 class MessageFeedModel : public QAbstractListModel {
-	friend class HudDataModel;
+	friend class HudPovDataModel;
 
 	enum Role { Message = Qt::UserRole + 1 };
 
@@ -183,7 +185,7 @@ class MessageFeedModel : public QAbstractListModel {
 };
 
 class AwardsModel : public QAbstractListModel {
-	friend class HudDataModel;
+	friend class HudPovDataModel;
 
 	// TODO: Add icons?
 	enum Role { Message = Qt::UserRole + 1 };
@@ -239,11 +241,9 @@ public:
 	bool operator!=( const ObjectiveIndicatorState &that ) const { return m_underlying != that.m_underlying; }
 };
 
+// Just an namespace for the enum
 class HudDataModel : public QObject {
 	Q_OBJECT
-
-	friend class FragsFeedModel;
-
 public:
 	enum Team {
 		TeamSpectators = 1,
@@ -252,60 +252,85 @@ public:
 		TeamBeta,
 	};
 	Q_ENUM( Team );
+};
+
+class HudPovDataModel : public HudDataModel {
+	Q_OBJECT
+
+public:
+	Q_SIGNAL void activeWeaponIconChanged( const QByteArray &activeWeaponIcon );
+	Q_PROPERTY( QByteArray activeWeaponIcon READ getActiveWeaponIcon NOTIFY activeWeaponIconChanged );
+	Q_SIGNAL void activeWeaponNameChanged( const QByteArray &activeWeaponName );
+	Q_PROPERTY( QByteArray activeWeaponName READ getActiveWeaponName NOTIFY activeWeaponNameChanged );
+	Q_SIGNAL int activeWeaponWeakAmmoChanged( int activeWeaponWeaponAmmo );
+	Q_PROPERTY( int activeWeaponWeakAmmo MEMBER m_activeWeaponWeakAmmo NOTIFY activeWeaponWeakAmmoChanged );
+	Q_SIGNAL int activeWeaponStrongAmmoChanged( int activeWeaponStrongAmmo );
+	Q_PROPERTY( int activeWeaponStrongAmmo MEMBER m_activeWeaponStrongAmmo NOTIFY activeWeaponStrongAmmoChanged );
+
+	Q_SIGNAL void healthChanged( int health );
+	Q_PROPERTY( int health MEMBER m_health NOTIFY healthChanged );
+	Q_SIGNAL void armorChanged( int armor );
+	Q_PROPERTY( int armor MEMBER m_armor NOTIFY armorChanged );
+
+	Q_SIGNAL void isMessageFeedFadingOutChanged( bool isMessageFeedFadingOut );
+	Q_PROPERTY( bool isMessageFeedFadingOut READ getIsMessageFeedFadingOut NOTIFY isMessageFeedFadingOutChanged );
+
+	Q_SIGNAL void statusMessageChanged( const QString &statusMessage );
+	Q_PROPERTY( QString statusMessage MEMBER m_formattedStatusMessage NOTIFY statusMessageChanged );
+
+	Q_SIGNAL void hasActivePovChanged( bool hasActivePov );
+	Q_PROPERTY( bool hasActivePov MEMBER m_hasActivePov NOTIFY hasActivePovChanged );
+	Q_SIGNAL void isPovAliveChanged( bool isPovAlive );
+	Q_PROPERTY( bool isPovAlive MEMBER m_isPovAlive NOTIFY isPovAliveChanged );
+
+	[[nodiscard]]
+	Q_INVOKABLE QObject *getInventoryModel();
+	[[nodiscard]]
+	Q_INVOKABLE QObject *getTeamListModel();
+	[[nodiscard]]
+	Q_INVOKABLE QObject *getMessageFeedModel();
+	[[nodiscard]]
+	Q_INVOKABLE QObject *getAwardsModel();
+
+	void addToMessageFeed( const wsw::StringView &message, int64_t timestamp ) {
+		m_messageFeedModel.addMessage( message, timestamp );
+	}
+
+	void addAward( const wsw::StringView &award, int64_t timestamp ) {
+		m_awardsModel.addAward( award, timestamp );
+	}
+
+	[[nodiscard]]
+	bool getIsMessageFeedFadingOut() const { return m_messageFeedModel.isFadingOut(); }
+
+	void addStatusMessage( const wsw::StringView &message, int64_t timestamp );
+
+	void checkPropertyChanges( int64_t currTime );
+	void updateScoreboardData( const ReplicatedScoreboardData &scoreboardData );
+
+	void setViewStateIndex( unsigned viewStateIndex );
+	[[nodiscard]]
+	auto getViewStateIndex() const -> unsigned;
+	[[nodiscard]]
+	bool hasValidViewStateIndex() const;
+	void clearViewStateIndex();
 private:
-	// TODO: Reorder public/private sections
+	[[nodiscard]]
+	auto getActiveWeaponIcon() const -> QByteArray;
+	[[nodiscard]]
+	auto getActiveWeaponName() const -> QByteArray;
+
 	InventoryModel m_inventoryModel;
 	TeamListModel m_teamListModel;
-	FragsFeedModel m_fragsFeedModel { this };
 	MessageFeedModel m_messageFeedModel;
 	AwardsModel m_awardsModel;
 
-	VarModificationTracker m_clientHudChangesTracker;
-	VarModificationTracker m_specHudChangesTracker;
-
-	InGameHudLayoutModel m_clientLayoutModel;
-	InGameHudLayoutModel m_specLayoutModel;
-
-	using HudNameString = wsw::StaticString<HudLayoutModel::kMaxHudNameLength>;
-	HudNameString m_clientHudName, m_specHudName;
+	unsigned m_viewStateIndex { ~0u };
 
 	int64_t m_lastStatusMessageTimestamp { 0 };
 	wsw::StaticString<96> m_originalStatusMessage;
 	// TODO make toStyledText() work with arbitrary types
 	QString m_formattedStatusMessage;
-
-	wsw::StaticString<32> m_alphaName;
-	wsw::StaticString<32> m_betaName;
-	QByteArray m_styledAlphaName;
-	QByteArray m_styledBetaName;
-
-	QByteArray m_styledAlphaClan;
-	QByteArray m_styledBetaClan;
-
-	QByteArray m_alphaPlayersStatus, m_betaPlayersStatus;
-	int m_numAliveAlphaPlayers { 0 }, m_numAliveBetaPlayers { 0 };
-	int m_pendingNumAliveAlphaPlayers { 0 }, m_pendingNumAliveBetaPlayers { 0 };
-	unsigned m_lastIndividualAlphaClanCounter { 0 }, m_lastIndividualBetaClanCounter { 0 };
-	std::optional<int> m_pendingIndividualAlphaPlayerNum, m_pendingIndividualBetaPlayerNum;
-
-	ObjectiveIndicatorState m_indicatorStates[3];
-
-	int m_rawAlphaColor { 0 }, m_rawBetaColor { 0 };
-	QColor m_alphaColor { toQColor( m_rawAlphaColor ) };
-	QColor m_betaColor { toQColor( m_rawBetaColor ) };
-	int m_alphaScore { 0 }, m_pendingAlphaScore { 0 };
-	int m_betaScore { 0 }, m_pendingBetaScore { 0 };
-	bool m_hasTwoTeams { false };
-	bool m_hasActivePov { false };
-	bool m_isPovAlive { false };
-	int m_activeItemsMask { 0 };
-	Team m_realClientTeam { TeamSpectators };
-
-	QByteArray m_formattedSeconds;
-	QByteArray m_formattedMinutes;
-	QByteArray m_matchStateString;
-	int m_matchTimeSeconds { 0 };
-	int m_matchTimeMinutes { 0 };
 
 	int m_activeWeapon { 0 };
 	int m_activeWeaponWeakAmmo { 0 };
@@ -313,49 +338,23 @@ private:
 
 	int m_health { 0 }, m_armor { 0 };
 
-	bool m_isInWarmupState { false };
-	bool m_isInPostmatchState { false };
-
-	bool m_hasLocations { false };
+	bool m_hasActivePov { false };
+	bool m_isPovAlive { false };
 
 	bool m_hasSetInventoryModelOwnership { false };
 	bool m_hasSetTeamListModelOwnership { false };
-	bool m_hasSetFragsFeedModelOwnership {false };
 	bool m_hasSetMessageFeedModelOwnership { false };
 	bool m_hasSetAwardsModelOwnership { false };
+};
 
-	[[nodiscard]]
-	auto getClientLayoutModel() -> QObject * { return &m_clientLayoutModel; }
-	[[nodiscard]]
-	auto getSpecLayoutModel() -> QObject * { return &m_specLayoutModel; }
+class HudCommonDataModel : public HudDataModel {
+	Q_OBJECT
 
-	[[nodiscard]]
-	static auto toQColor( int color ) -> QColor {
-		return QColor::fromRgb( COLOR_R( color ), COLOR_G( color ), COLOR_B( color ) );
-	}
+	friend class FragsFeedModel;
 
-	static void setFormattedTime( QByteArray *dest, int value );
-	static void setStyledName( QByteArray *dest, const wsw::StringView &name );
-
-	[[nodiscard]]
-	auto getActiveWeaponIcon() const -> QByteArray;
-	[[nodiscard]]
-	auto getActiveWeaponName() const -> QByteArray;
-
-	[[nodiscard]]
-	static auto getCrosshairFilePath( const wsw::StringView &prefix, const QByteArray &fileName ) -> QByteArray;
-
-	[[nodiscard]]
-	bool getIsMessageFeedFadingOut() const { return m_messageFeedModel.isFadingOut(); }
-
-	[[nodiscard]]
-	auto getStatusForNumberOfPlayers( int numPlayers ) const -> QByteArray;
-	void updateTeamPlayerStatuses( const ReplicatedScoreboardData &scoreboardData );
-
-	void handleVarChanges( StringConfigVar *var, InGameHudLayoutModel *model, HudNameString *currName );
 public:
-	Q_PROPERTY( QObject *clientLayoutModel READ getClientLayoutModel CONSTANT );
-	Q_PROPERTY( QObject *specLayoutModel READ getSpecLayoutModel CONSTANT );
+	Q_PROPERTY( QObject *regularLayoutModel READ getRegularLayoutModel CONSTANT );
+	Q_PROPERTY( QObject *miniviewLayoutModel READ getMiniviewLayoutModel CONSTANT );
 
 	Q_SIGNAL void alphaNameChanged( const QByteArray &alphaName );
 	Q_PROPERTY( const QByteArray alphaName MEMBER m_styledAlphaName NOTIFY alphaNameChanged );
@@ -391,11 +390,6 @@ public:
 	Q_SIGNAL void realClientTeamChanged( Team realClientTeam );
 	Q_PROPERTY( Team realClientTeam MEMBER m_realClientTeam NOTIFY realClientTeamChanged );
 
-	Q_SIGNAL void hasActivePovChanged( bool hasActivePov );
-	Q_PROPERTY( bool hasActivePov MEMBER m_hasActivePov NOTIFY hasActivePovChanged );
-	Q_SIGNAL void isPovAliveChanged( bool isPovAlive );
-	Q_PROPERTY( bool isPovAlive MEMBER m_isPovAlive NOTIFY isPovAliveChanged );
-
 	Q_SIGNAL void activeItemsMaskChanged( int activeItemsMask );
 	Q_PROPERTY( int activeItemsMask MEMBER m_activeItemsMask NOTIFY activeItemsMaskChanged );
 
@@ -412,42 +406,30 @@ public:
 	Q_SIGNAL void isInPostmatchStateChanged( bool isInPostmatchState );
 	Q_PROPERTY( bool isInPostmatchState MEMBER m_isInPostmatchState NOTIFY isInPostmatchStateChanged );
 
-	Q_SIGNAL void activeWeaponIconChanged( const QByteArray &activeWeaponIcon );
-	Q_PROPERTY( QByteArray activeWeaponIcon READ getActiveWeaponIcon NOTIFY activeWeaponIconChanged );
-	Q_SIGNAL void activeWeaponNameChanged( const QByteArray &activeWeaponName );
-	Q_PROPERTY( QByteArray activeWeaponName READ getActiveWeaponName NOTIFY activeWeaponNameChanged );
-	Q_SIGNAL int activeWeaponWeakAmmoChanged( int activeWeaponWeaponAmmo );
-	Q_PROPERTY( int activeWeaponWeakAmmo MEMBER m_activeWeaponWeakAmmo NOTIFY activeWeaponWeakAmmoChanged );
-	Q_SIGNAL int activeWeaponStrongAmmoChanged( int activeWeaponStrongAmmo );
-	Q_PROPERTY( int activeWeaponStrongAmmo MEMBER m_activeWeaponStrongAmmo NOTIFY activeWeaponStrongAmmoChanged );
-
-	Q_SIGNAL void healthChanged( int health );
-	Q_PROPERTY( int health MEMBER m_health NOTIFY healthChanged );
-	Q_SIGNAL void armorChanged( int armor );
-	Q_PROPERTY( int armor MEMBER m_armor NOTIFY armorChanged );
-
 	Q_SIGNAL void hasLocationsChanged( bool hasLocations );
 	Q_PROPERTY( bool hasLocations MEMBER m_hasLocations NOTIFY hasLocationsChanged );
 
-	Q_SIGNAL void isMessageFeedFadingOutChanged( bool isMessageFeedFadingOut );
-	Q_PROPERTY( bool isMessageFeedFadingOut READ getIsMessageFeedFadingOut NOTIFY isMessageFeedFadingOutChanged );
+	enum MiniviewDisplay { MiniviewFixed, MiniviewPane1, MiniviewPane2 };
+	Q_ENUM( MiniviewDisplay );
 
-	Q_SIGNAL void statusMessageChanged( const QString &statusMessage );
-	Q_PROPERTY( QString statusMessage MEMBER m_formattedStatusMessage NOTIFY statusMessageChanged );
+	// For wtf gametype
+	static constexpr unsigned kMaxMiniviews = 12;
+
+	Q_SIGNAL void miniviewLayoutChangedPass1();
+	Q_SIGNAL void miniviewLayoutChangedPass2();
+	Q_INVOKABLE QObject *getMiniviewModelForIndex( int index );
+	Q_INVOKABLE QVariant getFixedMiniviewPositionForIndex( int indexOfModel ) const;
+	Q_INVOKABLE QVariant getFixedPositionMiniviewIndices() const;
+	Q_INVOKABLE QVariant getMiniviewIndicesForPane( int paneNum ) const;
+
+	[[nodiscard]]
+	auto getViewStateIndexForMiniviewModelIndex( int miniviewModelIndex ) const -> unsigned;
 
 	enum Powerup { Quad  = 0x1, Shell = 0x2, Regen = 0x4 };
 	Q_ENUM( Powerup );
 
 	[[nodiscard]]
-	Q_INVOKABLE QObject *getInventoryModel();
-	[[nodiscard]]
-	Q_INVOKABLE QObject *getTeamListModel();
-	[[nodiscard]]
 	Q_INVOKABLE QObject *getFragsFeedModel();
-	[[nodiscard]]
-	Q_INVOKABLE QObject *getMessageFeedModel();
-	[[nodiscard]]
-	Q_INVOKABLE QObject *getAwardsModel();
 
 	[[nodiscard]]
 	Q_INVOKABLE QByteArray getWeaponFullName( int weapon ) const;
@@ -485,9 +467,7 @@ public:
 	[[nodiscard]]
 	Q_INVOKABLE QByteArray getIndicatorStatusString( int stringNum ) const;
 
-	HudDataModel();
-
-	Q_SLOT void onHudUpdated( const QByteArray &name );
+	Q_SLOT void onHudUpdated( const QByteArray &name, HudLayoutModel::Flavor flavor );
 
 	void resetFragsFeed() {
 		m_fragsFeedModel.reset();
@@ -497,18 +477,96 @@ public:
 					   int64_t timestamp, unsigned meansOfDeath,
 					   const std::optional<std::pair<wsw::StringView, int>> &attackerAndTeam );
 
-	void addToMessageFeed( const wsw::StringView &message, int64_t timestamp ) {
-		m_messageFeedModel.addMessage( message, timestamp );
-	}
-
-	void addAward( const wsw::StringView &award, int64_t timestamp ) {
-		m_awardsModel.addAward( award, timestamp );
-	}
-
-	void addStatusMessage( const wsw::StringView &message, int64_t timestamp );
-
 	void checkPropertyChanges( int64_t currTime );
 	void updateScoreboardData( const ReplicatedScoreboardData &scoreboardData );
+
+	HudCommonDataModel();
+private:
+	[[nodiscard]]
+	auto getRegularLayoutModel() -> QObject *;
+	[[nodiscard]]
+	auto getMiniviewLayoutModel() -> QObject *;
+
+	[[nodiscard]]
+	static auto toQColor( int color ) -> QColor {
+		return QColor::fromRgb( COLOR_R( color ), COLOR_G( color ), COLOR_B( color ) );
+	}
+
+	static void setFormattedTime( QByteArray *dest, int value );
+	static void setStyledName( QByteArray *dest, const wsw::StringView &name );
+
+	[[nodiscard]]
+	static auto getCrosshairFilePath( const wsw::StringView &prefix, const QByteArray &fileName ) -> QByteArray;
+
+	[[nodiscard]]
+	auto getStatusForNumberOfPlayers( int numPlayers ) const -> QByteArray;
+	void updateTeamPlayerStatuses( const ReplicatedScoreboardData &scoreboardData );
+
+	using HudNameString = wsw::StaticString<HudLayoutModel::kMaxHudNameLength>;
+	void handleVarChanges( StringConfigVar *var, InGameHudLayoutModel *model, HudNameString *currName );
+
+	void updateMiniviewData( int64_t currTime );
+
+	FragsFeedModel m_fragsFeedModel { this };
+
+	VarModificationTracker m_regularHudChangesTracker;
+	VarModificationTracker m_miniviewHudChangesTracker;
+	InGameHudLayoutModel m_regularLayoutModel { HudLayoutModel::Regular };
+	InGameHudLayoutModel m_miniviewLayoutModel { HudLayoutModel::Miniview };
+	HudNameString m_regularHudName, m_miniviewHudName;
+
+	wsw::StaticString<32> m_alphaName, m_betaName;
+	QByteArray m_styledAlphaName, m_styledBetaName;
+	QByteArray m_styledAlphaClan, m_styledBetaClan;
+
+	QByteArray m_alphaPlayersStatus, m_betaPlayersStatus;
+	int m_numAliveAlphaPlayers { 0 }, m_numAliveBetaPlayers { 0 };
+	int m_pendingNumAliveAlphaPlayers { 0 }, m_pendingNumAliveBetaPlayers { 0 };
+	unsigned m_lastIndividualAlphaClanCounter { 0 }, m_lastIndividualBetaClanCounter { 0 };
+	std::optional<int> m_pendingIndividualAlphaPlayerNum, m_pendingIndividualBetaPlayerNum;
+
+	ObjectiveIndicatorState m_indicatorStates[3];
+
+	int m_rawAlphaColor { 0 }, m_rawBetaColor { 0 };
+	QColor m_alphaColor { toQColor( m_rawAlphaColor ) };
+	QColor m_betaColor { toQColor( m_rawBetaColor ) };
+	int m_alphaScore { 0 }, m_pendingAlphaScore { 0 };
+	int m_betaScore { 0 }, m_pendingBetaScore { 0 };
+	bool m_hasTwoTeams { false };
+
+	int m_activeItemsMask { 0 };
+	Team m_realClientTeam { TeamSpectators };
+
+	QByteArray m_formattedSeconds;
+	QByteArray m_formattedMinutes;
+	QByteArray m_matchStateString;
+	int m_matchTimeSeconds { 0 };
+	int m_matchTimeMinutes { 0 };
+
+	struct FixedPositionMinivewEntry {
+		int indexOfModel;
+		unsigned viewStateIndex;
+		Rect position;
+	};
+
+	struct HudControlledMiniviewEntry {
+		int indexOfModel;
+		int paneNumber;
+	};
+
+	wsw::StaticVector<FixedPositionMinivewEntry, kMaxMiniviews> m_fixedPositionMinviews;
+	wsw::StaticVector<HudControlledMiniviewEntry, kMaxMiniviews> m_hudControlledMinviewsForPane[2];
+
+	HudPovDataModel m_miniviewDataModels[kMaxMiniviews];
+
+	bool m_isInWarmupState { false };
+	bool m_isInPostmatchState { false };
+
+	bool m_hasLocations { false };
+
+	bool m_hasSetFragsFeedModelOwnership { false };
+	bool m_hasSetRegularLayoutModelOwnership { false };
+	bool m_hasSetMinivewLayoutModelOwnership { false };
 };
 
 }

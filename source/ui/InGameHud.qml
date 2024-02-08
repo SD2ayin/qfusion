@@ -5,15 +5,51 @@ import net.warsow 2.6
 
 Item {
     id: hudField
-    anchors.fill: parent
 
     property real alphaNameWidth
     property real betaNameWidth
-    property var model
+
+    property var layoutModel
+    property var commonDataModel
+    property var povDataModel
+
+    property var miniviewAllocator
+
+    // Miniviews can't allocate miniviews
+    readonly property bool isMiniview: !miniviewAllocator
+    readonly property real scale: isMiniview ? Math.min(hudField.width / rootItem.width, hudField.height / rootItem.height) : 1.0
+
+    property bool arrangementReset
+    property int stateIndex
+
+    readonly property string healthIconPath:
+        hudField.povDataModel.health > 100 ? "image://wsw/gfx/hud/icons/health/100" :
+                                             "image://wsw/gfx/hud/icons/health/50"
+
+    readonly property string armorIconPath:
+        hudField.povDataModel.armor >= 125 ? "image://wsw/gfx/hud/icons/armor/ra" :
+            (hudField.povDataModel.armor >= 75 ? "image://wsw/gfx/hud/icons/armor/ya" :
+                                                 "image://wsw/gfx/hud/icons/armor/ga")
+
+    readonly property color healthColor:
+        hudField.povDataModel.health > 100 ? "deeppink" :
+            (hudField.povDataModel.health >= 50 ? "white" : "orangered")
+
+    readonly property color armorColor:
+        hudField.povDataModel.armor >= 125 ? "red" : (hudField.povDataModel.armor >= 75 ? "gold" : "green")
+
+    readonly property real healthFrac: 0.01 * Math.min(100.0, Math.max(0, hudField.povDataModel.health))
+    readonly property real armorFrac: 0.01 * Math.min(100.0, hudField.povDataModel.armor)
+
+    Connections {
+        target: layoutModel
+        onArrangingItemsEnabled: arrangementReset = false
+        onArrangingItemsDisabled: arrangementReset = true
+    }
 
     Repeater {
         id: repeater
-        model: hudField.model
+        model: hudField.layoutModel
 
         property int numInstantiatedItems: 0
 
@@ -27,7 +63,7 @@ Item {
             states: [
                 State {
                     name: "arranged"
-                    when: repeater.numInstantiatedItems === repeater.count
+                    when: repeater.numInstantiatedItems === repeater.count && !hudField.arrangementReset
                     AnchorChanges {
                         target: itemLoader
                         anchors.top: getQmlAnchor(HudLayoutModel.Top)
@@ -37,21 +73,40 @@ Item {
                         anchors.horizontalCenter: getQmlAnchor(HudLayoutModel.HCenter)
                         anchors.verticalCenter: getQmlAnchor(HudLayoutModel.VCenter)
                     }
+                },
+                // We can't just disable "arranged" state, we have to force transition to the "reset" state with all anchors reset
+                State {
+                    name: "reset"
+                    when: repeater.numInstantiatedItems === repeater.count && hudField.arrangementReset
+                    AnchorChanges {
+                        target: itemLoader
+                        anchors.top: undefined
+                        anchors.bottom: undefined
+                        anchors.left: undefined
+                        anchors.right: undefined
+                        anchors.horizontalCenter: undefined
+                        anchors.verticalCenter: undefined
+                    }
                 }
             ]
 
             Connections {
                 target: Hud.ui
+                enabled: !hudField.isMiniview
                 onHudOccludersChanged: itemLoader.updateItemVisibility()
             }
 
             Connections {
-                target: Hud.dataModel
+                target: hudField.commonDataModel
                 onHasTwoTeamsChanged: itemLoader.updateItemVisibility()
-                onHasActivePovChanged: itemLoader.updateItemVisibility()
-                onIsPovAliveChanged: itemLoader.updateItemVisibility()
                 onIsInPostmatchStateChanged: itemLoader.updateItemVisibility()
                 onActiveItemsMaskChanged: itemLoader.updateItemVisibility()
+            }
+
+            Connections {
+                target: hudField.povDataModel
+                onHasActivePovChanged: itemLoader.updateItemVisibility()
+                onIsPovAliveChanged: itemLoader.updateItemVisibility()
             }
 
             Connections {
@@ -83,34 +138,51 @@ Item {
                 Hud.ui.ensureObjectDestruction(itemLoader)
             }
 
-            function updateItemVisibility() {
+            function shouldBeVisibleIfNotOccluded() {
                 if (item) {
-                    if (itemLoader.individualMask && !(itemLoader.individualMask & Hud.dataModel.activeItemsMask)) {
-                        item.visible = false
-                    } else if (!Hud.dataModel.hasTwoTeams && (flags & HudLayoutModel.TeamBasedOnly)) {
-                        item.visible = false
-                    } else if (!Hud.dataModel.hasActivePov && (flags & HudLayoutModel.PovOnly)) {
-                        item.visible = false
-                    } else if (!Hud.dataModel.isPovAlive && (flags & HudLayoutModel.AlivePovOnly)) {
-                        item.visible = false
-                    } else if (Hud.dataModel.isInPostmatchState && !(flags & HudLayoutModel.AllowPostmatch)){
-                        item.visible = false
-                    } else {
-                        // Put the expensive test last
-                        item.visible = !Hud.ui.isHudItemOccluded(item)
+                    // Hack for items which non-present in the actual layout but are added
+                    // to prevent reinstantiation upon file change which leads to leaks
+                    if (isHidden) {
+                        return false
                     }
+                    if (itemLoader.individualMask && !(itemLoader.individualMask & hudField.commonDataModel.activeItemsMask)) {
+                        return false
+                    }
+                    if (!hudField.commonDataModel.hasTwoTeams && (flags & HudLayoutModel.TeamBasedOnly)) {
+                        return false
+                    }
+                    if (!hudField.povDataModel.hasActivePov && (flags & HudLayoutModel.PovOnly)) {
+                        return false
+                    }
+                    if (!hudField.povDataModel.isPovAlive && (flags & HudLayoutModel.AlivePovOnly)) {
+                        return false
+                    }
+                    if (hudField.commonDataModel.isInPostmatchState && !(flags & HudLayoutModel.AllowPostmatch)){
+                        return false
+                    }
+                    return true
+                }
+                return false
+            }
+
+            function updateItemVisibility() {
+                if (shouldBeVisibleIfNotOccluded()) {
+                    // Put the expensive test last
+                    item.visible = !Hud.ui.isHudItemOccluded(item)
+                } else {
+                    item.visible = false
                 }
             }
 
             sourceComponent: {
                 if (kind === HudLayoutModel.HealthBar) {
-                    healthBarComponent
+                    hudField.isMiniview ? miniHealthBarComponent : healthBarComponent
                 } else if (kind === HudLayoutModel.ArmorBar) {
-                    armorBarComponent
+                    hudField.isMiniview? miniArmorBarComponent : armorBarComponent
                 } else if (kind === HudLayoutModel.InventoryBar) {
-                    inventoryBarComponent
+                    hudField.isMiniview ? miniInventoryBarComponent : inventoryBarComponent
                 } else if (kind === HudLayoutModel.WeaponStatus) {
-                    weaponStatusComponent
+                    hudField.isMiniview ? miniWeaponStatusComponent : weaponStatusComponent
                 } else if (kind === HudLayoutModel.MatchTime) {
                     matchTimeComponent
                 } else if (kind === HudLayoutModel.AlphaScore) {
@@ -131,6 +203,10 @@ Item {
                     statusMessageComponent
                 } else if (kind === HudLayoutModel.ObjectiveStatus) {
                     objectiveStatusComponent
+                } else if (kind === HudLayoutModel.MiniviewPane1) {
+                    miniviewPane1Component
+                } else if (kind === HudLayoutModel.MiniviewPane2) {
+                    miniviewPane2Component
                 } else {
                     undefined
                 }
@@ -140,12 +216,10 @@ Item {
                 id: healthBarComponent
                 HudValueBar {
                     text: "HEALTH"
-                    color: Hud.dataModel.health > 100 ? "deeppink" :
-                                                        (Hud.dataModel.health >= 50 ? "white" : "orangered")
-                    value: Hud.dataModel.health
-                    frac: 0.01 * Math.min(100.0, Math.max(0, Hud.dataModel.health))
-                    iconPath: Hud.dataModel.health > 100 ? "image://wsw/gfx/hud/icons/health/100" :
-                                                          "image://wsw/gfx/hud/icons/health/50"
+                    value: hudField.povDataModel.health
+                    frac: hudField.healthFrac
+                    color: hudField.healthColor
+                    iconPath: hudField.healthIconPath
                 }
             }
 
@@ -153,42 +227,82 @@ Item {
                 id: armorBarComponent
                 HudValueBar {
                     text: "ARMOR"
-                    value: Hud.dataModel.armor
-                    frac: 0.01 * Math.min(100.0, Hud.dataModel.armor)
-                    color: Hud.dataModel.armor >= 125 ? "red" : (Hud.dataModel.armor >= 75 ? "gold" : "green")
-                    iconPath: {
-                        Hud.dataModel.armor >= 125 ? "image://wsw/gfx/hud/icons/armor/ra" :
-                        (Hud.dataModel.armor >= 75 ? "image://wsw/gfx/hud/icons/armor/ya" :
-                                                    "image://wsw/gfx/hud/icons/armor/ga")
-                    }
+                    value: hudField.povDataModel.armor
+                    frac: hudField.armorFrac
+                    color: hudField.armorColor
+                    iconPath: hudField.armorIconPath
+                }
+            }
+
+            Component {
+                id: miniHealthBarComponent
+                HudMiniValueBar {
+                    miniviewScale: hudField.width / rootItem.width
+                    value: hudField.povDataModel.health
+                    frac: hudField.healthFrac
+                    color: hudField.healthColor
+                    iconPath: hudField.healthIconPath
+                }
+            }
+
+            Component {
+                id: miniArmorBarComponent
+                HudMiniValueBar {
+                    miniviewScale: hudField.width / rootItem.width
+                    value: hudField.povDataModel.armor
+                    frac: hudField.armorFrac
+                    color: hudField.armorColor
+                    iconPath: hudField.armorIconPath
                 }
             }
 
             Component {
                 id: inventoryBarComponent
-                HudInventoryBar {}
+                HudInventoryBar {
+                    povDataModel: hudField.povDataModel
+                }
+            }
+
+            Component {
+                id: miniInventoryBarComponent
+                HudMiniInventoryBar {
+                    povDataModel: hudField.povDataModel
+                    miniviewScale: hudField.width / rootItem.width
+                }
             }
 
             Component {
                 id: weaponStatusComponent
-                HudWeaponStatus {}
+                HudWeaponStatus {
+                    povDataModel: hudField.povDataModel
+                }
+            }
+
+            Component {
+                id: miniWeaponStatusComponent
+                HudMiniWeaponStatus {
+                    povDataModel: hudField.povDataModel
+                    miniviewScale: hudField.width / rootItem.width
+                }
             }
 
             Component {
                 id: matchTimeComponent
-                HudMatchTime {}
+                HudMatchTime {
+                    commonDataModel: hudField.commonDataModel
+                }
             }
 
             Component {
                 id: alphaScoreComponent
                 HudTeamScore {
-                    visible: Hud.dataModel.hasTwoTeams
+                    visible: commonDataModel.hasTwoTeams
                     leftAligned: true
-                    color: Hud.dataModel.alphaColor
-                    name: Hud.dataModel.alphaName
-                    clan: Hud.dataModel.alphaClan
-                    score: Hud.dataModel.alphaScore
-                    playersStatus: Hud.dataModel.alphaPlayersStatus
+                    color: hudField.commonDataModel.alphaColor
+                    name: hudField.commonDataModel.alphaName
+                    clan: hudField.commonDataModel.alphaClan
+                    score: hudField.commonDataModel.alphaScore
+                    playersStatus: hudField.commonDataModel.alphaPlayersStatus
                     siblingNameWidth: hudField.betaNameWidth
                     onNameWidthChanged: hudField.alphaNameWidth = nameWidth
                 }
@@ -197,13 +311,13 @@ Item {
             Component {
                 id: betaScoreComponent
                 HudTeamScore {
-                    visible: Hud.dataModel.hasTwoTeams
+                    visible: commonDataModel.hasTwoTeams
                     leftAligned: false
-                    color: Hud.dataModel.betaColor
-                    name: Hud.dataModel.betaName
-                    clan: Hud.dataModel.betaClan
-                    score: Hud.dataModel.betaScore
-                    playersStatus: Hud.dataModel.betaPlayersStatus
+                    color: hudField.commonDataModel.betaColor
+                    name: hudField.commonDataModel.betaName
+                    clan: hudField.commonDataModel.betaClan
+                    score: hudField.commonDataModel.betaScore
+                    playersStatus: hudField.commonDataModel.betaPlayersStatus
                     siblingNameWidth: hudField.alphaNameWidth
                     onNameWidthChanged: hudField.betaNameWidth = nameWidth
                 }
@@ -216,32 +330,65 @@ Item {
 
             Component {
                 id: teamInfoComponent
-                HudTeamInfo {}
+                HudTeamInfo {
+                    commonDataModel: hudField.commonDataModel
+                    povDataModel: hudField.povDataModel
+                }
             }
 
             Component {
                 id: fragsFeedComponent
-                HudFragsFeed {}
+                HudFragsFeed {
+                    commonDataModel: hudField.commonDataModel
+                }
             }
 
             Component {
                 id: messageFeedComponent
-                HudMessageFeed {}
+                HudMessageFeed {
+                    povDataModel: hudField.povDataModel
+                }
             }
 
             Component {
                 id: awardsAreaComponent
-                HudAwardsArea {}
+                HudAwardsArea {
+                    povDataModel: hudField.povDataModel
+                    isMiniview: hudField.isMiniview
+                }
             }
 
             Component {
                 id: statusMessageComponent
-                HudStatusMessage {}
+                HudStatusMessage {
+                    povDataModel: hudField.povDataModel
+                    isMiniview: hudField.isMiniview
+                }
             }
 
             Component {
                 id: objectiveStatusComponent
-                HudObjectiveStatus {}
+                HudObjectiveStatus {
+                    commonDataModel: hudField.commonDataModel
+                }
+            }
+
+            Component {
+                id: miniviewPane1Component
+                HudMiniviewPane {
+                    commonDataModel: hudField.commonDataModel
+                    miniviewAllocator: hudField.miniviewAllocator
+                    paneNumber: 1
+                }
+            }
+
+            Component {
+                id: miniviewPane2Component
+                HudMiniviewPane {
+                    commonDataModel: hudField.commonDataModel
+                    miniviewAllocator: hudField.miniviewAllocator
+                    paneNumber: 2
+                }
             }
 
             function getQmlAnchor(anchorBit) {

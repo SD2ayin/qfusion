@@ -158,6 +158,13 @@ typedef struct client_s {
 	mm_uuid_t mm_session;
 	mm_uuid_t mm_ticket;
 	char mm_login[MAX_INFO_VALUE];
+
+	[[nodiscard]] bool isAFakeClient() const {
+		return edict && ( edict->r.svflags & SVF_FAKECLIENT );
+	}
+	[[nodiscard]] bool isAHiddenClient() const {
+		return !edict || ( edict->r.svflags & SVF_NOCLIENT );
+	}
 } client_t;
 
 // a client can leave the server in one of four ways:

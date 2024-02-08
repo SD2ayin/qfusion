@@ -66,6 +66,7 @@ public:
 	void renderScene( Scene *scene, const refdef_t *rd );
 
 	void set2DMode( bool enable );
+	void set2DScissor( int x, int y, int w, int h );
 
 	void dynLightDirForOrigin( const float *origin, float radius, vec3_t dir, vec3_t diffuseLocal, vec3_t ambientLocal );
 

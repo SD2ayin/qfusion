@@ -174,38 +174,41 @@ void GS_TraceLaserBeam( trace_t *trace, vec3_t origin, vec3_t angles, float rang
 	}
 }
 
-void GS_TraceCurveLaserBeam( trace_t *trace, vec3_t origin, vec3_t angles, vec3_t blendPoint, int ignore, int timeDelta, void ( *impact )( trace_t *tr, vec3_t dir ) ) {
-	float frac, subdivisions = CURVELASERBEAM_SUBDIVISIONS;
-	float range = (float)GS_GetWeaponDef( WEAP_LASERGUN )->firedef_weak.timeout;
-	vec3_t from, dir, end;
-	int passthrough = ignore;
+void GS_GetCurvedLaserBeamSegments( vec3_t dest[MAX_CURVELASERBEAM_SUBDIVISIONS + 1], unsigned numSegments,
+									const float *origin, const float *angles, float range, const float *blendPoint ) {
+	VectorCopy( origin, dest[0] );
+	unsigned numAddedPoints = 1;
 
-	int i, j;
-	vec3_t tmpangles, blendAngles;
+	vec3_t blendDir;
+	VectorSubtract( blendPoint, origin, blendDir );
+	VectorNormalize( blendDir );
+	assert( std::fabs( VectorLength( blendDir ) - 1.0f ) < 1e-3f );
 
-	assert( trace );
+	vec3_t laserDir;
+	AngleVectors( angles, laserDir, nullptr, nullptr );
+	assert( std::fabs( VectorLength( laserDir ) - 1.0f ) < 1e-3f );
 
+	vec3_t from;
 	VectorCopy( origin, from );
-	VectorSubtract( blendPoint, origin, dir );
-	VecToAngles( dir, blendAngles );
 
-	for( i = 1; i <= (int)subdivisions; i++ ) {
-		frac = ( ( range / subdivisions ) * (float)i ) / (float)range;
+	const float segmentLength = range / (float)numSegments;
+	for( unsigned segmentNum = 0; segmentNum < numSegments; ++segmentNum ) {
+		const float frac = (float)segmentNum / (float)numSegments;
+		assert( frac >= 0.0f && frac <= 1.0f );
 
-		for( j = 0; j < 3; j++ )
-			tmpangles[j] = LerpAngle( angles[j], blendAngles[j], frac );
+		vec3_t segmentDir;
+		VectorSlerp( laserDir, frac, blendDir, segmentDir );
 
-		AngleVectors( tmpangles, dir, NULL, NULL );
-		VectorMA( origin, range * frac, dir, end );
+		vec3_t end;
+		VectorMA( origin, segmentLength * ( segmentNum + 1 ), segmentDir, end );
 
-		GS_TraceLaserBeam( trace, from, tmpangles, DistanceFast( from, end ), passthrough, timeDelta, impact );
-		if( trace->fraction != 1.0f ) {
-			break;
-		}
+		VectorCopy( end, dest[numAddedPoints] );
+		numAddedPoints++;
 
-		passthrough = trace->ent;
 		VectorCopy( end, from );
 	}
+
+	assert( numAddedPoints == numSegments + 1 );
 }
 
 void GS_AddLaserbeamPoint( gs_laserbeamtrail_t *trail, player_state_t *playerState, int64_t timeStamp ) {

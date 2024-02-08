@@ -208,7 +208,8 @@ ScoreboardModelProxy::ScoreboardModelProxy()
 }
 
 void ScoreboardModelProxy::dispatchPlayerRowUpdates( const PlayerUpdates &updates, int team,
-													 int rowInTeam, int rowInMixedList ) {
+													 int rowInTeam, std::optional<int> rowInMixedList ) {
+	assert( ( team != TEAM_PLAYERS ) == ( rowInMixedList != std::nullopt ) );
 	assert( team >= TEAM_PLAYERS && team <= TEAM_BETA );
 	QAbstractTableModel *const teamModel = &m_teamModelsHolder[team - 1];
 	QAbstractTableModel *const mixedModel = ( team != TEAM_PLAYERS ) ? m_teamModelsHolder.end() - 1 : nullptr;
@@ -223,7 +224,7 @@ void ScoreboardModelProxy::dispatchPlayerRowUpdates( const PlayerUpdates &update
 			QModelIndex teamModelIndex( teamModel->index( rowInTeam, (int)i ) );
 			teamModel->dataChanged( teamModelIndex, teamModelIndex, *changedRoles );
 			if( mixedModel ) {
-				QModelIndex mixedModelIndex( mixedModel->index( rowInMixedList, (int)i ) );
+				QModelIndex mixedModelIndex( mixedModel->index( *rowInMixedList, (int)i ) );
 				mixedModel->dataChanged( mixedModelIndex, mixedModelIndex, *changedRoles );
 			}
 		}
@@ -262,7 +263,7 @@ void ScoreboardModelProxy::dispatchPlayerRowUpdates( const PlayerUpdates &update
 		QModelIndex teamModelIndex( teamModel->index( rowInTeam, (int)i ) );
 		teamModel->dataChanged( teamModelIndex, teamModelIndex, changedRoles );
 		if( mixedModel ) {
-			QModelIndex mixedModelIndex( mixedModel->index( rowInMixedList, (int)i ) );
+			QModelIndex mixedModelIndex( mixedModel->index( *rowInMixedList, (int)i ) );
 			mixedModel->dataChanged( mixedModelIndex, mixedModelIndex, changedRoles );
 		}
 	}
@@ -283,7 +284,7 @@ void ScoreboardModelProxy::checkVars() {
 	}
 
 	const auto oldHasChasers = m_hasChasers;
-	m_hasChasers = v_showChasers.get() && CG_ActiveChasePov() != std::nullopt;
+	m_hasChasers = v_showChasers.get() && CG_ActiveChasePovOfViewState( CG_GetOurClientViewStateIndex() ) != std::nullopt;
 	if( m_hasChasers != oldHasChasers ) {
 		Q_EMIT hasChasersChanged( m_hasChasers );
 	}
@@ -330,8 +331,9 @@ void ScoreboardModelProxy::update( const ReplicatedScoreboardData &currData, con
 		}
 	}
 
-	const bool mustResetChasers = (unsigned)*maybeUpdateFlags & (unsigned)Scoreboard::UpdateFlags::Chasers;
+	const bool mustResetChasers     = (unsigned)*maybeUpdateFlags & (unsigned)Scoreboard::UpdateFlags::Chasers;
 	const bool mustResetChallengers = (unsigned)*maybeUpdateFlags & (unsigned)Scoreboard::UpdateFlags::Challengers;
+	const bool mustResetSpectators  = (unsigned)*maybeUpdateFlags & (unsigned)Scoreboard::UpdateFlags::Spectators;
 	if( mustResetChasers | mustResetChallengers ) {
 		alignas( 16 ) unsigned clientIndices[kMaxPlayers];
 		std::fill( std::begin( clientIndices ), std::end( clientIndices ), ~0u );
@@ -363,6 +365,10 @@ void ScoreboardModelProxy::update( const ReplicatedScoreboardData &currData, con
 		}
 	}
 
+	if( mustResetSpectators ) {
+		m_specsModel.markAsUpdated();
+	}
+
 	bool wasTeamReset[4] { false, false, false, false };
 
 	for( const Scoreboard::TeamUpdates &teamUpdate: teamUpdates ) {
@@ -370,11 +376,11 @@ void ScoreboardModelProxy::update( const ReplicatedScoreboardData &currData, con
 		if( teamUpdate.players ) {
 			assert( teamUpdate.team >= TEAM_SPECTATOR && teamUpdate.team <= TEAM_BETA );
 			wasTeamReset[teamUpdate.team] = true;
-			// Forcing a full reset is the easiest approach.
 			if( teamUpdate.team == TEAM_SPECTATOR ) {
 				m_specsModel.markAsUpdated();
 			} else {
 				auto &model = m_teamModelsHolder[teamUpdate.team - 1];
+				// Forcing a full reset is the easiest approach.
 				model.beginResetModel();
 				model.endResetModel();
 			}
@@ -388,42 +394,24 @@ void ScoreboardModelProxy::update( const ReplicatedScoreboardData &currData, con
 		model.endResetModel();
 	}
 
-	// Build index translation tables prior to dispatching updates, if needed
-	static_assert( kMaxPlayers <= 32 );
-	unsigned chasersPlayerIndicesMask = 0, challengersPlayerIndicesMask = 0;
-	if( !playerUpdates.empty() ) {
-		if( !mustResetChasers ) {
-			for( const unsigned playerIndex: m_chasers ) {
-				chasersPlayerIndicesMask |= ( 1u << playerIndex );
-			}
-		}
-		if( !mustResetChallengers ) {
-			for( const unsigned playerIndex: m_challengers ) {
-				challengersPlayerIndicesMask |= ( 1u << playerIndex );
-			}
-		}
-	}
-
 	for( const Scoreboard::PlayerUpdates &playerUpdate: playerUpdates ) {
 		const unsigned playerIndex = playerUpdate.playerIndex;
 		if( m_scoreboard.isPlayerConnected( playerIndex ) ) {
-			const unsigned playerBit = ( 1u << playerIndex );
-			if( chasersPlayerIndicesMask & playerBit ) {
-				m_chasersModel.markAsUpdated();
-			}
-			if( challengersPlayerIndicesMask & playerBit ) {
-				m_challengersModel.markAsUpdated();
-			}
 			const auto teamNum = (int)m_scoreboard.getPlayerTeam( playerIndex );
 			if( !wasTeamReset[teamNum] ) {
-				const auto &playerIndexToRowInTeamList = tablesOfRowsInTeams[teamNum];
-				const auto rowInTeamList               = (int)playerIndexToRowInTeamList[playerIndex];
-				assert( (unsigned)rowInTeamList < (unsigned)m_playerIndicesForLists[teamNum].size() );
+				// Spectators use the simplified model along with chasers/challengers
 				if( teamNum == TEAM_SPECTATOR ) {
 					m_specsModel.markAsUpdated();
 				} else {
-					const auto &playerIndexToRowInMixedList = tablesOfRowsInTeams[TEAM_BETA + 1];
-					const auto rowInMixedList               = (int)playerIndexToRowInMixedList[playerIndex];
+					const auto &playerIndexToRowInTeamList = tablesOfRowsInTeams[teamNum];
+					const auto rowInTeamList               = (int)playerIndexToRowInTeamList[playerIndex];
+					assert( (unsigned)rowInTeamList < (unsigned)m_playerIndicesForLists[teamNum].size() );
+					std::optional<int> rowInMixedList;
+					if( teamNum == TEAM_ALPHA || teamNum == TEAM_BETA ) {
+						const auto &playerIndexToRowInMixedList = tablesOfRowsInTeams[TEAM_BETA + 1];
+						rowInMixedList                          = (int)playerIndexToRowInMixedList[playerIndex];
+						assert( (unsigned)*rowInMixedList < (unsigned)m_playerIndicesForLists[TEAM_BETA + 1].size() );
+					}
 					dispatchPlayerRowUpdates( playerUpdate, teamNum, rowInTeamList, rowInMixedList );
 				}
 			}

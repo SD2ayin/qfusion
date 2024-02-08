@@ -239,6 +239,8 @@ int Q_bitcount( int v );
 #define Vector4Inverse( v )         ( ( v )[0] = -( v )[0], ( v )[1] = -( v )[1], ( v )[2] = -( v )[2], ( v )[3] = -( v )[3] )
 #define DotProduct4( x, y )    ( ( x )[0] * ( y )[0] + ( x )[1] * ( y )[1] + ( x )[2] * ( y )[2] + ( x )[3] * ( y )[3] )
 
+void VectorSlerp( const float *a, float c, const float *b, float *dest );
+
 inline float VectorNormalize( float *v ) {
 	const float squareLen = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
 	float len = 0.0f;

@@ -1064,13 +1064,15 @@ const firedef_t *GS_FiredefForPlayerState( const player_state_t *playerState, in
 int GS_ThinkPlayerWeapon( player_state_t *playerState, int buttons, int msecs, int timeDelta );
 trace_t *GS_TraceBullet( trace_t    *trace, vec3_t start, vec3_t dir, float r, float u, int range, int ignore, int timeDelta );
 void GS_TraceLaserBeam( trace_t *trace, vec3_t origin, vec3_t angles, float range, int ignore, int timeDelta, void ( *impact )( trace_t *tr, vec3_t dir ) );
-void GS_TraceCurveLaserBeam( trace_t *trace, vec3_t origin, vec3_t angles, vec3_t blendPoint, int ignore, int timeDelta, void ( *impact )( trace_t *tr, vec3_t dir ) );
 
-#define CURVELASERBEAM_SUBDIVISIONS ( 8 )
+#define CURVELASERBEAM_SUBDIVISIONS ( 12 )
 #define MAX_CURVELASERBEAM_SUBDIVISIONS ( 24 )
 #define CURVELASERBEAM_BACKTIME     60
 #define LASERGUN_WEAK_TRAIL_BACKUP  32 // 0.5 second backup at 62 fps, which is the ucmd fps ratio
 #define LASERGUN_WEAK_TRAIL_MASK    ( LASERGUN_WEAK_TRAIL_BACKUP - 1 )
+
+void GS_GetCurvedLaserBeamSegments( vec3_t dest[MAX_CURVELASERBEAM_SUBDIVISIONS + 1], unsigned numSegments,
+									const float *origin, const float *angles, float range, const float *blendPoint );
 
 typedef struct {
 	vec3_t origins[LASERGUN_WEAK_TRAIL_BACKUP];

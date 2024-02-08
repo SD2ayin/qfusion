@@ -8,6 +8,7 @@
 #include "../common/q_shared.h"
 #include "../common/q_math.h"
 #include "../common/q_comref.h"
+#include "cgameimports.h"
 
 struct MessageFault;
 struct ReplicatedScoreboardData;
@@ -42,13 +43,15 @@ public:
 	virtual void endRegistration() = 0;
 
 	[[nodiscard]]
-	virtual bool requestsKeyboardFocus() const = 0;
+	virtual bool grabsKeyboardAndMouseButtons() const = 0;
+	[[nodiscard]]
+	virtual bool grabsMouseMovement() const = 0;
 	[[nodiscard]]
 	virtual bool handleKeyEvent( int quakeKey, bool keyDown ) = 0;
 	[[nodiscard]]
 	virtual bool handleCharEvent( int ch ) = 0;
 	[[nodiscard]]
-	virtual bool handleMouseMove( int frameTime, int dx, int dy ) = 0;
+	virtual bool handleMouseMovement( float frameTimeMillis, int dx, int dy ) = 0;
 
 	virtual void handleEscapeKey() = 0;
 
@@ -101,6 +104,15 @@ public:
 
 	[[nodiscard]]
 	virtual bool isShown() const = 0;
+
+	virtual void dispatchShuttingDown() = 0;
+
+	[[nodiscard]]
+	virtual auto retrieveNumberOfHudMiniviewPanes() -> unsigned = 0;
+	[[nodiscard]]
+	virtual auto retrieveLimitOfMiniviews() -> unsigned = 0;
+	[[nodiscard]]
+	virtual auto retrieveHudControlledMiniviews( Rect positions[MAX_CLIENTS], unsigned viewStateNums[MAX_CLIENTS] ) -> unsigned = 0;
 };
 
 }

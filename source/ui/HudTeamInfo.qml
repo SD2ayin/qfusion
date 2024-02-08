@@ -9,9 +9,12 @@ Item {
     id: root
     width: implicitWidth
     height: implicitHeight
+    
+    property var commonDataModel
+    property var povDataModel
 
     // TODO: Make the native code track the longest string length and give a hint?
-    implicitWidth: 256 + 32 + 32 + (Hud.dataModel.hasLocations ? 128 + 32 : 0)
+    implicitWidth: 256 + 32 + 32 + (root.commonDataModel.hasLocations ? 128 + 32 : 0)
     implicitHeight: list.height + 32
 
     readonly property color evenRowColor: Qt.rgba(0.0, 0.0, 0.0, 0.7)
@@ -31,7 +34,7 @@ Item {
         anchors.centerIn: parent
         height: contentHeight
         width: root.width - 32
-        model: Hud.dataModel.getTeamListModel()
+        model: root.povDataModel.getTeamListModel()
         layer.enabled: count
         layer.effect: ElevationEffect { elevation: 64 }
         Component.onDestruction: Hud.destroyLayer(layer)
@@ -131,7 +134,7 @@ Item {
                     elide: Text.ElideMiddle
                 }
                 Label {
-                    visible: Hud.dataModel.hasLocations
+                    visible: root.commonDataModel.hasLocations
                     Layout.fillWidth: true
                     Layout.preferredWidth: 0.75
                     horizontalAlignment: Qt.AlignRight

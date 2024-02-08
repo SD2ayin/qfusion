@@ -66,7 +66,7 @@ public:
 	void spawnInstagunHitEffect( const float *origin, const float *impactNormal, const float *impactDir,
 								 bool spawnDecal, int ownerNum );
 
-	void spawnGunbladeBladeHitEffect( const float *origin, const float *dir );
+	void spawnGunbladeBladeHitEffect( const float *origin, const float *dir, int ownerNum );
 	void spawnGunbladeBlastHitEffect( const float *origin, const float *dir );
 
 	void spawnBulletImpactEffect( unsigned delay, const SolidImpact &impact );

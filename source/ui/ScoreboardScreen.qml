@@ -24,7 +24,7 @@ Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.horizontalCenterOffset: 0.5 * root.baseCellWidth
         sourceComponent: {
-            if (!UI.hudDataModel.hasTwoTeams) {
+            if (!UI.hudCommonDataModel.hasTwoTeams) {
                 playersDisplayComponent
             } else if (UI.scoreboard.layout === Scoreboard.Mixed) {
                 mixedTeamsDisplayComponent
@@ -111,14 +111,14 @@ Rectangle {
             ScoreboardTeamPane {
                 width: root.tableWidth
                 model: UI.scoreboardAlphaModel
-                baseColor: Qt.darker(UI.hudDataModel.alphaColor)
+                baseColor: Qt.darker(UI.hudCommonDataModel.alphaColor)
                 baseCellWidth: root.baseCellWidth
                 clanCellWidth: root.clanCellWidth
             }
             ScoreboardTeamPane {
                 width: root.tableWidth
                 model: UI.scoreboardBetaModel
-                baseColor: Qt.darker(UI.hudDataModel.betaColor)
+                baseColor: Qt.darker(UI.hudCommonDataModel.betaColor)
                 baseCellWidth: root.baseCellWidth
                 clanCellWidth: root.clanCellWidth
             }
@@ -133,7 +133,7 @@ Rectangle {
             ScoreboardTeamPane {
                 width: root.tableWidth
                 model: UI.scoreboardAlphaModel
-                baseColor: Qt.darker(UI.hudDataModel.alphaColor)
+                baseColor: Qt.darker(UI.hudCommonDataModel.alphaColor)
                 baseCellWidth: root.baseCellWidth
                 clanCellWidth: root.clanCellWidth
             }
@@ -141,7 +141,7 @@ Rectangle {
                 width: root.tableWidth
                 model: UI.scoreboardBetaModel
                 displayHeader: false
-                baseColor: Qt.darker(UI.hudDataModel.betaColor)
+                baseColor: Qt.darker(UI.hudCommonDataModel.betaColor)
                 baseCellWidth: root.baseCellWidth
                 clanCellWidth: root.clanCellWidth
             }
@@ -155,8 +155,8 @@ Rectangle {
             width: root.tableWidth
             model: UI.scoreboardMixedModel
             mixedTeamsMode: true
-            baseAlphaColor: Qt.darker(UI.hudDataModel.alphaColor)
-            baseBetaColor: Qt.darker(UI.hudDataModel.betaColor)
+            baseAlphaColor: Qt.darker(UI.hudCommonDataModel.alphaColor)
+            baseBetaColor: Qt.darker(UI.hudCommonDataModel.betaColor)
             baseCellWidth: root.baseCellWidth
             clanCellWidth: root.clanCellWidth
         }

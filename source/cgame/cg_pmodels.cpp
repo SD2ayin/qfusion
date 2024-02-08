@@ -79,7 +79,6 @@ void CG_ResetPModels( void ) {
 		cg_entPModels[i].flash_time = cg_entPModels[i].barrel_time = 0;
 		memset( &cg_entPModels[i].animState, 0, sizeof( gs_pmodel_animationstate_t ) );
 	}
-	memset( &cg.weapon, 0, sizeof( cg.weapon ) );
 }
 
 /*
@@ -577,7 +576,7 @@ void CG_MoveToTag( vec3_t move_origin,
 * CG_PModel_GetProjectionSource
 * It asumes the player entity is up to date
 */
-bool CG_PModel_GetProjectionSource( int entnum, orientation_t *tag_result ) {
+bool CG_PModel_GetProjectionSource( int entnum, orientation_t *tag_result, ViewState *viewState ) {
 	centity_t *cent;
 	pmodel_t *pmodel;
 
@@ -595,9 +594,9 @@ bool CG_PModel_GetProjectionSource( int entnum, orientation_t *tag_result ) {
 	}
 
 	// see if it's the view weapon
-	if( ISVIEWERENTITY( entnum ) && !cg.view.thirdperson ) {
-		VectorCopy( cg.weapon.projectionSource.origin, tag_result->origin );
-		Matrix3_Copy( cg.weapon.projectionSource.axis, tag_result->axis );
+	if( viewState->isViewerEntity( entnum ) && !viewState->view.thirdperson ) {
+		VectorCopy( viewState->weapon.projectionSource.origin, tag_result->origin );
+		Matrix3_Copy( viewState->weapon.projectionSource.axis, tag_result->axis );
 		return true;
 	}
 
@@ -658,7 +657,7 @@ void CG_SetOutlineColor( byte_vec4_t outlineColor, byte_vec4_t color ) {
 /*
 * CG_OutlineScaleForDist
 */
-static float CG_OutlineScaleForDist( entity_t *e, float maxdist, float scale ) {
+static float CG_OutlineScaleForDist( entity_t *e, float maxdist, float scale, const ViewState *viewState ) {
 	float dist;
 	vec3_t dir;
 
@@ -667,14 +666,14 @@ static float CG_OutlineScaleForDist( entity_t *e, float maxdist, float scale ) {
 	}
 
 	// Kill if behind the view or if too far away
-	VectorSubtract( e->origin, cg.view.origin, dir );
-	dist = VectorNormalize2( dir, dir ) * cg.view.fracDistFOV;
+	VectorSubtract( e->origin, viewState->view.origin, dir );
+	dist = VectorNormalize2( dir, dir ) * viewState->view.fracDistFOV;
 	if( dist > maxdist ) {
 		return 0;
 	}
 
 	if( !( e->renderfx & RF_WEAPONMODEL ) ) {
-		if( DotProduct( dir, &cg.view.axis[AXIS_FORWARD] ) < 0 ) {
+		if( DotProduct( dir, &viewState->view.axis[AXIS_FORWARD] ) < 0 ) {
 			return 0;
 		}
 	}
@@ -703,7 +702,7 @@ static float CG_OutlineScaleForDist( entity_t *e, float maxdist, float scale ) {
 /*
 * CG_AddColoredOutLineEffect
 */
-void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t g, uint8_t b, uint8_t a ) {
+void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t g, uint8_t b, uint8_t a, const ViewState *viewState ) {
 	float scale;
 	uint8_t *RGBA;
 
@@ -728,13 +727,13 @@ void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t 
 
 	if( effects & ( EF_QUAD | EF_SHELL | EF_REGEN | EF_GODMODE ) ) {
 		float pulse;
-		scale = CG_OutlineScaleForDist( ent, 2048, 3.5f );
+		scale = CG_OutlineScaleForDist( ent, 2048, 3.5f, viewState );
 		pulse = fabs( sin( cg.time * 0.005f ) );
 		scale += 1.25f * scale * pulse * pulse;
 	} else if( !v_outlineModels.get() || !( effects & EF_OUTLINE ) ) {
 		scale = 0;
 	} else {
-		scale = CG_OutlineScaleForDist( ent, 1024, 1.0f );
+		scale = CG_OutlineScaleForDist( ent, 1024, 1.0f, viewState );
 	}
 
 	if( !scale ) {
@@ -799,7 +798,7 @@ void CG_AddColoredOutLineEffect( entity_t *ent, int effects, uint8_t r, uint8_t 
 /*
 * CG_PModel_AddFlag
 */
-static void CG_PModel_AddFlag( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
+static void CG_PModel_AddFlag( centity_t *cent, DrawSceneRequest *drawSceneRequest, ViewState *viewState ) {
 	int flag_team  = ( cent->current.team == TEAM_ALPHA ) ? TEAM_BETA : TEAM_ALPHA;
 	vec4_t teamcolor;
 	byte_vec4_t col;
@@ -813,7 +812,7 @@ static void CG_PModel_AddFlag( centity_t *cent, DrawSceneRequest *drawSceneReque
 
 	Vector4Scale( teamcolor, 255, col );
 
-	CG_AddFlagModelOnTag( cent, col, "tag_flag1", drawSceneRequest );
+	CG_AddFlagModelOnTag( cent, col, "tag_flag1", drawSceneRequest, viewState );
 }
 
 /*
@@ -1016,7 +1015,8 @@ void CG_UpdatePlayerModelEnt( centity_t *cent ) {
 	// outline color
 	CG_SetOutlineColor( cent->outlineColor, cent->ent.shaderRGBA );
 
-	if( v_raceGhosts.get() && !ISVIEWERENTITY( cent->current.number ) && GS_RaceGametype() ) {
+	// TODO: Update effects just before submission
+	if( v_raceGhosts.get() && !getPrimaryViewState()->isViewerEntity( cent->current.number ) && GS_RaceGametype() ) {
 		cent->effects &= ~EF_OUTLINE;
 		cent->effects |= EF_RACEGHOST;
 	} else {
@@ -1134,7 +1134,7 @@ static bonepose_t blendpose[SKM_MAX_BONES];
 /*
 * CG_AddPModel
 */
-void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
+void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest, ViewState *viewState ) {
 	int i, j;
 	pmodel_t *pmodel;
 	vec3_t tmpangles;
@@ -1151,20 +1151,20 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 	// if viewer model, and casting shadows, offset the entity to predicted player position
 	// for view and shadow accuracy
 
-	if( ISVIEWERENTITY( cent->current.number ) ) {
+	if( viewState->isViewerEntity( cent->current.number ) ) {
 		vec3_t org;
 
-		if( cg.view.playerPrediction ) {
+		if( viewState->view.playerPrediction ) {
 			float backlerp = 1.0f - cg.lerpfrac;
 
 			for( i = 0; i < 3; i++ )
-				org[i] = cg.predictedPlayerState.pmove.origin[i] - backlerp * cg.predictionError[i];
+				org[i] = viewState->predictedPlayerState.pmove.origin[i] - backlerp * viewState->predictionError[i];
 
-			CG_ViewSmoothPredictedSteps( org );
+			CG_ViewSmoothPredictedSteps( org, viewState );
 
-			tmpangles[YAW] = cg.predictedPlayerState.viewangles[YAW];
+			tmpangles[YAW]   = viewState->predictedPlayerState.viewangles[YAW];
 			tmpangles[PITCH] = 0;
-			tmpangles[ROLL] = 0;
+			tmpangles[ROLL]  = 0;
 			AnglesToAxis( tmpangles, cent->ent.axis );
 		} else {
 			VectorCopy( cent->ent.origin, org );
@@ -1223,10 +1223,11 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 	// add skeleton effects (pose is unmounted yet)
 	if( cent->current.type != ET_CORPSE ) {
 		// if it's our client use the predicted angles
-		if( cg.view.playerPrediction && ISVIEWERENTITY( cent->current.number ) && ( (unsigned)cg.view.POVent == cgs.playerNum + 1 ) ) {
-			tmpangles[YAW] = cg.predictedPlayerState.viewangles[YAW];
+		// TODO: The trailing condition is redundant (isn't it?)
+		if( viewState->view.playerPrediction && viewState->isViewerEntity( cent->current.number ) && ( (unsigned)viewState->view.POVent == cgs.playerNum + 1 ) ) {
+			tmpangles[YAW]   = viewState->predictedPlayerState.viewangles[YAW];
 			tmpangles[PITCH] = 0;
-			tmpangles[ROLL] = 0;
+			tmpangles[ROLL]  = 0;
 		} else {
 			// apply interpolated LOWER angles to entity
 			for( j = 0; j < 3; j++ )
@@ -1269,7 +1270,7 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 	cent->ent.renderfx |= RF_NOSHADOW;
 
 	if( !( cent->effects & EF_RACEGHOST ) ) {
-		CG_AddCentityOutLineEffect( cent );
+		CG_AddCentityOutLineEffect( cent, viewState );
 		CG_AddEntityToScene( &cent->ent, drawSceneRequest );
 	}
 
@@ -1277,7 +1278,7 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 		return;
 	}
 
-	CG_PModel_AddFlag( cent, drawSceneRequest );
+	CG_PModel_AddFlag( cent, drawSceneRequest, viewState );
 
 	CG_AddShellEffects( &cent->ent, cent->effects, drawSceneRequest );
 
@@ -1285,7 +1286,7 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 
 	if( cent->localEffects[LOCALEFFECT_EV_PLAYER_TELEPORT_IN] | cent->localEffects[LOCALEFFECT_EV_PLAYER_TELEPORT_OUT] ) {
 		vec3_t color;
-		if( ISVIEWERENTITY( cent->current.number ) ) {
+		if( viewState->isViewerEntity( cent->current.number ) ) {
 			VectorSet( color, 0.1f, 0.1f, 0.1f );
 		} else {
 			VectorSet( color, 0.5f, 0.5f, 0.5f );
@@ -1324,11 +1325,11 @@ void CG_AddPModel( centity_t *cent, DrawSceneRequest *drawSceneRequest ) {
 		return;
 	}
 
-	const bool addCoronaLight = !ISVIEWERENTITY( cent->current.number ) || cg.view.thirdperson;
+	const bool addCoronaLight = !viewState->isViewerEntity( cent->current.number ) || viewState->view.thirdperson;
 
 	// add weapon model
 	CG_AddWeaponOnTag( &cent->ent, &tag_weapon, cent->current.weapon, cent->effects, addCoronaLight,
-		&pmodel->projectionSource, pmodel->flash_time, pmodel->barrel_time, drawSceneRequest );
+		&pmodel->projectionSource, pmodel->flash_time, pmodel->barrel_time, drawSceneRequest, viewState );
 }
 
 #define MOVEDIREPSILON  0.3f

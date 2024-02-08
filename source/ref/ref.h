@@ -541,7 +541,7 @@ struct Skin;
 Skin *R_RegisterSkinFile( const char *name );
 shader_s *R_FindShaderForSkinFile( const Skin *skin, const char *meshname );
 
-void RF_TransformVectorToScreen( const refdef_t *rd, const vec3_t in, vec2_t out );
+bool RF_TransformVectorToViewport( const refdef_t *rd, const vec3_t in, vec2_t out );
 bool RF_LerpTag( orientation_t *orient, const model_s *mod, int oldframe, int frame, float lerpfrac, const char *name );
 
 void        R_SetCustomColor( int num, int r, int g, int b );
@@ -563,6 +563,7 @@ void RF_BeginFrame( bool forceClear, bool forceVsync, bool uncappedFPS );
 void RF_EndFrame();
 
 void R_Set2DMode( bool );
+void RF_Set2DScissor( int x, int y, int w, int h );
 
 const char *RF_GetSpeedsMessage( char *out, size_t size );
 

@@ -2,6 +2,7 @@
 
 #include "local.h"
 #include "../common/q_shared.h"
+#include "../common/gs_public.h"
 #include "../common/wswstringsplitter.h"
 #include "../common/wswtonum.h"
 #include "../client/client.h"
@@ -254,26 +255,43 @@ auto Scoreboard::checkAndGetUpdates( const RawData &currData, PlayerUpdatesList 
 	unsigned updatesMask = 0x0;
 	bool isTeamUpdateNeeded[4] { false, false, false, false };
 
+	if( currData.povChaseMask != m_oldRawData.povChaseMask ) {
+		updatesMask |= (unsigned)UpdateFlags::Chasers;
+	}
+
+	// This element-wise comparison is 100% correct for this field, as it's padded by zeroes
+	if( std::memcmp( currData.challengersQueue, m_oldRawData.challengersQueue, std::size( currData.challengersQueue ) ) != 0 ) {
+		updatesMask |= (unsigned)UpdateFlags::Challengers;
+	}
+
 	for( unsigned playerIndex = 0; playerIndex < kMaxPlayers; ++playerIndex ) {
 		const auto oldTeam = m_oldRawData.getPlayerTeam( playerIndex );
 		const auto newTeam = currData.getPlayerTeam( playerIndex );
 		if( oldTeam != newTeam ) {
 			isTeamUpdateNeeded[oldTeam] = isTeamUpdateNeeded[newTeam] = true;
 		}
-		addPlayerUpdates( m_oldRawData, currData, playerIndex, playerUpdates );
+		if( addPlayerUpdates( m_oldRawData, currData, playerIndex, playerUpdates ) ) {
+			const unsigned playerNum = currData.getPlayerNum( playerIndex );
+			static_assert( kMaxPlayers <= sizeof( unsigned ) * 8 );
+			assert( playerNum >= 0 && playerNum < sizeof( unsigned ) * 8 );
+			if( currData.povChaseMask & ( 1u << playerNum ) ) {
+				updatesMask |= (unsigned)UpdateFlags::Chasers;
+			}
+			if( !( updatesMask & (unsigned)UpdateFlags::Challengers ) ) {
+				const uint8_t *const queueBegin = std::begin( currData.challengersQueue );
+				const uint8_t *const queueEnd   = std::end( currData.challengersQueue );
+				if( std::find( queueBegin, queueEnd, playerNum + 1 ) != queueEnd ) {
+					updatesMask |= (unsigned)UpdateFlags::Challengers;
+				}
+			}
+			if( currData.getPlayerTeam( playerIndex ) == TEAM_SPECTATOR ) {
+				updatesMask |= (unsigned)UpdateFlags::Spectators;
+			}
+		}
 	}
 
 	if( !playerUpdates.empty() ) {
 		updatesMask |= (unsigned)UpdateFlags::Players;
-	}
-
-	if( currData.povChaseMask != m_oldRawData.povChaseMask ) {
-		updatesMask |= (unsigned)UpdateFlags::Chasers;
-	}
-
-	// This byte-wise comparison is 100% correct for this field.
-	if( memcmp( currData.challengersQueue, m_oldRawData.challengersQueue, sizeof( currData.challengersQueue ) ) != 0 ) {
-		updatesMask |= (unsigned)UpdateFlags::Challengers;
 	}
 
 	for( unsigned i = 0; i < 4; ++i ) {
@@ -323,8 +341,7 @@ auto Scoreboard::getPlayerClanForColumn( unsigned playerIndex, unsigned column )
 	return CG_PlayerClan( m_oldRawData.getPlayerNum( playerIndex ) );
 }
 
-void Scoreboard::addPlayerUpdates( const RawData &oldOne, const RawData &newOne,
-								   unsigned playerIndex, PlayerUpdatesList &dest ) {
+bool Scoreboard::addPlayerUpdates( const RawData &oldOne, const RawData &newOne, unsigned playerIndex, PlayerUpdatesList &dest ) {
 	const auto oldPlayerNum = oldOne.getPlayerNum( playerIndex );
 	const auto newPlayerNum = newOne.getPlayerNum( playerIndex );
 
@@ -362,7 +379,10 @@ void Scoreboard::addPlayerUpdates( const RawData &oldOne, const RawData &newOne,
 
 	if( (unsigned)nickname | (unsigned)clan | (unsigned)score | (unsigned)mask | (unsigned)ghosting ) {
 		new( dest.unsafe_grow_back() )PlayerUpdates { (uint8_t)playerIndex, mask, nickname, clan, score, ghosting };
+		return true;
 	}
+
+	return false;
 }
 
 }

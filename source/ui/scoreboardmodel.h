@@ -133,7 +133,7 @@ public:
 
 	using PlayerUpdates = Scoreboard::PlayerUpdates;
 
-	void dispatchPlayerRowUpdates( const PlayerUpdates &updates, int team, int rowInTeam, int rowInMixedList );
+	void dispatchPlayerRowUpdates( const PlayerUpdates &updates, int team, int rowInTeam, std::optional<int> rowInMixedList );
 public:
 	enum class QmlColumnKind {
 		Nickname,

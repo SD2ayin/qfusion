@@ -8,7 +8,8 @@ StackView {
     id: root
     initialItem: settingsComponent
 
-    readonly property var listOfHuds: UI.hudEditorModel.existingHuds
+    readonly property var listOfRegularHuds: UI.regularHudEditorModel.existingHuds
+    readonly property var listOfMiniviewHuds: UI.miniviewHudEditorModel.existingHuds
 
     function startHudEditorWizard() {
         clear(StackView.Immediate)
@@ -61,18 +62,18 @@ StackView {
                 SettingsGroupHeaderRow { text: "HUD" }
 
                 SettingsRow {
-                    text: "Player HUD"
+                    text: "Regular"
                     CVarAwareComboBox {
-                        knownHeadingsAndValues: [listOfHuds, listOfHuds]
-                        cvarName: "cg_clientHUD"
+                        knownHeadingsAndValues: [listOfRegularHuds, listOfRegularHuds]
+                        cvarName: "cg_regularHud"
                     }
                 }
 
                 SettingsRow {
-                    text: "Spectator HUD"
+                    text: "Miniview"
                     CVarAwareComboBox {
-                        knownHeadingsAndValues: [listOfHuds, listOfHuds]
-                        cvarName: "cg_specHUD"
+                        knownHeadingsAndValues: [listOfMiniviewHuds, listOfMiniviewHuds]
+                        cvarName: "cg_miniviewHud"
                     }
                 }
 
@@ -80,7 +81,7 @@ StackView {
                     Layout.preferredWidth: 150
                     Layout.margins: 16
                     Layout.alignment: Qt.AlignHCenter
-                    text: "Edit huds"
+                    text: "Edit HUDs"
                     highlighted: true
                     //Material.accent: Qt.lighter(Material.background, 1.1)
                     onClicked: root.startHudEditorWizard()

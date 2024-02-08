@@ -6,11 +6,9 @@ import net.warsow 2.6
 
 Item {
     id: root
-    property var selectedForLoadingFileName
-    property var selectedForSavingFileName
+
     signal exitRequested()
 
-    readonly property var existingHuds: UI.hudEditorModel.existingHuds
     readonly property real listItemWidth: 300
 
     Label {
@@ -24,7 +22,7 @@ Item {
         font.weight: Font.Medium
         font.pointSize: 12
         font.letterSpacing: 1
-        text: "Step <b>" + (swipeView.currentIndex + 1) + "/3</b> - " + swipeView.currentItem.subpageTitle
+        text: "Step <b>" + (stackView.currentItem.stageIndex + 1) + "/4</b> - " + stackView.currentItem.subpageTitle
     }
 
     Label {
@@ -38,27 +36,77 @@ Item {
         elide: Qt.ElideRight
         font.pointSize: 12
         font.letterSpacing: 1
-        text: swipeView.currentItem.summary
+        text: stackView.currentItem.summary
     }
 
-    SwipeView {
-        id: swipeView
+    StackView {
+        id: stackView
         anchors.top: summaryLabel.bottom
         anchors.bottom: buttonsBar.top
         anchors.left: parent.left
         anchors.right: parent.right
-        interactive: false
         clip: true
+        initialItem: flavorSelectionComponent
+        function setComponent(c, props) { replace(c, props) }
+    }
 
-        onCurrentIndexChanged: {
-            selectedForSavingFileName = undefined
-            if (swipeView.currentIndex === 0) {
-                selectedForLoadingFileName = undefined
+    Component {
+        id: flavorSelectionComponent
+        Item {
+            id: flavorSelectionPage
+
+            property var selectedHudEditorModel
+
+            readonly property string subpageTitle: "Select a HUD flavor"
+            readonly property string summary: {
+                if (selectedHudEditorModel === UI.regularHudEditorModel) {
+                    "You have selected editing primary HUD models"
+                } else if (selectedHudEditorModel == UI.miniviewHudEditorModel) {
+                    "You have selected editing miniview HUD models"
+                } else {
+                    ""
+                }
+            }
+
+            readonly property bool canGoBack: false
+            readonly property bool canGoNext: !!selectedHudEditorModel
+            readonly property int stageIndex: 0
+
+            width: root.width
+
+            function handleNextRequest() {
+                console.assert(selectedHudEditorModel)
+                stackView.setComponent(loadPageComponent, {"selectedHudEditorModel" : selectedHudEditorModel})
+            }
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 12
+
+                SelectableLabel {
+                    width: listItemWidth
+                    text: "Primary"
+                    selected: selectedHudEditorModel === UI.regularHudEditorModel
+                    onClicked: selectedHudEditorModel = UI.regularHudEditorModel
+                }
+                SelectableLabel {
+                    width: listItemWidth
+                    text: "Miniview"
+                    selected: selectedHudEditorModel === UI.miniviewHudEditorModel
+                    onClicked: selectedHudEditorModel = UI.miniviewHudEditorModel
+                }
             }
         }
+    }
 
+    Component {
+        id: loadPageComponent
         Item {
             id: loadPage
+
+            property var selectedHudEditorModel
+            property var selectedForLoadingFileName
+
             readonly property string subpageTitle: "Select a HUD file to load"
             readonly property string summary: {
                 if (selectedForLoadingFileName) {
@@ -68,14 +116,34 @@ Item {
                     ''
                 }
             }
-            readonly property bool canGoPrev: false
+
+            readonly property bool canGoBack: true
             readonly property bool canGoNext: !!selectedForLoadingFileName
+            readonly property int stageIndex: 1
+
             property int selectedIndex: -1
             width: root.width
 
-            SwipeView.onIsCurrentItemChanged: {
-                if (SwipeView.isCurrentItem) {
-                    loadPage.selectedIndex = -1
+            Component.onCompleted: {
+                console.assert(selectedHudEditorModel)
+            }
+
+            function handleBackRequest() {
+                console.assert(selectedHudEditorModel)
+                stackView.setComponent(flavorSelectionComponent)
+            }
+
+            function handleNextRequest() {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+                if (selectedHudEditorModel.load(selectedForLoadingFileName)) {
+                    stackView.setComponent(hudEditorComponent, {
+                        "selectedHudEditorModel" : selectedHudEditorModel,
+                        "selectedForLoadingFileName" : selectedForLoadingFileName,
+                    })
+                } else {
+                    console.warn("Failed to load the HUD editor model from", root.impl.selectedForLoadingFileName)
+                    root.exitRequested()
                 }
             }
 
@@ -93,7 +161,7 @@ Item {
                         height: contentHeight
                         anchors.centerIn: parent
                         spacing: 12
-                        model: existingHuds
+                        model: selectedHudEditorModel.existingHuds
                         delegate: SelectableLabel {
                             width: listItemWidth
                             text: modelData
@@ -107,34 +175,74 @@ Item {
                 }
             }
         }
+    }
 
+    Component {
+        id: hudEditorComponent
         Item {
+            property var selectedHudEditorModel
+            property var selectedForLoadingFileName
+
             readonly property string subpageTitle: "Edit the selected HUD"
-            readonly property string summary: '<b>' + (selectedForLoadingFileName || '').toUpperCase() + '</b>'
-            readonly property bool canGoPrev: true
+            readonly property string summary: {
+                const flavorString = (selectedHudEditorModel === UI.regularHudEditorModel) ? "regular" : "miniview"
+                '<b>' + selectedForLoadingFileName.toUpperCase() + ' (<font color="yellow">' + flavorString + '</font>)</b>'
+            }
+            readonly property bool canGoBack: true
             readonly property bool canGoNext: true
+            readonly property int stageIndex: 2
+
             width: root.width
+
+            Component.onCompleted: {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+            }
+
+            function handleBackRequest() {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+                stackView.setComponent(loadPageComponent, {"selectedHudEditorModel" : selectedHudEditorModel})
+            }
+
+            function handleNextRequest() {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+                stackView.setComponent(savePageComponent, {
+                    "selectedHudEditorModel" : selectedHudEditorModel,
+                    "selectedForLoadingFileName" : selectedForLoadingFileName,
+                })
+            }
 
             HudEditor {
                 anchors.centerIn: parent
                 width: parent.width
                 height: parent.height - 48
+                hudEditorModel: selectedHudEditorModel
                 Component.onCompleted: {
-                    UI.hudEditorModel.setDragAreaSize(width, height)
-                    UI.hudEditorModel.setFieldAreaSize(fieldWidth, fieldHeight)
+                    selectedHudEditorModel.setDragAreaSize(width, height)
+                    selectedHudEditorModel.setFieldAreaSize(fieldWidth, fieldHeight)
                 }
             }
         }
+    }
 
+    Component {
+        id: savePageComponent
         Item {
             id: savePage
+
+            property var selectedHudEditorModel
+            property var selectedForLoadingFileName
+            property var selectedForSavingFileName
+
             readonly property string subpageTitle: 'Select a file to save the edited HUD'
             readonly property string summary: {
                 if (selectedForSavingFileName) {
                     if (selectedForSavingFileName === selectedForLoadingFileName) {
                         'You have selected saving changes back to the <b><font color="yellow">' +
                             selectedForLoadingFileName + '</font></b> HUD file'
-                    } else if (savePage.selectedIndex == existingHuds.length) {
+                    } else if (savePage.selectedIndex == selectedHudEditorModel.existingHuds.length) {
                         'You have selected saving the edited <b><font color="yellow">' + selectedForLoadingFileName +
                         '</font></b> HUD to <b><font color="yellow">' + selectedForSavingFileName + '</font><b>'
                     } else {
@@ -146,15 +254,35 @@ Item {
                     ''
                 }
             }
-            readonly property bool canGoPrev: true
+            readonly property bool canGoBack: true
             readonly property bool canGoNext: !!selectedForSavingFileName
+            readonly property int stageIndex: 3
+
             property int selectedIndex: -1
             width: root.width
 
-            SwipeView.onIsCurrentItemChanged: {
-                if (SwipeView.isCurrentItem) {
-                    savePage.selectedIndex = -1
+            Component.onCompleted: {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+            }
+
+            function handleBackRequest() {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+                stackView.setComponent(hudEditorComponent, {
+                    "selectedHudEditorModel" : selectedHudEditorModel,
+                    "selectedForLoadingFileName" : selectedForLoadingFileName,
+                })
+            }
+
+            function handleNextRequest() {
+                console.assert(selectedHudEditorModel)
+                console.assert(selectedForLoadingFileName)
+                console.assert(selectedForSavingFileName)
+                if (!selectedHudEditorModel.save(selectedForSavingFileName)) {
+                    console.warn("Failed to saved the HUD model to", selectedForSavingFileName)
                 }
+                root.exitRequested()
             }
 
             onSelectedIndexChanged: {
@@ -197,17 +325,18 @@ Item {
                         spacing: 8
                         ListView {
                             id: selectHudToSaveList
-                            model: existingHuds
+                            model: selectedHudEditorModel.existingHuds
                             width: listItemWidth
                             height: contentHeight
                             spacing: 12
                             delegate: SelectableLabel {
-                                enabled: allowOverwritingCheckBox.checked || index === existingHuds.length
+                                enabled: allowOverwritingCheckBox.checked || index === selectedHudEditorModel.existingHuds.length
                                 width: listItemWidth
                                 text: modelData
                                 selected: savePage.selectedIndex === index
                                 onClicked: {
                                     savePage.selectedIndex = index
+                                    const existingHuds     = selectedHudEditorModel.existingHuds
                                     // Remove the no longer useful custom name by switching back to the default model
                                     if (model.length != existingHuds.length && index != existingHuds.length) {
                                         selectHudToSaveList.model = existingHuds
@@ -218,8 +347,9 @@ Item {
                         AddNewListItemButton {
                             width: listItemWidth
                             height: 36
+                            maxHudNameLength: selectedHudEditorModel.maxHudNameLength
                             onAdditionRequested: {
-                                const model = [...existingHuds]
+                                const model = [...selectedHudEditorModel.existingHuds]
                                 model.push(text)
                                 selectHudToSaveList.model = model
                                 savePage.selectedIndex = model.length - 1
@@ -246,8 +376,8 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: buttonsBar.anchors.bottomMargin + 16
-        count: 3
-        currentIndex: swipeView.currentIndex
+        count: 4
+        currentIndex: stackView.currentItem.stageIndex
         interactive: false
     }
 
@@ -260,17 +390,17 @@ Item {
         height: 64
 
         Button {
-            id: prevButton
+            id: backButton
             flat: true
             text: "back"
             Layout.preferredWidth: 120
-            visible: swipeView.currentItem.canGoPrev
-            onClicked: swipeView.currentIndex = swipeView.currentIndex - 1
+            visible: stackView.currentItem.canGoBack
+            onClicked: stackView.currentItem.handleBackRequest()
         }
 
         Item {
-            Layout.preferredWidth: prevButton.Layout.preferredWidth
-            visible: !prevButton.visible
+            Layout.preferredWidth: backButton.Layout.preferredWidth
+            visible: !backButton.visible
         }
 
         Item { Layout.fillWidth: true }
@@ -278,38 +408,22 @@ Item {
         Button {
             id: nextButton
             highlighted: true
-            text: swipeView.currentIndex === 2 ? "save" : "next"
+            text: stackView.currComponent === savePageComponent ? "save" : "next"
             Layout.preferredWidth: 120
-            visible: swipeView.currentItem.canGoNext
-            onClicked: {
-                if (swipeView.currentIndex === 0) {
-                    if (UI.hudEditorModel.load(selectedForLoadingFileName)) {
-                        swipeView.currentIndex = 1
-                    } else {
-                        console.warn("Failed to load the HUD editor model from", selectedForLoadingFileName)
-                        root.exitRequested()
-                    }
-                } else if (swipeView.currentIndex === 1) {
-                    swipeView.currentIndex = 2
-                } else {
-                    if (!UI.hudEditorModel.save(selectedForSavingFileName)) {
-                        console.warn("Failed to save the HUD editor model to", selectedForSavingFileName)
-                    }
-                    root.exitRequested()
-                }
-            }
+            visible: stackView.currentItem.canGoNext
+            onClicked: stackView.currentItem.handleNextRequest()
         }
 
         Item {
-            Layout.preferredWidth: prevButton.Layout.preferredWidth
+            Layout.preferredWidth: backButton.Layout.preferredWidth
             visible: !nextButton.visible
         }
     }
 
     function handleKeyEvent(event) {
         if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back) {
-            if (swipeView.currentIndex) {
-                swipeView.currentIndex = swipeView.currentIndex - 1
+            if (stackView.currentItem.canGoBack) {
+                stackView.currentItem.handleBackRequest()
             } else {
                 root.exitRequested()
             }

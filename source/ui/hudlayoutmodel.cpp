@@ -1,4 +1,5 @@
 #include "hudlayoutmodel.h"
+#include "local.h"
 #include "../common/wswexceptions.h"
 #include "../common/wswfs.h"
 #include "../common/wswtonum.h"
@@ -115,27 +116,54 @@ bool HudLayoutModel::load( const wsw::StringView &fileName ) {
 				}
 			}
 		}
+	} else {
+		uiNotice() << "Failed to make file path";
 	}
 	return false;
 }
 
-static const wsw::StringView kHudsDirectory( "huds"_asView );
-static const wsw::StringView kHudsExtension( ".wswhud"_asView );
+static const wsw::StringView kHudsExtension( ".hud"_asView );
+static const wsw::StringView kRegularHudsDir( "huds/regular"_asView );
+static const wsw::StringView kMiniviewHudsDir( "huds/miniview"_asView );
 
 void HudEditorModel::reloadExistingHuds() {
+	wsw::StringView dir, suffix;
+	if( m_flavor != HudLayoutModel::Miniview ) {
+		dir    = kRegularHudsDir;
+		suffix = ".regular"_asView;
+	} else {
+		dir    = kMiniviewHudsDir;
+		suffix = ".miniview"_asView;
+	}
+
 	wsw::fs::SearchResultHolder searchResultHolder;
-	if( const auto maybeResult = searchResultHolder.findDirFiles( kHudsDirectory, kHudsExtension ) ) {
+	if( const auto maybeResult = searchResultHolder.findDirFiles( dir, kHudsExtension ) ) {
 		QJsonArray huds;
 		for( const wsw::StringView &fileName : *maybeResult ) {
 			if( const auto maybeName = wsw::fs::stripExtension( fileName ) ) {
-				if( maybeName->length() <= HudLayoutModel::kMaxHudNameLength ) {
-					// Check whether the hud file really contains a valid hud
-					// TODO: Don't modify the global mutable state
-					if( m_layoutModel.load( *maybeName ) ) {
-						huds.append( QString::fromLatin1( maybeName->data(), (int)maybeName->size() ).toLower() );
+				// The fs can't handle multi-dot extensions (?), here's the workaround
+				if( maybeName->endsWith( suffix, wsw::IgnoreCase ) ) {
+					const wsw::StringView actualName = maybeName->dropRight( suffix.length() );
+					if( actualName.length() <= HudLayoutModel::kMaxHudNameLength ) {
+						// Check whether the hud file really contains a valid hud.
+						// We use a separate scratchpad model to avoid modifying the actual model.
+						if( m_scratchpadLayoutModel.load( actualName ) ) {
+							huds.append( QString::fromLatin1( actualName.data(), (int)actualName.size() ).toLower() );
+						}
+					} else {
+						uiWarning() << "The name of file" << fileName << "is too long for a valid hud";
 					}
+				} else {
+					uiWarning() << "The name of file" << fileName << R"(must end with a valud suffix, ".regular" or ".miniview")";
 				}
 			}
+		}
+		// Don't hold no longer useful temporary data in memory
+		m_scratchpadLayoutModel.beginResetModel();
+		m_scratchpadLayoutModel.m_entries.clear();
+		m_scratchpadLayoutModel.endResetModel();
+		if( huds.empty() ) {
+			uiWarning() << "Failed to find any HUD for" << suffix.drop( 1 ) << "flavor";
 		}
 		if( huds != m_existingHuds ) {
 			m_existingHuds = huds;
@@ -165,7 +193,7 @@ bool HudEditorModel::save( const QByteArray &fileName ) {
 	// Make sure that the file handle has been closed to the moment of reloading
 	if( hasWrittenSuccessfully ) {
 		reloadExistingHuds();
-		Q_EMIT hudUpdated( fileName );
+		Q_EMIT hudUpdated( fileName, m_flavor );
 	}
 	return hasWrittenSuccessfully;
 }
@@ -187,7 +215,11 @@ auto HudLayoutModel::makeFilePath( wsw::StaticString<MAX_QPATH> *buffer,
 		}
 	}
 	buffer->clear();
-	( *buffer ) << kHudsDirectory << '/' << baseFileName << kHudsExtension;
+	if( m_flavor != Miniview ) {
+		( *buffer ) << kRegularHudsDir << '/' << baseFileName << ".regular"_asView << kHudsExtension;
+	} else {
+		( *buffer ) << kMiniviewHudsDir << '/' << baseFileName << ".miniview"_asView << kHudsExtension;
+	}
 	return buffer->asView();
 }
 
@@ -380,7 +412,15 @@ auto HudLayoutModel::deserialize( const wsw::StringView &data ) -> std::optional
 		const int kind = entry.kind;
 		if( kind && (unsigned)kind < (unsigned)presentKinds.max_size() ) {
 			if( metaKinds.valueToKey( kind ) != nullptr ) {
-				if ( !presentKinds[kind] ) {
+				if( m_flavor == Miniview ) {
+					const EditorProps &props = kEditorPropsForKind[kind - 1];
+					assert( props.kind == kind );
+					if( !props.allowInMiniviewHud ) {
+						uiWarning() << "An element of kind" << props.name << "is disallowed in miniview HUDs";
+						return std::nullopt;
+					}
+				}
+				if( !presentKinds[kind] ) {
 					presentKinds[kind] = true;
 					continue;
 				}
@@ -587,10 +627,24 @@ auto HudEditorToolboxModel::data( const QModelIndex &modelIndex, int role ) cons
 	return QVariant();
 }
 
-void HudEditorToolboxModel::setDisplayedAnchorsForKind( int kind, int anchors ) {
-	assert( (unsigned)( kind - 1 ) < m_entries.size() );
-	m_entries[kind - 1].kind = kind;
-	const QModelIndex modelIndex( createIndex( kind - 1, 0 ) );
+auto HudEditorToolboxModel::findEntryByKind( int kind ) const -> const Entry * {
+	for( const Entry &entry: m_entries ) {
+		if( entry.kind == kind ) {
+			return std::addressof( entry );
+		}
+	}
+	return nullptr;
+}
+
+void HudEditorToolboxModel::setDisplayedAnchorsForKind( int kind, int /*anchors*/ ) {
+	const Entry *entry = findEntryByKind( kind );
+	assert( entry );
+	const auto indexOfEntry = entry - m_entries.data();
+	// TODO: This is wrong for the mini model
+	//assert( (unsigned)( kind - 1 ) < m_entries.size() );
+	// TODO: Why were we assinging the kind
+	//m_entries[kind - 1].kind = kind;
+	const QModelIndex modelIndex( createIndex( (int)indexOfEntry, 0 ) );
 	// TODO: Use a better granularity for supplied roles
 	Q_EMIT dataChanged( modelIndex, modelIndex, kMutableRoles );
 }
@@ -606,6 +660,7 @@ bool HudEditorLayoutModel::acceptDeserializedEntries( wsw::Vector<FileEntry> &&f
 	for( FileEntry &fileEntry: fileEntries ) {
 		const auto &props = kEditorPropsForKind[fileEntry.kind - 1];
 		assert( fileEntry.kind == props.kind );
+		assert( m_flavor != Miniview || props.allowInMiniviewHud );
 		Entry entry;
 		entry.kind = fileEntry.kind;
 		entry.selfAnchors = fileEntry.selfAnchors;
@@ -630,15 +685,17 @@ bool HudEditorLayoutModel::acceptDeserializedEntries( wsw::Vector<FileEntry> &&f
 		if( !( presentKindsMask & ( 1u << (unsigned)i ) ) ) {
 			const auto kind = (Kind)i;
 			const auto props = kEditorPropsForKind[kind - 1];
-			Entry entry;
-			entry.kind = kind;
-			entry.selfAnchors = VCenter | HCenter;
-			entry.anchorItemAnchors = VCenter | HCenter;
-			entry.realAnchorItem = AnchorItem::forToolbox();
-			entry.rectangle.setSize( props.size );
-			entry.color = props.color;
-			entry.name = props.name;
-			entries.push_back( entry );
+			if( m_flavor != Miniview || props.allowInMiniviewHud ) {
+				Entry entry;
+				entry.kind = kind;
+				entry.selfAnchors = VCenter | HCenter;
+				entry.anchorItemAnchors = VCenter | HCenter;
+				entry.realAnchorItem = AnchorItem::forToolbox();
+				entry.rectangle.setSize( props.size );
+				entry.color = props.color;
+				entry.name = props.name;
+				entries.push_back( entry );
+			}
 		}
 	}
 
@@ -649,20 +706,70 @@ bool HudEditorLayoutModel::acceptDeserializedEntries( wsw::Vector<FileEntry> &&f
 }
 
 const HudLayoutModel::EditorProps HudLayoutModel::kEditorPropsForKind[] {
-	{ "Health"_asView, HealthBar, QSize( 144, 32 ), QColor::fromRgbF( 1.0, 0.5, 1.0 ) },
-	{ "Armor"_asView, ArmorBar, QSize( 144, 32 ), QColor::fromRgbF( 1.0, 0.3, 0.0 ) },
-	{ "Inventory"_asView, InventoryBar, QSize( 256, 48 ), QColor::fromRgbF( 1.0, 0.8, 0.0 ) },
-	{ "Weapon status"_asView, WeaponStatus, QSize( 96, 96 ), QColor::fromRgbF( 1.0, 0.5, 0.0 ) },
-	{ "Match time"_asView, MatchTime, QSize( 128, 64 ), QColor::fromRgbF( 0.7, 0.7, 0.7 ) },
-	{ "Alpha score"_asView, AlphaScore, QSize( 128, 56 ), QColor::fromRgbF( 1.0, 0.0, 0.0 ) },
-	{ "Beta score"_asView, BetaScore, QSize( 128, 56 ), QColor::fromRgbF( 0.0, 1.0, 0.0 ) },
-	{ "Chat"_asView, Chat, QSize( 256, 72 ), QColor::fromRgbF( 0.7, 1.0, 0.3 ) },
-	{ "Team info"_asView, TeamInfo, QSize( 256, 128 ), QColor::fromRgbF( 0.0, 0.3, 0.7 ) },
-	{ "Frags feed"_asView, FragsFeed, QSize( 144, 108 ), QColor::fromRgbF( 0.3, 0.0, 0.7 ) },
-	{ "Message feed"_asView, MessageFeed, QSize( 256, 64 ), QColor::fromRgbF( 0.0, 0.7, 0.7 ) },
-	{ "Awards area"_asView, AwardsArea, QSize( 256, 64 ), QColor::fromRgbF( 0.0, 0.7, 0.9 ) },
-	{ "Status message"_asView, StatusMessage, QSize( 192, 32 ), QColor::fromRgbF( 0.3, 0.9, 0.7 ) },
-	{ "Objective status"_asView, ObjectiveStatus, QSize( 96, 64 ), QColor::fromRgbF( 0.9, 0.6, 0.3 ) }
+	EditorProps {
+		.name = "Health"_asView, .kind = HealthBar, .size = QSize( 144, 32 ),
+		.color = QColor::fromRgbF( 1.0, 0.5, 1.0 ), .allowInMiniviewHud = true,
+	},
+	EditorProps {
+		.name = "Armor"_asView, .kind = ArmorBar, .size = QSize( 144, 32 ),
+		.color = QColor::fromRgbF( 1.0, 0.3, 0.0 ), .allowInMiniviewHud = true,
+	},
+	EditorProps {
+		.name = "Inventory"_asView, .kind = InventoryBar, .size = QSize( 256, 48 ),
+		.color = QColor::fromRgbF( 1.0, 0.8, 0.0 ), .allowInMiniviewHud = true,
+	},
+	EditorProps {
+		.name = "Weapon status"_asView, .kind = WeaponStatus, .size = QSize( 96, 96 ),
+		.color = QColor::fromRgbF( 1.0, 0.5, 0.0 ), .allowInMiniviewHud = true,
+	},
+	EditorProps {
+		.name = "Match time"_asView, .kind = MatchTime, .size = QSize( 128, 64 ),
+		.color = QColor::fromRgbF( 0.7, 0.7, 0.7 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Alpha score"_asView, .kind = AlphaScore, .size = QSize( 128, 56 ),
+		.color = QColor::fromRgbF( 1.0, 0.0, 0.0 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Beta score"_asView, .kind = BetaScore, .size = QSize( 128, 56 ),
+		.color = QColor::fromRgbF( 0.0, 1.0, 0.0 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Chat"_asView, .kind = Chat, .size = QSize( 256, 72 ),
+		.color = QColor::fromRgbF( 0.7, 1.0, 0.3 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Team info"_asView, .kind = TeamInfo, .size = QSize( 256, 128 ),
+		.color = QColor::fromRgbF( 0.0, 0.3, 0.7 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Frags feed"_asView, .kind = FragsFeed, .size = QSize( 144, 108 ),
+		.color = QColor::fromRgbF( 0.3, 0.0, 0.7 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Message feed"_asView, .kind = MessageFeed, .size = QSize( 256, 64 ),
+		.color = QColor::fromRgbF( 0.0, 0.7, 0.7 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Awards area"_asView, .kind = AwardsArea, .size = QSize( 256, 64 ),
+		.color = QColor::fromRgbF( 0.0, 0.7, 0.9 ), .allowInMiniviewHud = true,
+	},
+	EditorProps {
+		.name = "Status message"_asView, .kind = StatusMessage, .size = QSize( 192, 32 ),
+		.color = QColor::fromRgbF( 0.3, 0.9, 0.7 ), .allowInMiniviewHud = true,
+	},
+	EditorProps {
+		.name = "Objective status"_asView, .kind = ObjectiveStatus, .size = QSize( 96, 64 ),
+		.color = QColor::fromRgbF( 0.9, 0.6, 0.3 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Miniview pane 1"_asView, .kind = MiniviewPane1, .size = QSize( 128, 128 ),
+		.color = QColor::fromRgbF( 0.5, 1.0, 0.6 ), .allowInMiniviewHud = false,
+	},
+	EditorProps {
+		.name = "Miniview pane 2"_asView, .kind = MiniviewPane2, .size = QSize( 128, 128 ),
+		.color = QColor::fromRgbF( 0.5, 1.0, 0.6 ), .allowInMiniviewHud = false,
+	}
 };
 
 void HudEditorModel::setFieldAreaSize( qreal width, qreal height ) {
@@ -901,8 +1008,9 @@ auto HudEditorModel::getMatchingAnchorItem( int draggedIndex ) const
 	const QRectF validAreaRectangle( 0, 0, m_fieldAreaSize.width(), m_fieldAreaSize.height() );
 	if( !draggedRectangle.intersects( validAreaRectangle ) ) {
 		const auto draggedItemKind = itemEntries[draggedIndex].kind;
-		assert( draggedItemKind > 0 );
-		const auto &toolboxEntryRectangle = m_toolboxModel.m_entries[draggedItemKind - 1].rectangle;
+		const auto entry           = m_toolboxModel.findEntryByKind( draggedItemKind );
+		assert( entry );
+		const auto &toolboxEntryRectangle = entry->rectangle;
 		const auto centerAnchors = HudLayoutModel::VCenter | HudLayoutModel::HCenter;
 		const QPointF draggedItemCenter( getPointForAnchors( draggedRectangle, centerAnchors ) );
 		const QPointF toolboxPlaceholderCenter( getPointForAnchors( toolboxEntryRectangle, centerAnchors ) );
@@ -1051,6 +1159,8 @@ auto HudLayoutModel::getFlagsForKind( Kind kind ) -> Flags {
 		case AwardsArea: return AllowPostmatch;
 		case StatusMessage: return NoFlags;
 		case ObjectiveStatus: return NoFlags;
+		case MiniviewPane1: return NoFlags;
+		case MiniviewPane2: return NoFlags;
 		default: wsw::failWithLogicError( "unreachable" );
 	}
 }
@@ -1071,22 +1181,28 @@ auto HudLayoutModel::getShownItemBitsForKind( Kind kind ) -> ShownItemBits {
 		case AwardsArea: return ShowAwards;
 		case StatusMessage: return NoShownItemBits;
 		case ObjectiveStatus: return NoShownItemBits;
+		// TODO: Should there be some specific bit for miniviews?
+		case MiniviewPane1: return NoShownItemBits;
+		case MiniviewPane2: return NoShownItemBits;
 		default: wsw::failWithLogicError( "unreachable" );
 	}
 }
 
-HudEditorModel::HudEditorModel() {
+HudEditorModel::HudEditorModel( HudLayoutModel::Flavor flavor )
+	: m_layoutModel( flavor ), m_scratchpadLayoutModel( flavor ), m_flavor( flavor ) {
 	reloadExistingHuds();
 
 	m_toolboxModel.beginResetModel();
 
 	for( const auto &props: HudEditorLayoutModel::kEditorPropsForKind ) {
-		HudEditorToolboxModel::Entry entry;
-		entry.name = props.name;
-		entry.color = props.color;
-		entry.kind = props.kind;
-		entry.rectangle = QRectF( 0, 0, props.size.width(), props.size.height() );
-		m_toolboxModel.m_entries.push_back( entry );
+		if( m_flavor != HudLayoutModel::Miniview || props.allowInMiniviewHud ) {
+			m_toolboxModel.m_entries.emplace_back( HudEditorToolboxModel::Entry {
+				.rectangle = QRectF( 0, 0, props.size.width(), props.size.height() ),
+				.name      = props.name,
+				.color     = props.color,
+				.kind      = props.kind,
+			});
+		}
 	}
 
 	m_toolboxModel.endResetModel();
@@ -1099,7 +1215,8 @@ auto InGameHudLayoutModel::roleNames() const -> QHash<int, QByteArray> {
 		{ SelfAnchors, "selfAnchors" },
 		{ AnchorItemAnchors, "anchorItemAnchors" },
 		{ AnchorItemIndex, "anchorItemIndex" },
-		{ IndividualMask, "individualMask" }
+		{ IndividualMask, "individualMask" },
+		{ IsHidden, "isHidden" },
 	};
 }
 
@@ -1117,6 +1234,7 @@ auto InGameHudLayoutModel::data( const QModelIndex &index, int role ) const -> Q
 				case AnchorItemAnchors: return m_entries[row].otherAnchors;
 				case AnchorItemIndex: return m_entries[row].anchorItem.toRawValue();
 				case IndividualMask: return getShownItemBitsForKind( m_entries[row].kind );
+				case IsHidden: return m_entries[row].isHidden;
 				default: return QVariant();
 			}
 		}
@@ -1138,9 +1256,25 @@ bool InGameHudLayoutModel::load( const wsw::StringView &fileName ) {
 }
 
 bool InGameHudLayoutModel::acceptDeserializedEntries( wsw::Vector<FileEntry> &&fileEntries ) {
-	beginResetModel();
-	m_entries.clear();
-	m_entries.reserve( fileEntries.size() );
+	const QMetaEnum metaKinds( QMetaEnum::fromType<Kind>() );
+
+	// Discover what kinds are missing from the layout
+	unsigned presentKindsMask = 0;
+	assert( metaKinds.keyCount() < 32 );
+
+	const bool wasEmpty = m_entries.empty();
+	if( wasEmpty ) {
+		beginResetModel();
+	} else {
+		m_entries.clear();
+	}
+
+	// Items are linked by index, not by kind.
+	// The sorting breaks original indices, hence we have to retranslate anchor item indices upon sorting.
+	// TODO: Specify kinds in file data?
+	assert( fileEntries.size() <= (size_t)metaKinds.keyCount() );
+	auto *kindsForOriginalIndices = (Kind *)alloca( sizeof( Kind ) * fileEntries.size() );
+
 	for( const FileEntry &fileEntry: fileEntries ) {
 		assert( fileEntry.kind && fileEntry.kind < std::size( kEditorPropsForKind ) + 1 );
 		m_entries.emplace_back( Entry {
@@ -1149,8 +1283,61 @@ bool InGameHudLayoutModel::acceptDeserializedEntries( wsw::Vector<FileEntry> &&f
 			.otherAnchors    = fileEntry.otherAnchors,
 			.anchorItem      = fileEntry.anchorItem,
 		});
+
+		const auto kind = (unsigned)fileEntry.kind;
+		assert( kind && kind < 32 );
+		assert( metaKinds.valueToKey( kind ) );
+		assert( !( presentKindsMask & ( 1u << kind ) ) );
+		presentKindsMask |= ( 1u << kind );
+		// TODO: zipWithIndex
+		const auto index = std::addressof( fileEntry ) - fileEntries.data();
+		kindsForOriginalIndices[index] = fileEntry.kind;
 	}
-	endResetModel();
+
+	// Add hidden entries for non-present kinds
+	for( int kind = 1; kind < metaKinds.keyCount() + 1; ++kind ) {
+		if( !( presentKindsMask & ( 1u << (unsigned)kind ) ) ) {
+			if( m_flavor != Miniview || kEditorPropsForKind[kind - 1].allowInMiniviewHud ) {
+				m_entries.emplace_back( Entry {
+					.kind         = (Kind)kind,
+					.selfAnchors  = HCenter | VCenter,
+					.otherAnchors = HCenter | VCenter,
+					.anchorItem   = AnchorItem::forField(),
+					.isHidden     = true,
+				});
+			}
+		}
+	}
+
+	std::sort( m_entries.begin(), m_entries.end(), []( const Entry &a, const Entry &b ) { return a.kind < b.kind; } );
+	// Patch item indices after sorting
+	for( Entry &entry: m_entries ) {
+		// If it was in the file layout
+		if( presentKindsMask & ( 1u << (unsigned)entry.kind ) ) {
+			// If it needs index patching
+			if( entry.anchorItem.isOtherItem() ) {
+				const int unpatchedIndex  = entry.anchorItem.toItemIndex();
+				const Kind anchorItemKind = kindsForOriginalIndices[unpatchedIndex];
+				const auto it = std::find_if( m_entries.begin(), m_entries.end(), [&]( const Entry &e ) {
+					return e.kind == anchorItemKind;
+				});
+				const auto newActualIndex = (unsigned)( it - m_entries.begin() );
+				assert( newActualIndex < m_entries.size() );
+				entry.anchorItem = AnchorItem::forItem( newActualIndex );
+			}
+		}
+	}
+
+	if( wasEmpty ) {
+		endResetModel();
+	} else {
+		Q_EMIT arrangingItemsDisabled();
+		const QModelIndex topLeft( this->index( 0 ) );
+		const QModelIndex bottomRight( this->index( (int)( m_entries.size() - 1 ) ) );
+		Q_EMIT dataChanged( topLeft, bottomRight, kAllRolesExceptKind );
+		Q_EMIT arrangingItemsEnabled();
+	}
+
 	return true;
 }
 

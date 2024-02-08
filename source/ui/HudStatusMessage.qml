@@ -4,18 +4,21 @@ import QtQuick.Controls.Material 2.12
 import net.warsow 2.6
 
 Item {
+    id: root
     implicitWidth: stackView.currentItem ? stackView.currentItem.implicitWidth + 96 : 0
     implicitHeight: stackView.height
 
+    property var povDataModel
+    property bool isMiniview
+
     Connections {
-        target: Hud.dataModel
+        target: root.povDataModel
         onStatusMessageChanged: {
             stackView.clear(StackView.Immediate)
             stackView.push(component, {"message": statusMessage}, StackView.PushTransition)
             timer.start()
         }
     }
-
 
     Timer {
         id: timer
@@ -71,6 +74,7 @@ Item {
             // We must report individual items and not the stack view, otherwise we lose items in transitions
             Connections {
                 target: Hud.ui
+                enabled: !root.isMiniview
                 onDisplayedHudItemsRetrievalRequested: Hud.ui.supplyDisplayedHudItemAndMargin(instantiatedItem, 4.0)
             }
             property string message

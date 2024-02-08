@@ -912,7 +912,7 @@ static const RgbaLifespan kGunbladeHitColors[1] {
 	}
 };
 
-void EffectsSystemFacade::spawnGunbladeBladeHitEffect( const float *pos, const float *dir ) {
+void EffectsSystemFacade::spawnGunbladeBladeHitEffect( const float *pos, const float *dir, int ownerNum ) {
 	// Find what are we hitting
 	vec3_t local_pos, local_dir;
 	VectorCopy( pos, local_pos );
@@ -921,7 +921,7 @@ void EffectsSystemFacade::spawnGunbladeBladeHitEffect( const float *pos, const f
 	VectorMA( pos, -1.0, local_dir, end );
 
 	trace_t trace;
-	CG_Trace( &trace, local_pos, vec3_origin, vec3_origin, end, cg.view.POVent, MASK_SHOT );
+	CG_Trace( &trace, local_pos, vec3_origin, vec3_origin, end, ownerNum, MASK_SHOT );
 
 	if( trace.fraction != 1.0 ) {
 		bool isHittingFlesh = false;
@@ -2753,8 +2753,9 @@ bool EffectsSystemFacade::MultiGroupEventRateLimiter::acquirePermission( int64_t
 
 auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> unsigned {
 
+    ViewState *viewState = getPrimaryViewState();
     orientation_t projection;
-    CG_PModel_GetProjectionSource(owner, &projection);
+    CG_PModel_GetProjectionSource(owner, &projection, viewState);
 
     projection.origin[2] -= 10.0f;
 
@@ -2765,7 +2766,7 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> uns
 		.smoothEdgeDistance = 172.0f,
 		.width              = m_rng.nextFloat( 4.0f, 8.0f ),
 		.minLength          = m_rng.nextFloat( 80.0f, 108.0f ),
-		.distancePercentage = ( owner == (int)cg.predictedPlayerState.POVnum ) ? 0.24f : 0.18f,
+		.distancePercentage = ( owner == (int)viewState->predictedPlayerState.POVnum ) ? 0.24f : 0.18f,
 		.programLightRadius = 72.0f,
 		.coronaLightRadius  = 108.0f,
 		.lightColor         = { 0.9f, 0.8f, 1.0f }
@@ -2777,8 +2778,9 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> uns
 void EffectsSystemFacade::spawnPelletTracers( int owner, std::span<const vec3_t> to,
 											  unsigned *timeoutsBuffer ) {
 
+    ViewState *viewState = getPrimaryViewState();
     orientation_t projection;
-    CG_PModel_GetProjectionSource(owner, &projection);
+    CG_PModel_GetProjectionSource( owner, &projection, viewState );
 
     projection.origin[2] -= 10.0f;
 

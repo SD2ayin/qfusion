@@ -135,13 +135,15 @@ public:
 	void endRegistration() override;
 
 	[[nodiscard]]
-	bool requestsKeyboardFocus() const override;
+	bool grabsKeyboardAndMouseButtons() const override;
+	[[nodiscard]]
+	bool grabsMouseMovement() const override;
 	[[nodiscard]]
 	bool handleKeyEvent( int quakeKey, bool keyDown ) override;
 	[[nodiscard]]
 	bool handleCharEvent( int ch ) override;
 	[[nodiscard]]
-	bool handleMouseMove( int frameTime, int dx, int dy ) override;
+	bool handleMouseMovement( float frameTimeMillis, int dx, int dy ) override;
 
 	void handleEscapeKey() override;
 
@@ -190,6 +192,11 @@ public:
 	[[nodiscard]]
 	bool isShown() const override;
 
+	void dispatchShuttingDown() override { Q_EMIT shuttingDown(); }
+	auto retrieveNumberOfHudMiniviewPanes() -> unsigned override;
+	auto retrieveLimitOfMiniviews() -> unsigned override { return m_hudCommonDataModel.kMaxMiniviews; }
+	auto retrieveHudControlledMiniviews( Rect positions[MAX_CLIENTS], unsigned viewStateNums[MAX_CLIENTS] ) -> unsigned override;
+
 	[[nodiscard]]
 	auto getFrameTimestamp() const -> int64_t { return ::cls.realtime; }
 
@@ -215,8 +222,6 @@ public:
 
 	Q_SIGNAL void isShowingHudChanged( bool isShowingHud );
 	Q_PROPERTY( bool isShowingHud MEMBER m_isShowingHud NOTIFY isShowingHudChanged );
-	Q_SIGNAL void isShowingPovHudChanged( bool isShowingPovHud );
-	Q_PROPERTY( bool isShowingPovHud MEMBER m_isShowingPovHud NOTIFY isShowingPovHudChanged );
 
 	Q_PROPERTY( bool isShowingActionRequests READ isShowingActionRequests NOTIFY isShowingActionRequestsChanged );
 
@@ -243,6 +248,16 @@ public:
 	Q_SIGNAL void nativelyDrawnItemsRetrievalRequested();
 	// Qml should call this method in reply
 	Q_INVOKABLE void supplyNativelyDrawnItem( QQuickItem *item );
+
+	// Asks Qml
+	Q_SIGNAL void hudControlledMiniviewItemsRetrievalRequested();
+	// Qml should call this method in reply
+	Q_INVOKABLE void supplyHudControlledMiniviewItemAndModelIndex( QQuickItem *item, int modelIndex );
+
+	// Asks Qml
+	Q_SIGNAL void hudMiniviewPanesRetrievalRequested();
+	// Qml should call this method in reply
+	Q_INVOKABLE void supplyHudMiniviewPane( int number );
 
 	Q_INVOKABLE QVariant getCVarValue( const QString &name ) const;
 	Q_INVOKABLE void setCVarValue( const QString &name, const QVariant &value );
@@ -407,6 +422,8 @@ signals:
 	Q_SIGNAL void isShowingDemoPlaybackMenuChanged( bool isShowingDemoMenu );
 	Q_SIGNAL void isDebuggingNativelyDrawnItemsChanged( bool isDebuggingNativelyDrawnItems );
 	Q_SIGNAL void hasPendingCVarChangesChanged( bool hasPendingCVarChanges );
+
+	Q_SIGNAL void shuttingDown();
 private:
 	static inline QGuiApplication *s_application { nullptr };
 	static inline int s_fakeArgc { 0 };
@@ -460,6 +477,12 @@ private:
 
 	wsw::Vector<QPair<QString, QVariant>> m_pendingCVarChanges;
 
+	Rect *m_miniviewItemPositions { nullptr };
+	unsigned *m_miniviewViewStateIndices { nullptr };
+	unsigned m_numRetrievedMiniviews { 0 };
+	bool m_hasMiniviewPane1 { false };
+	bool m_hasMiniviewPane2 { false };
+
 	std::unique_ptr<QmlSandbox> m_menuSandbox;
 	std::unique_ptr<QmlSandbox> m_hudSandbox;
 
@@ -486,8 +509,10 @@ private:
 
 	ActionRequestsModel m_actionRequestsModel;
 
-	HudEditorModel m_hudEditorModel;
-	HudDataModel m_hudDataModel;
+	HudEditorModel m_regularHudEditorModel { HudLayoutModel::Regular };
+	HudEditorModel m_miniviewHudEditorModel { HudLayoutModel::Miniview };
+	HudCommonDataModel m_hudCommonDataModel;
+	HudPovDataModel m_hudPovDataModel;
 
 	QString m_pendingDroppedConnectionTitle;
 	QString m_droppedConnectionTitle;
@@ -520,7 +545,6 @@ private:
 	bool m_isShowingActionRequests { false };
 
 	bool m_hasTeamChat { false };
-	bool m_isShowingPovHud { false };
 	bool m_isShowingHud { false };
 
 	bool m_isConsoleOpen { false };
@@ -641,8 +665,6 @@ private:
 	auto getPressedKeyboardModifiers() const -> Qt::KeyboardModifiers;
 
 	[[nodiscard]]
-	bool tryHandlingKeyEventAsAMouseEvent( int quakeKey, bool keyDown );
-	[[nodiscard]]
 	auto getTargetWindowForKeyboardInput() -> QQuickWindow *;
 
 	void drawBackgroundMapIfNeeded();
@@ -706,6 +728,8 @@ void QtUISystem::registerCustomQmlTypes() {
 	qmlRegisterUncreatableType<HudEditorModel>( uri, 2, 6, "HudEditorModel", reason );
 	qmlRegisterUncreatableType<InGameHudLayoutModel>( uri, 2, 6, "InGameHudLayoutModel", reason );
 	qmlRegisterUncreatableType<HudDataModel>( uri, 2, 6, "HudDataModel", reason );
+	qmlRegisterUncreatableType<HudCommonDataModel>( uri, 2, 6, "HudCommonDataModel", reason );
+	qmlRegisterUncreatableType<HudPovDataModel>( uri, 2, 6, "HudPovDataModel", reason );
 	qmlRegisterType<NativelyDrawnImage>( uri, 2, 6, "NativelyDrawnImage_Native" );
 	qmlRegisterType<NativelyDrawnModel>( uri, 2, 6, "NativelyDrawnModel_Native" );
 	qmlRegisterType<VideoSource>( uri, 2, 6, "WswVideoSource" );
@@ -774,7 +798,8 @@ void QtUISystem::registerContextProperties( QQmlContext *context, SandboxKind sa
 	// TODO: Show hud popups in the menu sandbox/context?
 	context->setContextProperty( "__chatProxy", &m_chatProxy );
 	context->setContextProperty( "__teamChatProxy", &m_teamChatProxy );
-	context->setContextProperty( "__hudDataModel", &m_hudDataModel );
+	context->setContextProperty( "__hudCommonDataModel", &m_hudCommonDataModel );
+	context->setContextProperty( "__hudPovDataModel", &m_hudPovDataModel );
 
 	// This condition not only helps to avoid global namespace pollution,
 	// but first and foremost is aimed to prevent keeping excessive GC roots.
@@ -800,7 +825,8 @@ void QtUISystem::registerContextProperties( QQmlContext *context, SandboxKind sa
 		context->setContextProperty( "__demosResolver", &m_demosResolver );
 		context->setContextProperty( "__demoPlayer", &m_demoPlayer );
 		context->setContextProperty( "__playersModel", &m_playersModel );
-		context->setContextProperty( "__hudEditorModel", &m_hudEditorModel );
+		context->setContextProperty( "__regularHudEditorModel", &m_regularHudEditorModel );
+		context->setContextProperty( "__miniviewHudEditorModel", &m_miniviewHudEditorModel );
 	}
 }
 
@@ -907,6 +933,7 @@ void UISystem::init( int width, int height ) {
 
 void UISystem::shutdown() {
 	VideoPlaybackSystem::shutdown();
+	uiSystemInstanceHolder.instance()->dispatchShuttingDown();
 	uiSystemInstanceHolder.shutdown();
 }
 
@@ -953,7 +980,8 @@ QtUISystem::QtUISystem( int initialWidth, int initialHeight ) {
 	m_menuSandbox = createQmlSandbox( initialWidth, initialHeight, MenuSandbox );
 	m_hudSandbox  = createQmlSandbox( initialWidth, initialHeight, HudSandbox );
 
-	connect( &m_hudEditorModel, &HudEditorModel::hudUpdated, &m_hudDataModel, &HudDataModel::onHudUpdated );
+	connect( &m_regularHudEditorModel, &HudEditorModel::hudUpdated, &m_hudCommonDataModel, &HudCommonDataModel::onHudUpdated );
+	connect( &m_miniviewHudEditorModel, &HudEditorModel::hudUpdated, &m_hudCommonDataModel, &HudCommonDataModel::onHudUpdated );
 }
 
 QtUISystem::~QtUISystem() {
@@ -1575,14 +1603,9 @@ void QtUISystem::checkPropertyChanges() {
 	}
 
 	const bool wasShowingHud = m_isShowingHud;
-	const bool wasShowingPovHud = m_isShowingPovHud;
 	m_isShowingHud = actualClientState == CA_ACTIVE && !( m_activeMenuMask & MainMenu );
 	if( m_isShowingHud != wasShowingHud ) {
 		Q_EMIT isShowingHudChanged( m_isShowingHud );
-	}
-	m_isShowingPovHud = m_isShowingHud && ( CG_ActiveChasePov() != std::nullopt );
-	if( m_isShowingPovHud != wasShowingPovHud ) {
-		Q_EMIT isShowingPovHudChanged( m_isShowingPovHud );
 	}
 
 	const bool wasShowingActionRequests = m_isShowingActionRequests;
@@ -1673,13 +1696,19 @@ void QtUISystem::checkPropertyChanges() {
 
 	const auto timestamp = getFrameTimestamp();
 	VideoPlaybackSystem::instance()->update( timestamp );
-	m_hudDataModel.checkPropertyChanges( timestamp );
+	m_hudCommonDataModel.checkPropertyChanges( timestamp );
+	if( CG_IsViewAttachedToPlayer() ) {
+		m_hudPovDataModel.setViewStateIndex( CG_GetPrimaryViewStateIndex() );
+	} else {
+		m_hudPovDataModel.setViewStateIndex( CG_GetOurClientViewStateIndex() );
+	}
+	m_hudPovDataModel.checkPropertyChanges( timestamp );
 
 	updateCVarAwareControls();
 	updateHudOccluders();
 }
 
-bool QtUISystem::handleMouseMove( int frameTime, int dx, int dy ) {
+bool QtUISystem::handleMouseMovement( float frameTime, int dx, int dy ) {
 	// Mouse handling is only available for the main menu
 	if( !m_activeMenuMask || !m_menuSandbox ) {
 		return false;
@@ -1716,8 +1745,18 @@ bool QtUISystem::handleMouseMove( int frameTime, int dx, int dy ) {
 	return true;
 }
 
-bool QtUISystem::requestsKeyboardFocus() const {
-	return m_activeMenuMask != 0 || ( m_isShowingChatPopup || m_isShowingTeamChatPopup );
+bool QtUISystem::grabsKeyboardAndMouseButtons() const {
+	if( m_activeMenuMask != 0 ) {
+		return ( m_activeMenuMask & DemoPlaybackMenu ) == 0;
+	}
+	return m_isShowingChatPopup || m_isShowingTeamChatPopup;
+}
+
+bool QtUISystem::grabsMouseMovement() const {
+	if( m_activeMenuMask != 0 ) {
+		return ( m_activeMenuMask & DemoPlaybackMenu ) == 0;
+	}
+	return m_isShowingChatPopup || m_isShowingTeamChatPopup;
 }
 
 void QtUISystem::handleEscapeKey() {
@@ -1768,8 +1807,40 @@ bool QtUISystem::handleKeyEvent( int quakeKey, bool keyDown ) {
 		return false;
 	}
 
-	if( tryHandlingKeyEventAsAMouseEvent( quakeKey, keyDown ) ) {
+	[[maybe_unused]]
+	bool isTargetingDemoPlaybackMenu = false;
+	if( m_menuSandbox && targetWindow == m_menuSandbox->m_window.get() ) {
+		if( m_activeMenuMask & DemoPlaybackMenu ) {
+			isTargetingDemoPlaybackMenu = true;
+		}
+	}
+
+	Qt::MouseButton mouseButton = Qt::NoButton;
+	if( quakeKey == K_MOUSE1 ) {
+		mouseButton = Qt::LeftButton;
+	} else if( quakeKey == K_MOUSE2 ) {
+		mouseButton = Qt::RightButton;
+	} else if( quakeKey == K_MOUSE3 ) {
+		mouseButton = Qt::MiddleButton;
+	}
+
+	if( mouseButton != Qt::NoButton ) {
+		QPointF point( m_mouseXY[0], m_mouseXY[1] );
+		QEvent::Type eventType = keyDown ? QEvent::MouseButtonPress : QEvent::MouseButtonRelease;
+		QMouseEvent event( eventType, point, mouseButton, getPressedMouseButtons(), getPressedKeyboardModifiers() );
+		const bool sent = QCoreApplication::sendEvent( m_menuSandbox->m_window.get(), &event );
+		// Allow propagation of events to the cgame view switching logic
+		// if the mouse event was not handled by the player bar
+		if( sent && isTargetingDemoPlaybackMenu ) {
+			return event.isAccepted();
+		}
 		return true;
+	}
+
+	// To allow propagation of events to the cgame view switching logic,
+	// don't handle other keys when the demo playback menu is on.
+	if( isTargetingDemoPlaybackMenu ) {
+		return false;
 	}
 
 	const auto maybeQtKey = convertQuakeKeyToQtKey( quakeKey );
@@ -1832,25 +1903,6 @@ auto QtUISystem::getPressedKeyboardModifiers() const -> Qt::KeyboardModifiers {
 		result |= Qt::ShiftModifier;
 	}
 	return result;
-}
-
-bool QtUISystem::tryHandlingKeyEventAsAMouseEvent( int quakeKey, bool keyDown ) {
-	Qt::MouseButton button;
-	if( quakeKey == K_MOUSE1 ) {
-		button = Qt::LeftButton;
-	} else if( quakeKey == K_MOUSE2 ) {
-		button = Qt::RightButton;
-	} else if( quakeKey == K_MOUSE3 ) {
-		button = Qt::MiddleButton;
-	} else {
-		return false;
-	}
-
-	QPointF point( m_mouseXY[0], m_mouseXY[1] );
-	QEvent::Type eventType = keyDown ? QEvent::MouseButtonPress : QEvent::MouseButtonRelease;
-	QMouseEvent event( eventType, point, button, getPressedMouseButtons(), getPressedKeyboardModifiers() );
-	QCoreApplication::sendEvent( m_menuSandbox->m_window.get(), &event );
-	return true;
 }
 
 auto QtUISystem::getTargetWindowForKeyboardInput() -> QQuickWindow * {
@@ -2237,7 +2289,8 @@ void QtUISystem::handleConfigString( unsigned configStringIndex, const wsw::Stri
 void QtUISystem::updateScoreboard( const ReplicatedScoreboardData &scoreboardData, const AccuracyRows &accuracyRows ) {
 	m_scoreboardModel.update( scoreboardData, accuracyRows );
 	m_playersModel.update( scoreboardData );
-	m_hudDataModel.updateScoreboardData( scoreboardData );
+	m_hudCommonDataModel.updateScoreboardData( scoreboardData );
+	m_hudPovDataModel.updateScoreboardData( scoreboardData );
 }
 
 bool QtUISystem::isShowingScoreboard() const {
@@ -2277,25 +2330,25 @@ void QtUISystem::handleOptionsStatusCommand( const wsw::StringView &status ) {
 }
 
 void QtUISystem::resetFragsFeed() {
-	m_hudDataModel.resetFragsFeed();
+	m_hudCommonDataModel.resetFragsFeed();
 }
 
 void QtUISystem::addFragEvent( const std::pair<wsw::StringView, int> &victimAndTeam,
 							   unsigned meansOfDeath,
 							   const std::optional<std::pair<wsw::StringView, int>> &attackerAndTeam ) {
-	m_hudDataModel.addFragEvent( victimAndTeam, getFrameTimestamp(), meansOfDeath, attackerAndTeam );
+	m_hudCommonDataModel.addFragEvent( victimAndTeam, getFrameTimestamp(), meansOfDeath, attackerAndTeam );
 }
 
 void QtUISystem::addToMessageFeed( const wsw::StringView &message ) {
-	m_hudDataModel.addToMessageFeed( message, getFrameTimestamp() );
+	m_hudPovDataModel.addToMessageFeed( message, getFrameTimestamp() );
 }
 
 void QtUISystem::addAward( const wsw::StringView &award ) {
-	m_hudDataModel.addAward( award, getFrameTimestamp() );
+	m_hudPovDataModel.addAward( award, getFrameTimestamp() );
 }
 
 void QtUISystem::addStatusMessage( const wsw::StringView &message ) {
-	m_hudDataModel.addStatusMessage( message, getFrameTimestamp() );
+	m_hudPovDataModel.addStatusMessage( message, getFrameTimestamp() );
 }
 
 static const QString kConnectionFailedTitle( "Connection failed" );
@@ -2365,28 +2418,54 @@ bool QtUISystem::isShown() const {
 	return false;
 }
 
+auto QtUISystem::retrieveNumberOfHudMiniviewPanes() -> unsigned {
+	m_hasMiniviewPane1 = false;
+	m_hasMiniviewPane2 = false;
+
+	Q_EMIT hudMiniviewPanesRetrievalRequested();
+
+	return ( m_hasMiniviewPane1 ? 1 : 0 ) + ( m_hasMiniviewPane2 ? 1 : 0 );
 }
 
-bool CG_IsScoreboardShown() {
-	return wsw::ui::UISystem::instance()->isShowingScoreboard();
+auto QtUISystem::retrieveHudControlledMiniviews( Rect *positions, unsigned *viewStateIndices ) -> unsigned {
+	m_miniviewItemPositions    = positions;
+	m_miniviewViewStateIndices = viewStateIndices;
+	m_numRetrievedMiniviews    = 0;
+
+	Q_EMIT hudControlledMiniviewItemsRetrievalRequested();
+
+	return m_numRetrievedMiniviews;
 }
 
-void CG_ScoresOn_f( const CmdArgs & ) {
-	wsw::ui::UISystem::instance()->setScoreboardShown( true );
+void QtUISystem::supplyHudMiniviewPane( int number ) {
+	assert( number == 1 || number == 2 );
+	if( number == 1 ) {
+		m_hasMiniviewPane1 = true;
+	} else if( number == 2 ) {
+		m_hasMiniviewPane2 = true;
+	}
 }
 
-void CG_ScoresOff_f( const CmdArgs & ) {
-	wsw::ui::UISystem::instance()->setScoreboardShown( false );
+void QtUISystem::supplyHudControlledMiniviewItemAndModelIndex( QQuickItem *item, int modelIndex ) {
+	const QRectF &fRect        = item->boundingRect();
+	const QPointF &fRealTopLeft = item->mapToGlobal( fRect.topLeft() );
+
+	const QRect iRect         = fRect.toRect();
+	const QPoint iRealTopLeft = fRealTopLeft.toPoint();
+
+	m_miniviewItemPositions[m_numRetrievedMiniviews] = Rect {
+		.x      = iRealTopLeft.x(),
+		.y      = iRealTopLeft.y(),
+		.width  = iRect.width(),
+		.height = iRect.height(),
+	};
+
+	const unsigned viewStateIndex = m_hudCommonDataModel.getViewStateIndexForMiniviewModelIndex( modelIndex );
+
+	m_miniviewViewStateIndices[m_numRetrievedMiniviews] = viewStateIndex;
+	m_numRetrievedMiniviews++;
 }
 
-void CG_MessageMode( const CmdArgs & ) {
-	wsw::ui::UISystem::instance()->toggleChatPopup();
-	CL_ClearInputState();
-}
-
-void CG_MessageMode2( const CmdArgs & ) {
-	wsw::ui::UISystem::instance()->toggleTeamChatPopup();
-	CL_ClearInputState();
 }
 
 #include "uisystem.moc"

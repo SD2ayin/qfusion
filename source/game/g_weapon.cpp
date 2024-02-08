@@ -1770,7 +1770,26 @@ edict_t *W_Fire_Lasergun_Weak( edict_t *self, vec3_t start, vec3_t end, float da
 	laser_mod = mod;
 	laser_missed = true;
 
-	GS_TraceCurveLaserBeam( &trace, start, self->s.angles, end, ENTNUM( self ), timeDelta, _LaserImpact );
+	vec3_t points[CURVELASERBEAM_SUBDIVISIONS + 1];
+	GS_GetCurvedLaserBeamSegments( points, CURVELASERBEAM_SUBDIVISIONS, start, self->s.angles, (float)range, end );
+
+	int passthrough = ENTNUM( self );
+	for( unsigned segmentNum = 0; segmentNum < CURVELASERBEAM_SUBDIVISIONS; ++segmentNum ) {
+		float *segmentFrom = points[segmentNum + 0];
+		float *segmentTo   = points[segmentNum + 1];
+
+		// TODO: GS_TraceLaserBeam() should not require angles
+		vec3_t segmentDir, tmpangles;
+		VectorSubtract( segmentTo, segmentFrom, segmentDir );
+		VecToAngles( segmentDir, tmpangles );
+
+		GS_TraceLaserBeam( &trace, segmentFrom, tmpangles, DistanceFast( segmentFrom, segmentTo ), passthrough, 0, _LaserImpact );
+		if( trace.fraction != 1.0f ) {
+			break;
+		}
+
+		passthrough = trace.ent;
+	}
 
 	laser->r.svflags |= SVF_FORCEOWNER;
 	VectorCopy( start, laser->s.origin );

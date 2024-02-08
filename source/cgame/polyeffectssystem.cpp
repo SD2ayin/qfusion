@@ -1125,10 +1125,14 @@ void PolyEffectsSystem::simulateTracersAndSubmit( int64_t currTime, float timeDe
 		bool hasAlignedForPov = false;
 		// If we should align
 		if( const std::optional<TracerParams::AlignForPovParams> &alignForPovParams = tracer->alignForPovParams ) {
+			// TODO: This should be specified by params
+			// TODO: Make sure it's stable (check some kind of spawn ids)
+			ViewState *viewState = getPrimaryViewState();
+
 			// If we're really following the initial POV
-			if( alignForPovParams->povNum == cg.predictedPlayerState.POVnum ) {
-				const float *const actualViewOrigin = cg.predictedPlayerState.pmove.origin;
-				const float *const actualViewAngles = cg.predictedPlayerState.viewangles;
+			if( alignForPovParams->povNum == viewState->predictedPlayerState.POVnum ) {
+				const float *const actualViewOrigin = viewState->predictedPlayerState.pmove.origin;
+				const float *const actualViewAngles = viewState->predictedPlayerState.viewangles;
 
 				// Pin the farthest point at it's regular origin and align the free tail towards the viewer
 				// TODO: Think of creating a separate kind of QuadPoly::AppearanceRules for this case?

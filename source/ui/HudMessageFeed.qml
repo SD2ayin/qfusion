@@ -11,6 +11,8 @@ Item {
     implicitHeight: list.height + 20
     opacity: 0.9
 
+    property var povDataModel
+
     Connections {
         target: Hud.ui
         onDisplayedHudItemsRetrievalRequested: {
@@ -21,7 +23,7 @@ Item {
     }
 
     Connections {
-        target: Hud.dataModel
+        target: root.povDataModel
         onIsMessageFeedFadingOutChanged: {
             if (isMessageFeedFadingOut) {
                 fadeOutAnim.start()
@@ -45,7 +47,7 @@ Item {
         anchors.top: parent.top
         anchors.topMargin: 10
         anchors.horizontalCenter: parent.horizontalCenter
-        model: Hud.dataModel.getMessageFeedModel()
+        model: root.povDataModel.getMessageFeedModel()
         width: parent.width - 20
         height: contentHeight
         spacing: 3

@@ -28,7 +28,7 @@ static BoolConfigVar v_forceMyTeamAlpha( "cg_forceMyTeamAlpha"_asView, { .byDefa
 
 int CG_TeamToForcedTeam( int team ) {
 	if( v_forceMyTeamAlpha.get() ) {
-		if( const int myTeam = cg.predictedPlayerState.stats[STAT_TEAM]; myTeam == TEAM_BETA ) {
+		if( const int myTeam = getPrimaryViewState()->predictedPlayerState.stats[STAT_TEAM]; myTeam == TEAM_BETA ) {
 			if( team == TEAM_ALPHA ) {
 				return TEAM_BETA;
 			}

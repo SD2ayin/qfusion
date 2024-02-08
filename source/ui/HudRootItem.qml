@@ -8,10 +8,10 @@ import net.warsow 2.6
 Item {
     id: rootItem
 
-    // These conditions try to prevent activating the loader until the status of models is well-defined.
-    readonly property bool useDifferentHuds:
-        Hud.dataModel.specLayoutModel.name.length > 0 && Hud.dataModel.clientLayoutModel.name.length > 0 &&
-            Hud.dataModel.specLayoutModel.name.toUpperCase() != Hud.dataModel.clientLayoutModel.name.toUpperCase()
+    property var instantiatedMiniviewHuds: ({})
+
+    property var oldMiniviews: []
+    property var oldMiniviewIndices: []
 
     Window.onWindowChanged: {
         if (Window.window) {
@@ -22,19 +22,101 @@ Item {
 
     // Try reusing the same instance due to Qml GC quirks
     InGameHud {
-        visible: Hud.ui.isShowingHud && (Hud.dataModel.hasActivePov || !useDifferentHuds)
+        // TODO: Is visibility switching it really needed (we don't draw it anyway, but property updates handling may vary)?
+        visible: Hud.ui.isShowingHud
         anchors.fill: parent
-        model: Hud.dataModel.clientLayoutModel
+        layoutModel: Hud.commonDataModel.regularLayoutModel
+        commonDataModel: Hud.commonDataModel
+        povDataModel: Hud.povDataModel
+        miniviewAllocator: rootItem
     }
 
-    Loader {
-        // Using separate HUD files for client and spec should be discouraged for now.
-        active: useDifferentHuds
-        anchors.fill: parent
-        sourceComponent: InGameHud {
-            // Toggle the visibility once it's loaded for the same GC-related reasons
-            visible: Hud.ui.isShowingHud && !Hud.dataModel.hasActivePov
-            model: Hud.dataModel.specLayoutModel
+    Component.onCompleted: {
+        applyMiniviewLayoutPass1()
+        applyMiniviewLayoutPass2()
+    }
+
+    Connections {
+        target: Hud.commonDataModel
+        onMiniviewLayoutChangedPass1: applyMiniviewLayoutPass1()
+        onMiniviewLayoutChangedPass2: applyMiniviewLayoutPass2()
+    }
+
+    Connections {
+        target: Hud.ui
+        onDisplayedHudItemsRetrievalRequested: {
+            for (const view of oldMiniviews) {
+                Hud.ui.supplyDisplayedHudItemAndMargin(view, 4.0)
+            }
+        }
+        onShuttingDown: {
+            for (const view of Object.values(rootItem.instantiatedMiniviewHuds)) {
+                view.parent = null
+                view.destroy()
+            }
+            rootItem.instantiatedMiniviewHuds = null
+        }
+    }
+
+    function applyMiniviewLayoutPass1() {
+        // Recycle all (we have to care of preserving the original order)
+        for (let i = 0; i < oldMiniviews.length; ++i) {
+            recycle(oldMiniviews[i], oldMiniviewIndices[i])
+        }
+        oldMiniviews.length       = 0
+        oldMiniviewIndices.length = 0
+    }
+
+    function applyMiniviewLayoutPass2() {
+        // Take all needed
+        const miniviewIndices = Hud.commonDataModel.getFixedPositionMiniviewIndices()
+        for (const miniviewIndex of miniviewIndices) {
+            const view = take(miniviewIndex)
+            oldMiniviewIndices.push(miniviewIndex)
+            oldMiniviews.push(view)
+            const position = Hud.commonDataModel.getFixedMiniviewPositionForIndex(miniviewIndex)
+            view.x         = position.x
+            view.y         = position.y
+            view.width     = position.width
+            view.height    = position.height
+            view.parent    = rootItem
+        }
+
+        console.assert(miniviewIndices.length === oldMiniviewIndices.length)
+        console.assert(miniviewIndices.length === oldMiniviews.length)
+    }
+
+    function recycle(view, miniviewIndex) {
+        view.parent = null
+        instantiatedMiniviewHuds[miniviewIndex] = view
+    }
+
+    function take(miniviewIndex) {
+        const maybeExistingView = instantiatedMiniviewHuds[miniviewIndex]
+        if (maybeExistingView) {
+            return maybeExistingView
+        }
+        const model = Hud.commonDataModel.getMiniviewModelForIndex(miniviewIndex)
+        const view  = miniviewComponent.createObject(rootItem, {"povDataModel" : model})
+        instantiatedMiniviewHuds[miniviewIndex] = view
+        return view
+    }
+
+    Component {
+        id: miniviewComponent
+        InGameHud {
+            layoutModel: Hud.commonDataModel.miniviewLayoutModel
+            commonDataModel: Hud.commonDataModel
+            // pov data model specified via args
+
+            Rectangle {
+                anchors.centerIn: parent
+                width: parent.width - 4
+                height: parent.height - 4
+                color: "transparent"
+                border.color: "white"
+                border.width: 1
+            }
         }
     }
 

@@ -5,8 +5,9 @@ import net.warsow 2.6
 QtObject {
     readonly property var ui: __ui
     readonly property var serverListModel: __serverListModel
-    readonly property var hudDataModel: __hudDataModel
-    readonly property var hudEditorModel: __hudEditorModel
+    readonly property var hudCommonDataModel: __hudCommonDataModel
+    readonly property var regularHudEditorModel: __regularHudEditorModel
+    readonly property var miniviewHudEditorModel: __miniviewHudEditorModel
     readonly property var keysAndBindings: __keysAndBindings
     readonly property var demosModel: __demosModel
     readonly property var demosResolver: __demosResolver

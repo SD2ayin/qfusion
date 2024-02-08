@@ -568,7 +568,7 @@ struct weaponinfo_s *CG_GetWeaponInfo( int weapon ) {
 *
 * Add weapon model(s) positioned at the tag
 */
-void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, DrawSceneRequest *drawSceneRequest ) {
+void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int effects, bool addCoronaLight, orientation_t *projectionSource, int64_t flash_time, int64_t barrel_time, DrawSceneRequest *drawSceneRequest, ViewState *viewState ) {
 	entity_t weapon;
 	weaponinfo_t *weaponInfo;
 	float intensity;
@@ -602,7 +602,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 
 	CG_PlaceModelOnTag( &weapon, ent, tag );
 
-	CG_AddColoredOutLineEffect( &weapon, effects, 0, 0, 0, 255 );
+	CG_AddColoredOutLineEffect( &weapon, effects, 0, 0, 0, 255, viewState );
 
 	if( !( effects & EF_RACEGHOST ) ) {
 		CG_AddEntityToScene( &weapon, drawSceneRequest );
@@ -638,7 +638,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 
 			CG_PlaceModelOnTag( &expansion, &weapon, tag );
 
-			CG_AddColoredOutLineEffect( &expansion, effects, 0, 0, 0, 255 );
+			CG_AddColoredOutLineEffect( &expansion, effects, 0, 0, 0, 255, viewState );
 
 			if( !( effects & EF_RACEGHOST ) ) {
 				CG_AddEntityToScene( &expansion, drawSceneRequest ); // skelmod
@@ -679,7 +679,7 @@ void CG_AddWeaponOnTag( entity_t *ent, orientation_t *tag, int weaponid, int eff
 			// barrel requires special tagging
 			CG_PlaceRotatedModelOnTag( &barrel, &weapon, tag );
 
-			CG_AddColoredOutLineEffect( &barrel, effects, 0, 0, 0, ent->shaderRGBA[3] );
+			CG_AddColoredOutLineEffect( &barrel, effects, 0, 0, 0, ent->shaderRGBA[3], viewState );
 
 			if( !( effects & EF_RACEGHOST ) ) {
 				CG_AddEntityToScene( &barrel, drawSceneRequest ); // skelmod

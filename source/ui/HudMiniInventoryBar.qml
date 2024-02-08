@@ -10,25 +10,23 @@ Item {
     // Consider the extra space to the left/right to be equal to the spacing
     implicitWidth: cardWidth * povDataModel.getInventoryModel().numInventoryItems +
                        layout.spacing * (povDataModel.getInventoryModel().numInventoryItems + 1)
-    implicitHeight: cardHeight + 24
+    implicitHeight: cardHeight + 32 * actualScale
     width: implicitWidth
     height: implicitHeight
 
     property var povDataModel
+    property real miniviewScale
 
-    readonly property real cardWidth: 60
-    readonly property real cardHeight: 100
-    readonly property real cardRadius: 9
+    readonly property real actualScale: Math.max(12, 32 * miniviewScale) / 32.0
 
-    Connections {
-        target: Hud.ui
-        onDisplayedHudItemsRetrievalRequested: Hud.ui.supplyDisplayedHudItemAndMargin(layout, 24.0)
-    }
+    readonly property real cardWidth: 45 * actualScale
+    readonly property real cardHeight: 58 * actualScale
+    readonly property real cardRadius: 1 + 8 * actualScale
 
     RowLayout {
         id: layout
         anchors.centerIn: parent
-        spacing: 24
+        spacing: 4 * miniviewScale < 1.0 ? 1.0 : 12 * miniviewScale
 
         Repeater {
             model: root.povDataModel.getInventoryModel()
@@ -61,17 +59,15 @@ Item {
                     radius: cardRadius
                     color: "black"
                     opacity: 0.7
-                    layer.effect: ElevationEffect { elevation: 16 }
-                    Component.onDestruction: Hud.destroyLayer(layer)
                 }
 
                 Rectangle {
                     anchors.centerIn: parent
-                    width: delegateItem.visible ? delegateItem.width + 3 : 0
-                    height: cardHeight + 3
-                    radius: cardRadius - 2
+                    width: delegateItem.visible ? delegateItem.width + 2 : 0
+                    height: cardHeight + 2 * border.width
+                    radius: cardRadius
                     color: "transparent"
-                    border.width: 4
+                    border.width: Math.max(1.5, 4 * actualScale)
                     border.color: Qt.lighter(model.color, 1.1)
                     visible: active
                 }
@@ -80,41 +76,11 @@ Item {
                     id: icon
                     visible: delegateItem.width + 2 > icon.width
                     anchors.centerIn: parent
-                    width: 32
-                    height: 32
+                    width: 32 * actualScale
+                    height: 32 * actualScale
                     source: model.hasWeapon ? model.iconPath : (model.iconPath + "?grayscale=true")
                     smooth: true
                     mipmap: true
-                }
-
-                Label {
-                    anchors.top: frame.top
-                    visible: delegateItem.width > 24
-                    anchors.topMargin: strongAmmoCount >= 0 ? 6 : 4
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    font.family: Hud.ui.numbersFontFamily
-                    font.weight: Font.Black
-                    font.pointSize: strongAmmoCount >= 0 ? 14 : 18
-                    font.letterSpacing: 1.0
-                    opacity: strongAmmoCount ? 1.0 : 0.5
-                    textFormat: Text.PlainText
-                    text: strongAmmoCount >= 0 ? (strongAmmoCount ? strongAmmoCount : "\u2013") : "\u221E"
-                    style: Text.Raised
-                }
-
-                Label {
-                    anchors.bottom: frame.bottom
-                    visible: delegateItem.width > 24
-                    anchors.bottomMargin: weakAmmoCount >= 0 ? 6 : 4
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    font.family: Hud.ui.numbersFontFamily
-                    font.weight: Font.Black
-                    font.pointSize: weakAmmoCount >= 0 ? 14 : 18
-                    font.letterSpacing: 1.0
-                    opacity: weakAmmoCount ? 1.0 : 0.5
-                    textFormat: Text.PlainText
-                    text: weakAmmoCount >= 0 ? (weakAmmoCount ? weakAmmoCount : "\u2013") : "\u221E"
-                    style: Text.Raised
                 }
             }
         }

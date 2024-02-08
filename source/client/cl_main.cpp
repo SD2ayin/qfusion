@@ -166,6 +166,9 @@ static void *module_handle;
 static uint8_t g_netchanCompressionBuffer[MAX_MSGLEN];
 static netchan_t g_netchanInstanceBackup;
 
+static int64_t oldKeyboardTimestamp;
+static int64_t oldMouseTimestamp;
+
 // These are system specific functions
 // wrapper around R_Init
 rserr_t VID_Sys_Init( const char *applicationName, const char *screenshotsPrefix, int startupColor, const int *iconXPM,
@@ -294,9 +297,9 @@ void CL_GameModule_RenderView() {
 	}
 }
 
-void CL_GameModule_InputFrame( int frameTime ) {
+void CL_GameModule_InputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis ) {
 	if( cge ) {
-		CG_InputFrame( frameTime );
+		CG_InputFrame( inputTimestamp, keyboardDeltaMillis, mouseDeltaMillis );
 	}
 }
 
@@ -304,6 +307,13 @@ void CL_GameModule_ClearInputState( void ) {
 	if( cge ) {
 		CG_ClearInputState();
 	}
+}
+
+bool CL_GameModule_GrabsMouseMovement() {
+	if( cge ) {
+		return CG_GrabsMouseMovement();
+	}
+	return false;
 }
 
 unsigned CL_GameModule_GetButtonBits( void ) {
@@ -332,7 +342,7 @@ void CL_GameModule_MouseMove( int dx, int dy ) {
 }
 
 bool CG_HasKeyboardFocus() {
-	return cge && !Con_HasKeyboardFocus() && !wsw::ui::UISystem::instance()->requestsKeyboardFocus();
+	return cge && !Con_HasKeyboardFocus() && !wsw::ui::UISystem::instance()->grabsKeyboardAndMouseButtons();
 }
 
 static void CL_CreateNewUserCommand( int realMsec );
@@ -350,21 +360,30 @@ void CL_ClearInputState( void ) {
 *
 * Notifies cgame of new frame, refreshes input timings, coordinates and angles
 */
-static void CL_UpdateGameInput( int frameTime ) {
+static void CL_UpdateGameInput( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis ) {
 	int mx, my;
 	IN_GetMouseMovement( &mx, &my );
 
 	// refresh input in cgame
-	CL_GameModule_InputFrame( frameTime );
+	CL_GameModule_InputFrame( inputTimestamp, keyboardDeltaMillis, mouseDeltaMillis );
 
-	if( !wsw::ui::UISystem::instance()->handleMouseMove( frameTime, mx, my ) ) {
-		CL_GameModule_MouseMove( mx, my );
-		// TODO: Check whether a console is open?
-		CL_GameModule_AddViewAngles( cl.viewangles );
+	bool handledByCGame = false;
+	auto *const uiSystem = wsw::ui::UISystem::instance();
+	if( !uiSystem->grabsMouseMovement() ) {
+		if( CL_GameModule_GrabsMouseMovement() ) {
+			CL_GameModule_MouseMove( mx, my );
+			CL_GameModule_AddViewAngles( cl.viewangles );
+			handledByCGame = true;
+		}
+	}
+
+	if( !handledByCGame ) {
+		// Let the UI handle it for non-modal stuff like the demo player bar
+		(void)uiSystem->handleMouseMovement( mouseDeltaMillis, mx, my );
 	}
 }
 
-void CL_UserInputFrame( int realMsec ) {
+void CL_UserInputFrame( int64_t inputTimestamp, int keyboardDeltaMillis, float mouseDeltaMillis, int realMsec ) {
 	// let the mouse activate or deactivate
 	IN_Frame();
 
@@ -375,13 +394,10 @@ void CL_UserInputFrame( int realMsec ) {
 	IN_Commands();
 
 	// refresh mouse angles and movement velocity
-	CL_UpdateGameInput( realMsec );
+	CL_UpdateGameInput( inputTimestamp, keyboardDeltaMillis, mouseDeltaMillis );
 
 	// create a new usercmd_t structure for this frame
 	CL_CreateNewUserCommand( realMsec );
-
-	// process console commands
-	CL_Cbuf_ExecutePendingCommands();
 }
 
 void CL_InitInput( void ) {
@@ -1521,6 +1537,10 @@ void SCR_UpdateScreen( void ) {
 	if( canRenderView ) {
 		SCR_RenderView( timedemo );
 	}
+
+	R_Set2DMode( true );
+	RF_Set2DScissor( 0, 0, viddef.width, viddef.height );
+
 	if( canDrawConsoleNotify ) {
 		Con_DrawNotify( viddef.width, viddef.height );
 	}
@@ -4092,7 +4112,6 @@ snapshot_t *SNAP_ParseFrame( msg_t *msg, snapshot_t *lastFrame, snapshot_t *back
 		numplayers++;
 	}
 	newframe->numplayers = numplayers;
-	newframe->playerState = newframe->playerStates[0];
 
 	// read packet entities
 	cmd = MSG_ReadUint8( msg );
@@ -5468,7 +5487,20 @@ void CL_Frame( int realMsec, int gameMsec ) {
 
 	CL_UpdateSnapshot();
 	CL_AdjustServerTime( gameMsec );
-	CL_UserInputFrame( realMsec );
+
+	const auto currTimestampMicros = (int64_t)Sys_Microseconds();
+	const auto currTimestampMillis = currTimestampMicros / 1000;
+	if( currTimestampMillis > oldKeyboardTimestamp ) {
+		const int64_t keyboardDelta = currTimestampMillis - oldKeyboardTimestamp;
+		const int64_t mouseDelta    = currTimestampMicros - oldMouseTimestamp;
+		oldKeyboardTimestamp = currTimestampMillis;
+		oldMouseTimestamp    = currTimestampMicros;
+
+		CL_UserInputFrame( currTimestampMicros, (int)keyboardDelta, ( (float)mouseDelta * 1e-3f ), realMsec );
+	}
+
+	CL_Cbuf_ExecutePendingCommands();
+
 	CL_NetFrame( realMsec, gameMsec );
 
 	int minMsec;

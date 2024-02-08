@@ -33,6 +33,10 @@ void R_Set2DMode( bool enable ) {
 	wsw::ref::Frontend::instance()->set2DMode( enable );
 }
 
+void RF_Set2DScissor( int x, int y, int w, int h ) {
+	wsw::ref::Frontend::instance()->set2DScissor( x, y, w, h );
+}
+
 namespace wsw::ref {
 
 auto Frontend::getDefaultFarClip( const refdef_s *fd ) const -> float {

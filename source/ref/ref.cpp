@@ -1444,9 +1444,9 @@ int RF_GetAverageFrametime( void ) {
 	return rf.frameTime.average;
 }
 
-void RF_TransformVectorToScreen( const refdef_t *rd, const vec3_t in, vec2_t out ) {
+bool RF_TransformVectorToViewport( const refdef_t *rd, const vec3_t in, vec2_t out ) {
 	if( !rd || !in || !out ) {
-		return;
+		return false;
 	}
 
 	vec4_t temp;
@@ -1471,11 +1471,12 @@ void RF_TransformVectorToScreen( const refdef_t *rd, const vec3_t in, vec2_t out
 	Matrix4_Multiply_Vector( p, temp2, temp );
 
 	if( !temp[3] ) {
-		return;
+		return false;
 	}
 
-	out[0] = rd->x + ( temp[0] / temp[3] + 1.0f ) * rd->width * 0.5f;
-	out[1] = glConfig.height - ( rd->y + ( temp[1] / temp[3] + 1.0f ) * rd->height * 0.5f );
+	out[0] = (float)rd->x + ( temp[0] / temp[3] + 1.0f ) * (float)rd->width * 0.5f;
+	out[1] = (float)rd->height + (float)rd->y - ( temp[1] / temp[3] + 1.0f ) * (float)rd->height * 0.5f;
+	return true;
 }
 
 bool RF_LerpTag( orientation_t *orient, const model_t *mod, int oldframe, int frame, float lerpfrac, const char *name ) {
