@@ -458,7 +458,7 @@ private:
 	struct BaseKeyframedHull {
 		float scale;
 		// Externally managed, should point to the unit mesh data
-		vec4_t *vertexMoveDirections;
+		const vec4_t *vertexMoveDirections;
 
 		// Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
 		float *limitsAtDirections;
@@ -474,6 +474,7 @@ private:
 
 			vec4_t mins, maxs;
 			vec4_t *vertexPositions;
+			byte_vec4_t *vertexColors;
 			SharedMeshData *sharedMeshData;
 			HullSolidDynamicMesh *submittedSolidMesh;
 			HullCloudDynamicMesh *submittedCloudMeshes[1];
@@ -511,8 +512,8 @@ private:
 		Layer storageOfLayers[NumLayers];
 		float storageOfLimits[kNumVertices];
 		vec4_t storageOfPositions[kNumVertices * NumLayers];
-        vec4_t storageOfMoveDirections[kNumVertices];
 
+		byte_vec4_t storageOfColors[kNumVertices * NumLayers];
 		SharedMeshData storageOfSharedMeshData[NumLayers];
 		// TODO: Allocate dynamically on demand?
 		// TODO: Optimize the memory layout
@@ -524,11 +525,11 @@ private:
 			this->subdivLevel                = SubdivLevel;
 			this->layers                     = &storageOfLayers[0];
 			this->limitsAtDirections         = &storageOfLimits[0];
-            this->vertexMoveDirections       = &storageOfMoveDirections[0];
 			for( unsigned i = 0; i < NumLayers; ++i ) {
 				Layer *const layer              = &layers[i];
 				layer->lastKeyframeNum          = 0;
 				layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
+				layer->vertexColors             = &storageOfColors[i * kNumVertices];
 				layer->sharedMeshData           = &storageOfSharedMeshData[i];
 				layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
 
@@ -585,9 +586,8 @@ private:
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets,
-                            float maxOffset, const float *rotation = nullptr,
-                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets, float maxOffset,
+							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
