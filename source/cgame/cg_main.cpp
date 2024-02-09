@@ -1184,9 +1184,6 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                         .drag         = 0.02f,
                         .angle        = 12.0f,
                         .bounceCount  = {.minInclusive = 1, .maxInclusive = 1},
-                        //.speed        = { .min = 400.0f, .max = 600.0f },
-                        //.percentage   = { .min = 0.15, .max = 0.2 },
-                        //.timeout      = { .min = 60, .max = 100 },
                         .speed        = {.min = 0.0f, .max = 400.0f},
                         .percentage   = {.min = 0.0f, .max = 1.0f},
                         .timeout      = {.min = 180, .max = 240},
@@ -5572,8 +5569,6 @@ static void CG_RegisterWeaponModels( void ) {
 	}
 
 }
-
-Geometry GetGeometryFromAliasMD3( model_t *model, const char *meshName );
 
 static void CG_RegisterModels( void ) {
 	if( cgs.precacheModelsStart == MAX_MODELS ) {
