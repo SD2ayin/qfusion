@@ -422,8 +422,8 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 		mod->radius = wsw::max( mod->radius, poutframe->radius );
 	}
 }
-/*
-void Mod_GetAliasMD3Geometry(const char *fileName, const char *meshName, const unsigned frame, Geometry *outGeometry ) {
+
+void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 ) {
     unsigned *fileBuffer;
     (void)R_LoadFile( fileName, (void **)&fileBuffer );
     auto fileNameAsView = wsw::StringView( fileName );
@@ -433,10 +433,9 @@ void Mod_GetAliasMD3Geometry(const char *fileName, const char *meshName, const u
     }
 
     const dmd3header_t *pInModel = ( dmd3header_t * )fileBuffer;
-    const int version   = LittleLong(pInModel->version );
-    const int numFrames = LittleLong(pInModel->num_frames );
-    const int numMeshes = LittleLong(pInModel->num_meshes );
-    const int numTags   = LittleLong(pInModel->num_tags );
+    const int version        = LittleLong( pInModel->version );
+    const unsigned numFrames = LittleLong( pInModel->num_frames );
+    const unsigned numMeshes = LittleLong( pInModel->num_meshes );
 
     if( version != MD3_ALIAS_VERSION ) {
         cgError() << fileNameAsView << "has wrong version number" << version << "should be" << MD3_ALIAS_VERSION;
@@ -446,51 +445,70 @@ void Mod_GetAliasMD3Geometry(const char *fileName, const char *meshName, const u
         cgError() << fileNameAsView << "has no frames";
         return;
     }
-    if( numMeshes < 0 ) {
-        cgError() << fileNameAsView << "has invalid number of meshes";
+    if( numMeshes <= 0 ) {
+        cgError() << fileNameAsView << "has no meshes";
         return;
     }
-    if( numMeshes <= 0 && numTags <= 0 ) {
-        cgError() << fileNameAsView << "has no tags or meshes";
-        return;
-    }
-
-    int bufSize;
-    uint8_t *buf;
-
-    bufSize = numFrames * ( sizeof( maliasframe_t ) + sizeof( maliastag_t ) * numTags ) +
-              numMeshes * sizeof( maliasmesh_t ) +
-              numMeshes * sizeof( drawSurfaceAlias_t );
-    buf = ( uint8_t * )Q_malloc( bufSize );
 
     //
     // load meshes
     //
     dmd3mesh_t *pInMesh;
     pInMesh = (dmd3mesh_t * )(( uint8_t * )pInModel + LittleLong(pInModel->ofs_meshes ) );
-    for( int i = 0; i < numMeshes; i++ ) {
+    for( unsigned meshNum = 0; meshNum < numMeshes; meshNum++ ) {
         dmd3mesh_t inMesh;
 
         memcpy( &inMesh, pInMesh, sizeof( dmd3mesh_t ) );
 
         if( strncmp( (const char *)inMesh.id, IDMD3HEADER, 4 ) ) {
-            cgError() << "mesh" << wsw::StringView(inMesh.name) << "in model" << fileNameAsView << "has wrong id (" <<
+            cgError() << "meshNum" << wsw::StringView(inMesh.name) << "in model" << fileNameAsView << "has wrong id (" <<
             wsw::StringView(inMesh.id) << "should be " << wsw::StringView(IDMD3HEADER) << ")";
         }
 
-        const unsigned numTris = LittleLong( inMesh.num_tris );
-        const unsigned numVerts = LittleLong( inMesh.num_verts );
+        const bool foundChosenMesh = meshName ? !strcmp( inMesh.name, meshName ) : true;
 
-        if( !strcmp( inMesh.name, meshName ) ) {
+        if( foundChosenMesh ) {
 
+            const unsigned numTris = LittleLong( inMesh.num_tris );
+            const unsigned numVerts = LittleLong( inMesh.num_verts );
+
+            auto *const triIndices      = new tri[numTris];
+            auto *const vertexPositions = new vec3_t[numVerts];
+
+            std::span<tri> triSpan( triIndices, numTris );
+            std::span<vec3_t> verticesSpan( vertexPositions, numVerts );
+
+            outGeometry->triIndices = triSpan;
+            outGeometry->vertexPositions = verticesSpan;
+
+            auto *pInTri = ( tri * )(( uint8_t * )pInMesh + LittleLong(inMesh.ofs_elems ) );
+            for( unsigned triNum = 0; triNum < numTris; triNum++, pInTri++ ) {
+
+                triIndices[triNum][0] = (elem_t)LittleLong( pInTri[0][0] );
+                triIndices[triNum][1] = (elem_t)LittleLong( pInTri[0][1] );
+                triIndices[triNum][2] = (elem_t)LittleLong( pInTri[0][2] );
+            }
+
+            auto *pInVertex = ( dmd3vertex_t * )(( uint8_t * )pInMesh + LittleLong( inMesh.ofs_verts ) );
+            pInVertex += numVerts * chosenFrame;
+
+            for( unsigned vert = 0; vert < numVerts; vert++ ) {
+                dmd3vertex_t inVertex;
+
+                memcpy(&inVertex, &(pInVertex[vert]), sizeof(dmd3vertex_t));
+
+                vertexPositions[vert][0] = LittleShort( pInVertex[vert].point[0] ) * MD3_XYZ_SCALE;
+                vertexPositions[vert][1] = LittleShort( pInVertex[vert].point[1] ) * MD3_XYZ_SCALE;
+                vertexPositions[vert][2] = LittleShort( pInVertex[vert].point[2] ) * MD3_XYZ_SCALE;
+            }
         }
 
         pInMesh = ( dmd3mesh_t * )( ( uint8_t * )pInMesh + LittleLong( inMesh.meshsize ) );
     }
     R_FreeFile(fileBuffer );
-}*/
+}
 
-Geometry GetGeometryFromAliasMD3( model_t *model, const char *meshName ){
+Geometry GetGeometryFromLoadedAliasMD3( model_t *model, const char *meshName ){
     Geometry geometry;
 
     const auto before = Sys_Microseconds();
