@@ -1525,25 +1525,25 @@ void EffectsSystemFacade::spawnStoneSmokeParticles( unsigned delay, const FlockO
                                                    float upShiftScale, unsigned materialParam,
                                                    float dustPercentageScale ) {
 
-    Particle::AppearanceRules appearanceRules;
-
-    ConicalFlockParams flockParams;
-
-    appearanceRules.materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle();
-    appearanceRules.colors              = kSoftDustColors;
-    appearanceRules.geometryRules       = Particle::SpriteRules {
-            .radius = { .mean = 25.0f, .spread = 7.5f },
-            .sizeBehaviour = Particle::Expanding
+    Particle::AppearanceRules appearanceRules {
+            .materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle(),
+            .colors              = kSoftDustColors,
+            .geometryRules       = Particle::SpriteRules {
+                .radius = {.mean = 25.0f, .spread = 7.5f},
+                .sizeBehaviour = Particle::Expanding
+            },
+            .applyVertexDynLight = true,
     };
-    appearanceRules.applyVertexDynLight = true;
 
-    flockParams.gravity         = 0.059f * GRAVITY;
-    flockParams.drag            = 0.03f;
-    flockParams.restitution     = 1.0f;
-    flockParams.angle           = 30.0f;
-    flockParams.speed           = { .min = 100.0f, .max = 500.0f };
-    flockParams.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale };
-    flockParams.timeout         = { .min = 750, .max = 1000 };
+    ConicalFlockParams flockParams{
+            .gravity = 0.059f * GRAVITY,
+            .drag            = 0.03f,
+            .restitution     = 1.0f,
+            .angle           = 30.0f,
+            .speed           = { .min = 100.0f, .max = 500.0f },
+            .percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
+            .timeout         = { .min = 750, .max = 1000 },
+    };
 
     orientation.copyToFlockParams( &flockParams );
     assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
@@ -1622,25 +1622,25 @@ void EffectsSystemFacade::spawnStuccoSmokeParticles( unsigned delay, const Flock
                                                     float upShiftScale, unsigned materialParam,
                                                     float dustPercentageScale ) {
 
-    Particle::AppearanceRules appearanceRules;
-
-    ConicalFlockParams flockParams;
-
-    appearanceRules.materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle();
-    appearanceRules.colors              = kSoftDustColors;
-    appearanceRules.geometryRules       = Particle::SpriteRules {
-            .radius = { .mean = 25.0f, .spread = 7.5f },
-            .sizeBehaviour = Particle::Expanding
+    Particle::AppearanceRules appearanceRules {
+            .materials = cgs.media.shaderStoneDustSoft.getAddressOfHandle(),
+            .colors              = kSoftDustColors,
+            .geometryRules       = Particle::SpriteRules {
+                .radius = {.mean = 25.0f, .spread = 7.5f},
+                .sizeBehaviour = Particle::Expanding
+            },
+            .applyVertexDynLight = true,
     };
-    appearanceRules.applyVertexDynLight = true;
 
-    flockParams.gravity         = 0.059f * GRAVITY;
-    flockParams.drag            = 0.03f;
-    flockParams.restitution     = 1.0f;
-    flockParams.angle           = 30.0f;
-    flockParams.speed           = { .min = 100.0f, .max = 500.0f };
-    flockParams.percentage      = { .min = 0.8f * dustPercentageScale, .max = 1.0f * dustPercentageScale };
-    flockParams.timeout         = { .min = 750, .max = 1000 };
+    ConicalFlockParams flockParams {
+        .gravity         = 0.059f * GRAVITY,
+        .drag            = 0.03f,
+        .restitution     = 1.0f,
+        .angle           = 30.0f,
+        .speed           = { .min = 100.0f, .max = 500.0f },
+        .percentage      = { .min = 0.8f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
+        .timeout         = { .min = 750, .max = 1000 },
+    };
 
     orientation.copyToFlockParams( &flockParams );
     assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
