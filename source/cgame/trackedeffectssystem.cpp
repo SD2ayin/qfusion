@@ -824,12 +824,14 @@ static ConicalFlockParams g_LingeringPlasmaTrailParticlesFlockParams {
 
 static ConicalFlockParams g_StrongPlasmaTrailParticlesFlockParams {
         .gravity      = 0.0f,
+        .outflowSpeed = 5.0f,
         .angle        = 0.01f,
         .innerAngle   = 0.0f,
         .bounceCount  = { .minInclusive = 0, .maxInclusive = 0 },
         .speed        = { .min = 0.0f, .max = 0.0f },
         .randomInitialRotation = { .min = 0.0f, .max = 360.0f },
-        .timeout      = { .min = 300, .max = 400 },
+        .angularVelocity       = { .min = -720.0f, .max = 720.0f },
+        .timeout      = { .min = 500, .max = 800 },
 };
 
 BoolConfigVar v_projectileLingeringTrails( wsw::StringView( "cg_projectileLingeringTrails"), { .byDefault = true, .flags = CVAR_ARCHIVE } );
@@ -877,14 +879,6 @@ void TrackedEffectsSystem::touchStrongPlasmaTrail( int entNum, const float *orig
 
         flockParams->speed.min = speed * -1.008f;
         flockParams->speed.max = speed * -0.9544f;
-
-        flockParams->angularVelocity.min = -720.0f;
-        flockParams->angularVelocity.max = 720.0f;
-
-        flockParams->timeout.min = 500;
-        flockParams->timeout.max = 800;
-
-        flockParams->outflowSpeed = 5.0f;
 
         trail->linger = false;
 
