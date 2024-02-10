@@ -477,6 +477,9 @@ typedef struct {
 	struct shader_s *shaderWhite;
 	struct shader_s *shaderMiniMap;
 
+    /// geometry test
+    Geometry cube;
+
 	int fullclipShaderNum;
 
 	// fonts
@@ -682,6 +685,8 @@ void CG_InitCrosshairs();
 void CG_ShutdownCrosshairs();
 
 struct model_s *CG_RegisterModel( const char *name );
+
+struct SimulatedHullsSystem::StaticCagedMesh *CG_RegisterStaticCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem );
 
 void CG_ResetClientInfos( void );
 void CG_LoadClientInfo( unsigned client, const wsw::StringView &configString );

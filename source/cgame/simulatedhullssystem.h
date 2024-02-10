@@ -8,6 +8,8 @@
 #include "../common/freelistallocator.h"
 #include "../common/podbufferholder.h"
 #include "../common/wswvector.h"
+#include "../common/geometry.h"
+#include "../common/wswstring.h"
 
 struct CMShapeList;
 
@@ -132,6 +134,44 @@ public:
 
 	using ShadingLayer = std::variant<MaskedShadingLayer, DotShadingLayer, CombinedShadingLayer>;
 
+    struct StaticCage {
+        Geometry cageGeometry;
+        wsw::String identifier;
+        wsw::HeapBasedFreelistAllocator *allocator;
+    };
+
+    wsw::Vector<StaticCage> LoadedStaticCages;
+
+    struct StaticCageCoordinate {
+        unsigned cageTriIdx;
+        float coordsOnCageTri[3]; // barycentric coordinates
+        float offset; // offset along direction
+        /// ? float moveDir ? precompute the moveDir?
+        float offsetFromLimit; // offset from boundaries like walls
+    };
+
+    struct StaticCagedMesh {
+        StaticCage *cage;
+        StaticCageCoordinate *vertexCoordinates;
+        unsigned numVertices;
+        unsigned numFrames;
+        std::span<tri> triIndices;
+        std::span<const ShadingLayer> shadingLayers;
+        float boundingRadius; // maximum radius of the mesh for a given frame for culling
+        StaticCagedMesh *LODs; // pointer to lower detail models
+    };
+
+    struct StaticKeyframedHullParams {
+        vec3_t origin;
+        vec3_t offset;
+        vec3_t dir;
+        float rotation;
+        float scale;
+        std::span<StaticCagedMesh> sharedCageCagedMeshes;
+    };
+
+    StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
+
 	struct OffsetKeyframe {
 		float lifetimeFraction { 0.0f };
 		const float *offsets { nullptr };
@@ -176,6 +216,37 @@ private:
 		std::span<const ShadingLayer> prevShadingLayers;
 		std::span<const ShadingLayer> nextShadingLayers;
 	};
+
+    //draft
+    struct SharedCageMeshData {
+        std::optional<std::variant<unsigned, std::monostate>> cachedChosenSolidSubdivLevel; // maybe ?
+        const vec4_t *cageVertexMoveDirs;
+        const float *cageVertexLimits;
+        float nextLodTangentRatio { 0.18f };
+        bool hasSibling { false };
+
+        float lifetimeFrac;
+        std::span<const ShadingLayer> prevShadingLayers;
+        std::span<const ShadingLayer> nextShadingLayers;
+
+        //wsw::Vector<uint32_t> *overrideColorsBuffer { nullptr }; NO NEED DIRECTLY COMPUTE COLORS
+        // Must be reset each frame
+        // std::optional<std::variant<std::pair<unsigned, unsigned>, std::monostate>> cachedOverrideColorsSpanInBuffer; X
+        // const vec4_t *simulatedPositions { nullptr }; NO NEED DIRECTLY COMPUTE POSITIONS
+        //const vec4_t *simulatedNormals { nullptr }; COMPUTE DIRECTLY
+        //const byte_vec4_t *simulatedColors { nullptr }; COMPUTE DIRECTLY
+        //unsigned simulatedSubdivLevel { 0 }; THERE IS NO "SUBDIV LEVEL"
+        //float minZLastFrame { 0.0f }; X
+        //float maxZLastFrame { 0.0f }; X
+        //float minFadedOutAlpha { 0.0f }; X
+        //ViewDotFade viewDotFade { ViewDotFade::NoFade }; X
+        //ZFade zFade { ZFade::NoFade }; X
+        //bool tesselateClosestLod { false }; X
+        //bool lerpNextLevelColors { false }; X
+        // currently for keyframed hull shading
+        //bool isAKeyframedHull { false }; X
+        //float lerpFrac { 0.0f };
+    };
 
 	class HullDynamicMesh : public DynamicMesh {
 		friend class SimulatedHullsSystem;
@@ -512,6 +583,7 @@ private:
 		Layer storageOfLayers[NumLayers];
 		float storageOfLimits[kNumVertices];
 		vec4_t storageOfPositions[kNumVertices * NumLayers];
+        vec4_t storageOfMoveDirections[kNumVertices];
 
 		byte_vec4_t storageOfColors[kNumVertices * NumLayers];
 		SharedMeshData storageOfSharedMeshData[NumLayers];
@@ -525,6 +597,7 @@ private:
 			this->subdivLevel                = SubdivLevel;
 			this->layers                     = &storageOfLayers[0];
 			this->limitsAtDirections         = &storageOfLimits[0];
+            this->vertexMoveDirections       = &storageOfMoveDirections[0];
 			for( unsigned i = 0; i < NumLayers; ++i ) {
 				Layer *const layer              = &layers[i];
 				layer->lastKeyframeNum          = 0;

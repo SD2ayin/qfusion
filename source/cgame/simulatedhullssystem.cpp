@@ -340,6 +340,49 @@ SimulatedHullsSystem::~SimulatedHullsSystem() {
 	CM_FreeShapeList( cl.cms, m_tmpShapeList );
 }
 
+void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
+
+SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
+    cgNotice() << "a";
+    auto *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
+    StaticCage *cage;
+    auto filepath = wsw::StringView( name );
+    unsigned suffixIdx = filepath.lastIndexOf('_').value_or( 0 );
+    const bool foundSuffix = suffixIdx != 0;
+    if( !foundSuffix ) {
+        cgNotice() << "static caged mesh " << wsw::StringView( name ) << "is incorrectly formatted";
+        return nullptr;
+    } else {
+        LoadedStaticCages.emplace_back();
+        cage = &LoadedStaticCages.back();
+        cagedMesh->cage = cage;
+
+        unsigned suffixLength = filepath.length() - suffixIdx;
+        auto identifier = filepath.dropRight( suffixLength );
+        cage->identifier = wsw::String( identifier.data(), identifier.length() );
+    }
+
+    cgNotice() << "cage identifier found:" << cage->identifier;
+
+    const char *format = ".md3"; // we are only using md3 format for now
+    auto filepathToCage = wsw::String( cage->identifier.data(), cage->identifier.length() ).append( format );
+    cgNotice() << "path to cage:" << filepathToCage;
+
+    Geometry *cageGeometry = &cage->cageGeometry;
+    GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
+    unsigned numCageVertices = cageGeometry->vertexPositions.size();
+    cgNotice() << "number of vertices in cage:" << numCageVertices;
+
+    //auto sizeOfBaseHull = sizeof( SimulatedHullsSystem::KeyframedHull ); needs to be done after templates are removed
+    size_t sizeOfMoveDirs = sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numCageVertices;
+    size_t sizeOfLimits   = sizeof( *BaseKeyframedHull::limitsAtDirections ) * numCageVertices;
+    size_t requiredSize   = sizeOfMoveDirs + sizeOfLimits;
+
+    cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, 64 );
+
+    return cagedMesh;
+}
+
 void SimulatedHullsSystem::clear() {
 	for( FireHull *hull = m_fireHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeFireHull( hull );

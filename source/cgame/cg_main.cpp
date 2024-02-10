@@ -1177,6 +1177,7 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                         }
                 };
 
+                /*
                 ConicalFlockParams flockParams{
                         .origin       = {trace->endpos[0], trace->endpos[1], trace->endpos[2]},
                         .offset       = {trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2]},
@@ -1222,6 +1223,24 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                 VectorCopy(particleDir, flockParams.dir);
 
                 cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+                 */
+                MeshFlockParams flockParams{
+                        .origin       = {trace->endpos[0], trace->endpos[1], trace->endpos[2]},
+                        .offset       = {40.0f * trace->plane.normal[0], 40.0f * trace->plane.normal[1],40.0f * trace->plane.normal[2]},
+                        .dir          = {trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2]},
+                        .geometry = &cgs.cube,
+                        .geometryScale = 50.0f,
+                        .geometryRotation = 0.0f,
+                        .gravity      = -0.35f * GRAVITY,
+                        .bounceCount  = {.minInclusive = 3, .maxInclusive = 4},
+                        .speed        = { .min = 0.0f, .max = 0.0f },
+                        .percentage   = { .min = 0.99f, .max = 1.0f },
+                        .timeout      = { .min = 1200, .max = 2400 },
+                };
+
+                for( int i = 0; i < 20; i++ ) {
+                    cg.particleSystem.addLargeParticleFlock(appearanceRules, flockParams);
+                }
 
             }
 
@@ -5570,6 +5589,8 @@ static void CG_RegisterWeaponModels( void ) {
 
 }
 
+void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
+
 static void CG_RegisterModels( void ) {
 	if( cgs.precacheModelsStart == MAX_MODELS ) {
 		return;
@@ -5636,9 +5657,13 @@ static void CG_RegisterModels( void ) {
 	}
 
 	cgs.media.registerModels();
+    cgs.media.registerStaticCagedMeshes( &cg.simulatedHullsSystem );
 
 	CG_RegisterBasePModel(); // never before registering the weapon models
 	CG_RegisterWeaponModels();
+
+    //debug
+    GetGeometryFromFileAliasMD3( "models/cube/cube.md3", &cgs.cube );
 
 	// precache forcemodels if defined
 	CG_RegisterForceModels();

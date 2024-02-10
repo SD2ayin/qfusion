@@ -33,6 +33,11 @@ MediaCache::CachedModel::CachedModel( MediaCache *parent, const wsw::StringView 
 	parent->link( this, &parent->m_models );
 }
 
+MediaCache::CachedStaticCagedMesh::CachedStaticCagedMesh( MediaCache *parent, const wsw::StringView &name )
+	: m_name( name ) {
+	parent->link( this, &parent->m_staticCagedMeshes );
+}
+
 MediaCache::CachedMaterial::CachedMaterial( MediaCache *parent, const wsw::StringView &name )
 	: m_name( name ) {
 	parent->link( this, &parent->m_materials );
@@ -50,6 +55,14 @@ void MediaCache::registerSounds() {
 void MediaCache::registerModels() {
 	for( CachedModel *model = m_models; model; model = (CachedModel *)model->m_next ) {
 		registerModel( model );
+        cgNotice() << "aaa";
+	}
+}
+
+void MediaCache::registerStaticCagedMeshes( SimulatedHullsSystem *hullsSystem ) {
+	for( CachedStaticCagedMesh *cagedMesh = m_staticCagedMeshes; cagedMesh; cagedMesh = (CachedStaticCagedMesh *)cagedMesh->m_next ) {
+		registerStaticCagedMesh( cagedMesh, hullsSystem );
+        cgNotice() << "bbb";
 	}
 }
 
@@ -70,6 +83,12 @@ void MediaCache::registerModel( CachedModel *model ) {
 		assert( model->m_name.isZeroTerminated() );
 		model->m_handle = CG_RegisterModel( model->m_name.data() );
 	}
+}
+
+void MediaCache::registerStaticCagedMesh( CachedStaticCagedMesh *cagedMesh, SimulatedHullsSystem *hullsSystem ) {
+    if( !cagedMesh->m_handle ) {
+        cagedMesh->m_handle = CG_RegisterStaticCagedMesh( cagedMesh->m_name.data(), hullsSystem );
+    }
 }
 
 void MediaCache::registerMaterial( CachedMaterial *material ) {
@@ -93,6 +112,12 @@ struct model_s *CG_RegisterModel( const char *name ) {
 	}
 
 	return model;
+}
+
+SimulatedHullsSystem::StaticCagedMesh *CG_RegisterStaticCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem ) {
+    //struct SimulatedHullsSystem::StaticCagedMesh *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
+    cgNotice() << "AMK";
+    return hullsSystem->RegisterStaticCagedMesh( name );
 }
 
 void CG_RegisterLevelMinimap( void ) {
