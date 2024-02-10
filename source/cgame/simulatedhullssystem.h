@@ -170,6 +170,7 @@ public:
         std::span<StaticCagedMesh> sharedCageCagedMeshes;
     };
 
+    void RegisterStaticCage( const wsw::String &identifier, StaticCage *cage );
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
 	struct OffsetKeyframe {
@@ -661,6 +662,8 @@ private:
 	void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets, float maxOffset,
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+
+    void addHull( AppearanceRules appearanceRules, StaticKeyframedHullParams hullParams );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );

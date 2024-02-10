@@ -342,25 +342,11 @@ SimulatedHullsSystem::~SimulatedHullsSystem() {
 
 void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
 
-SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
-    cgNotice() << "a";
-    auto *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
-    StaticCage *cage;
-    auto filepath = wsw::StringView( name );
-    unsigned suffixIdx = filepath.lastIndexOf('_').value_or( 0 );
-    const bool foundSuffix = suffixIdx != 0;
-    if( !foundSuffix ) {
-        cgNotice() << "static caged mesh " << wsw::StringView( name ) << "is incorrectly formatted";
-        return nullptr;
-    } else {
-        LoadedStaticCages.emplace_back();
-        cage = &LoadedStaticCages.back();
-        cagedMesh->cage = cage;
+void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier, StaticCage *cage ) {
+    LoadedStaticCages.emplace_back();
+    cage = &LoadedStaticCages.back();
 
-        unsigned suffixLength = filepath.length() - suffixIdx;
-        auto identifier = filepath.dropRight( suffixLength );
-        cage->identifier = wsw::String( identifier.data(), identifier.length() );
-    }
+    cage->identifier = identifier;
 
     cgNotice() << "cage identifier found:" << cage->identifier;
 
@@ -370,15 +356,54 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 
     Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
+    unitizeGeometry( cageGeometry );
+
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
 
     //auto sizeOfBaseHull = sizeof( SimulatedHullsSystem::KeyframedHull ); needs to be done after templates are removed
     size_t sizeOfMoveDirs = sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numCageVertices;
-    size_t sizeOfLimits   = sizeof( *BaseKeyframedHull::limitsAtDirections ) * numCageVertices;
-    size_t requiredSize   = sizeOfMoveDirs + sizeOfLimits;
+    size_t sizeOfLimits = sizeof( *BaseKeyframedHull::limitsAtDirections ) * numCageVertices;
+    size_t requiredSize = sizeOfMoveDirs + sizeOfLimits;
 
     cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, 64 );
+}
+
+SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
+    auto *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
+    StaticCage *cage;
+    cagedMesh->cage = cage;
+    auto filepath = wsw::StringView( name );
+    cgNotice() << "starting caged mesh registration for" << filepath;
+    unsigned suffixIdx = filepath.lastIndexOf('_').value_or( 0 );
+    const bool foundSuffix = suffixIdx != 0;
+    if( !foundSuffix ) {
+        cgNotice() << "static caged mesh " << wsw::StringView( name ) << "is incorrectly formatted";
+        return nullptr;
+    } else {
+        unsigned suffixLength = filepath.length() - suffixIdx;
+        auto identifier = filepath.dropRight( suffixLength );
+
+        unsigned loadedCageNum = 0;
+        bool foundCageAlreadyLoaded = false;
+        if( unsigned numLoadedCages = LoadedStaticCages.size(); numLoadedCages > 0 ) {
+            for( ; loadedCageNum < numLoadedCages; loadedCageNum++ ) {
+                StaticCage loadedCage = LoadedStaticCages[loadedCageNum];
+                if( wsw::StringView( loadedCage.identifier.data(), loadedCage.identifier.size() ).equals( identifier ) ){
+                    foundCageAlreadyLoaded = true;
+                    break;
+                }
+            }
+        }
+
+        if( foundCageAlreadyLoaded ) {
+            cage = &LoadedStaticCages[loadedCageNum];
+
+            cgNotice() << "cage" << cage->identifier << "was already loaded";
+        } else {
+            RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ), cage );
+        }
+    }
 
     return cagedMesh;
 }
@@ -748,6 +773,14 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	hull->scale                = scale;
 
 	hull->appearanceRules = appearanceRules;
+}
+
+void SimulatedHullsSystem::addHull( AppearanceRules appearanceRules, StaticKeyframedHullParams hullParams ) {
+    //if( auto *const hull = hullsSystem->allocStaticCagedHull( m_lastTime, toonSmokeLifetime ) ) {
+    //    hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
+    //                                    &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
+    //    hull->compoundMeshKey = compoundMeshKey;
+    //}
 }
 
 void SimulatedHullsSystem::calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes ) {

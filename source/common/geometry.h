@@ -22,4 +22,6 @@ void inline getTriCoords( const unsigned *triIndices, const Geometry *geometry, 
     VectorCopy( geometry->vertexPositions[triIndices[2]], outCoords[2] );
 }
 
+void unitizeGeometry( Geometry *geometry );
+
 #endif //QFUSION_GEOMETRY_H
