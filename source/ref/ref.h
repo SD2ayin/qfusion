@@ -182,6 +182,9 @@ struct alignas( 16 ) Particle {
 		Expanding,
 		Shrinking,
 		ExpandingAndShrinking,
+		Thickening,
+		Thinning,
+		ThickeningAndThinning,
 	};
 
 	// Few notes on these value ranges:
@@ -277,7 +280,7 @@ struct alignas( 16 ) Particle {
 
 	// TODO: All of this ties Particle to fixed AppearanceRules, allow supplying different instance data
 
-	static constexpr float kByteParamNormalizer = 1.0f / 128.0f;
+	static constexpr float kByteSpreadNormalizer = 1.0f / 128.0f;
 
 	// Should be set once upon spawn. Fractions are stored in a compact representation,
 	// floating-point values should be reconstructed by multiplying by kByteParamNormalizer
@@ -285,6 +288,9 @@ struct alignas( 16 ) Particle {
 	int8_t instanceLengthSpreadFraction;
 	int8_t instanceWidthSpreadFraction;
 	int8_t instanceRadiusSpreadFraction;
+
+	static constexpr uint8_t kUnitExtraScaleAsByte = 16;
+	static constexpr float kScaleOfByteExtraScale  = 1.0f / kUnitExtraScaleAsByte;
 
 	uint8_t instanceLengthExtraScale;
 	uint8_t instanceWidthExtraScale;
@@ -296,6 +302,32 @@ struct alignas( 16 ) Particle {
 	uint8_t instanceColorIndex;
 
 	uint8_t rotationAxisIndex;
+};
+
+[[nodiscard]]
+wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour )  {
+	assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
+	// Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
+	assert( sizeBehaviour != Particle::SizeNotChanging );
+
+	float result;
+	if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
+		// Grow faster than the linear growth
+		result = Q_Sqrt( lifetimeFrac );
+	} else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
+		// Shrink faster than the linear growth
+		result = ( 1.0f - lifetimeFrac );
+		result *= result;
+	} else {
+		assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
+		if( lifetimeFrac < 0.5f ) {
+			result = 2.0f * lifetimeFrac;
+		} else {
+			result = 2.0f * ( 1.0f - lifetimeFrac );
+		}
+	}
+	assert( result >= 0.0f && result <= 1.0f );
+	return result;
 };
 
 struct VisualTrace {

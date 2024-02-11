@@ -34,6 +34,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../client/snd_public.h"
 #include "cg_local.h"
 #include "../ui/huddatamodel.h"
+#include "../common/noise.h"
+#include "../ref/local.h"
 
 using wsw::operator""_asView;
 
@@ -1121,9 +1123,11 @@ static vec_t *_LaserColor( vec4_t color ) {
 
 static ParticleColorsForTeamHolder laserImpactParticleColorsHolder {
 	.defaultColors = {
-		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-		.fadedIn  = { 1.0f, 1.0f, 1.0f, 1.0f },
-		.fadedOut = { 1.0f, 0.9f, 0.0f, 0.0f },
+		.initial  = { 1.0f, 1.0f, 0.88f, 1.0f },
+		.fadedIn  = { 1.0f, 1.0f, 0.39f, 1.0f },
+		.fadedOut = { 0.88f, 0.25f, 0.07f, 1.0f },
+		.finishFadingInAtLifetimeFrac = 0.1f,
+		.startFadingOutAtLifetimeFrac = 0.35f
 	}
 };
 
@@ -1178,24 +1182,54 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					singleColorAddress = &holder->defaultColors;
 				}
 
-				EllipsoidalFlockParams flockParams {
+				const Particle::AppearanceRules appearanceRules{
+					.materials = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
+					.colors    = { singleColorAddress, singleColorAddress + 1 },
+					.geometryRules = Particle::SpriteRules{
+						.radius = { .mean = 5.0f, .spread = 2.5f },
+						.sizeBehaviour = Particle::Shrinking,
+					}
+				};
+
+				ConicalFlockParams flockParams {
 					.origin       = { trace->endpos[0], trace->endpos[1], trace->endpos[2] },
 					.offset       = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.stretchDir   = { trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2] },
-					.stretchScale = 0.5f,
-					.gravity      = 2.0f * GRAVITY,
-					.speed        = { .min = 150, .max = 200 },
-					.shiftSpeed   = { .min = 100, .max = 125 },
-					.percentage   = { .min = 1.0f, .max = 1.0f },
-					.timeout      = { .min = 150, .max = 300 },
+					.gravity      = 0.0f,
+					.drag         = 0.02f,
+					.angle        = 12.0f,
+					.bounceCount  = { .minInclusive = 1, .maxInclusive = 1 },
+					.speed        = { .min = 0.0f, .max = 400.0f },
+					.percentage   = { .min = 0.0f, .max = 1.0f },
+					.timeout      = { .min = 180, .max = 240 },
 				};
-				Particle::AppearanceRules appearanceRules {
-					.materials      = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
-					.colors         = { singleColorAddress, singleColorAddress + 1 },
-					.geometryRules  = Particle::SpriteRules {
-						.radius = { .mean = 1.25f, .spread = 0.25f }, .sizeBehaviour = Particle::Shrinking
-					},
-				};
+
+				vec3_t particleDir;
+
+				// https://math.stackexchange.com/a/205589 for creation of the cone
+				constexpr float innerAngle = 30.0f;
+				constexpr float angle      = 85.0f;
+				const float maxZ           = std::cos( (float)DEG2RAD( innerAngle ) );
+				const float minZ           = std::cos( (float)DEG2RAD( angle ) );
+				const float zRange         = maxZ - minZ;
+
+				constexpr unsigned numSpikes   = 4;
+				constexpr float spikeFraction = 1.0f / numSpikes;
+				constexpr float laserShotTime = 1.0f / 20.0f; // should be equal to fire rate
+
+				const unsigned spikeNum = (unsigned)( (float)cg.time * laserShotTime ) % numSpikes;
+				const float coord       = (float)cg.time * 5e-4f + (float)spikeNum * 10.0f;
+
+				mat3_t transformMatrix;
+				Matrix3_ForRotationOfDirs( &axis_identity[AXIS_UP], trace->plane.normal, transformMatrix );
+
+				const float z   = minZ + calcSimplexNoise2D( -coord, 0.0f ) * zRange;
+				const float r   = Q_Sqrt( 1.0f - z * z );
+				const float phi = DEG2RAD( AngleNormalize360( 360.0f * ( (float)spikeNum * spikeFraction + calcSimplexNoise2D( coord, 0.0f ) ) ) );
+				const vec3_t untransformed { r * std::cos( phi ), r * std::sin( phi ), z };
+				Matrix3_TransformVector( transformMatrix, untransformed, particleDir );
+
+				VectorCopy( particleDir, flockParams.dir );
+
 				cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
 			}
 
@@ -1537,7 +1571,7 @@ auto getSurfFlagsForImpact( const trace_t &trace, const float *impactDir ) -> in
 		vec3_t testPoint;
 
 		// Check behind
-		VectorMA( trace.endpos, +4.0f, impactDir, testPoint );
+		VectorMA( trace.endpos, 30.0f, impactDir, testPoint );
 		wsw::ref::traceAgainstBspWorld( &visualTrace, trace.endpos, testPoint );
 		if( visualTrace.fraction != 1.0f ) {
 			return visualTrace.surfFlags;
@@ -1571,7 +1605,7 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 	[[maybe_unused]]
 	const trace_t *waterTrace = GS_TraceBullet( &trace, origin, dir, r, u, (int)fireDef->timeout, owner, 0 );
 	if( waterTrace ) {
-		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, origin, waterTrace->endpos );
+		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, waterTrace->endpos );
 
 		if( canShowBulletImpactForDirAndTrace( dir, trace ) ) {
 			cg.effectsSystem.spawnUnderwaterBulletImpactEffect( delay, trace.endpos, trace.plane.normal );
@@ -1585,7 +1619,7 @@ static void CG_Event_FireMachinegun( vec3_t origin, vec3_t dir, int weapon, int 
 			});
 		}
 	} else {
-		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, origin, trace.endpos );
+		[[maybe_unused]] const unsigned delay = cg.effectsSystem.spawnBulletTracer( owner, trace.endpos );
 		if( canShowBulletImpactForDirAndTrace( dir, trace ) ) {
 			cg.effectsSystem.spawnBulletImpactEffect( delay, SolidImpact {
 				.origin      = { trace.endpos[0], trace.endpos[1], trace.endpos[2] },
@@ -1676,7 +1710,7 @@ static void CG_Fire_SunflowerPattern( vec3_t start, vec3_t dir, int *seed, int o
 	auto *const solidImpactDelays  = (unsigned *)alloca( sizeof( unsigned ) * count );
 
 	// TODO: Pass the origin stride plus impacts?
-	cg.effectsSystem.spawnPelletTracers( owner, start, { tracerTargets, numTracerTargets }, tracerDelaysBuffer );
+	cg.effectsSystem.spawnPelletTracers( owner, { tracerTargets, numTracerTargets }, tracerDelaysBuffer );
 
 	for( unsigned i = 0; i < numSolidImpacts; ++i ) {
 		solidImpactDelays[i] = tracerDelaysBuffer[solidImpactTracerIndices[i]];
@@ -4277,8 +4311,9 @@ void CG_AddEntities( DrawSceneRequest *drawSceneRequest, ViewState *viewState ) 
 				break;
 			case ET_BLASTER:
 				CG_AddGenericEnt( cent, drawSceneRequest, viewState );
-				cg.effectsSystem.touchBlastTrail( cent->current.number, cent->ent.origin, cg.time );
+				cg.effectsSystem.touchBlastTrail( cent->current.number, cent->ent.origin, cent->velocity, cg.time );
 				CG_EntityLoopSound( state, ATTN_STATIC, viewState );
+
 				// We use relatively large light radius because this projectile moves very fast, so make it noticeable
 				drawSceneRequest->addLight( cent->ent.origin, 192.0f, 144.0f, 0.9f, 0.7f, 0.0f );
 				break;
@@ -4440,13 +4475,15 @@ void CG_AddEntities( DrawSceneRequest *drawSceneRequest, ViewState *viewState ) 
 		CG_EntityLoopSound( state, ATTN_STATIC, viewState );
 
 		if( state->effects & EF_STRONG_WEAPON ) {
-			cg.effectsSystem.touchStrongPlasmaTrail( cent->current.number, cent->current.origin, cg.time );
+			//cgNotice() << "velocity" << cent->velocity[0] << cent->velocity[1] << cent->velocity[2];
+			cg.effectsSystem.touchStrongPlasmaTrail( cent->current.number, cent->current.origin, cent->velocity, cg.time );
 		} else {
-			cg.effectsSystem.touchWeakPlasmaTrail( cent->current.number, cent->current.origin, cg.time );
+			//cgNotice() << "velocity" << cent->velocity[0] << cent->velocity[1] << cent->velocity[2];
+			cg.effectsSystem.touchWeakPlasmaTrail( cent->current.number, cent->current.origin, cent->velocity, cg.time );
 		}
 
 		constexpr float desiredProgramLightRadius = 128.0f;
-		float programLightRadius = 0.0f;
+		float programLightRadius                  = 0.0f;
 
 		// TODO: This should be handled at rendering layer during culling/light prioritization
 		const float squareDistance = DistanceSquared( viewState->view.refdef.vieworg, state->origin );
@@ -4485,12 +4522,21 @@ void CG_LerpEntities( ViewState *viewState ) {
 		spatialize = true;
 
 		switch( cent->type ) {
+			case ET_PLASMA: {
+				VectorClear( cent->current.angles );
+				VectorClear( cent->prev.angles );
+				if( state->linearMovement ) {
+					CG_ExtrapolateLinearProjectile( cent );
+				} else {
+					CG_LerpGenericEnt( cent, viewState );
+				}
+				break;
+			}
 			case ET_GENERIC:
 			case ET_GIB:
 			case ET_BLASTER:
 			case ET_ELECTRO_WEAK:
 			case ET_ROCKET:
-			case ET_PLASMA:
 			case ET_GRENADE:
 			case ET_WAVE:
 			case ET_ITEM:
@@ -5548,6 +5594,7 @@ static void CG_RegisterWeaponModels( void ) {
 	if( !cgs.weaponInfos[0] ) {
 		cgs.weaponInfos[0] = CG_CreateWeaponZeroModel( cgs.weaponModels[0] );
 	}
+
 }
 
 static void CG_RegisterModels( void ) {

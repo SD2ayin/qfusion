@@ -52,6 +52,7 @@ struct EllipsoidalFlockParams {
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
 	struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+	struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
 	struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
 	struct { float min { 0.0f }, max { 1.0f }; } percentage;
 	struct { unsigned min { 300u }, max { 700u }; } timeout;
@@ -82,6 +83,7 @@ struct ConicalFlockParams {
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
 	struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+	struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
 	struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
 	struct { float min { 0.0f }, max { 1.0f }; } percentage;
 	struct { unsigned min { 300u }, max { 700u }; } timeout;
@@ -100,7 +102,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 				        unsigned maxParticles,
 				        const Particle::AppearanceRules *__restrict appearanceRules,
 				        wsw::RandomGenerator *__restrict rng,
-				        int64_t currTime, signed signedStride = 1 ) -> FillFlockResult;
+				        int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
 
 [[nodiscard]]
 auto fillParticleFlock( const ConicalFlockParams *__restrict params,
@@ -108,17 +110,19 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 				        unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 				  		wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride = 1 ) -> FillFlockResult;
+						int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
 
 struct ParticleTrailUpdateParams {
 	unsigned maxParticlesPerDrop { 1 };
 	float dropDistance { 8.0f };
+	float particleSizeMultiplier { 1.0f };
 };
 
 struct ParamsOfParticleTrailOfParticles {
 	const Particle::AppearanceRules appearanceRules;
 	ConicalFlockParams flockParamsTemplate;
 	const ParticleTrailUpdateParams updateParams;
+	const bool modulateByParentSize;
 };
 
 struct ParamsOfPolyTrailOfParticles {
@@ -183,6 +187,7 @@ struct alignas( 16 ) ParticleFlock {
 	float outflowOrigin[3]; //
 	// Axis of the outflow, should be a unit vector
 	float outflowAxis[3] { 0.0f, 0.0f, 1.0f };
+	bool modulateByParentSize;
 };
 
 void updateParticleTrail( ParticleFlock *flock, ConicalFlockParams *flockParamsTemplate,
@@ -247,7 +252,7 @@ private:
 	static constexpr unsigned kMaxLargeFlocks  = 24;
 
 	static constexpr unsigned kMaxClippedTrailFlocks    = 32;
-	static constexpr unsigned kMaxNonClippedTrailFlocks = 16;
+	static constexpr unsigned kMaxNonClippedTrailFlocks = 48;
 
 	static constexpr unsigned kMaxSmallFlockSize  = 8;
 	static constexpr unsigned kMaxMediumFlockSize = 48;

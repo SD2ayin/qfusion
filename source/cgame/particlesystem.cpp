@@ -3,6 +3,11 @@
 #include "../client/client.h"
 #include "../common/noise.h"
 #include "cg_local.h"
+#include "../common/configvars.h"
+
+using wsw::operator""_asView;
+
+FloatConfigVar v_debugImpact("debugImpact"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 struct PolyTrailOfParticles {
 	int64_t spawnedAt { 0 };
@@ -364,7 +369,9 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 
 		assert( !trailFlock->numActivatedParticles && !trailFlock->numDelayedParticles );
 		trailFlock->timeoutAt = std::numeric_limits<int64_t>::max();
-		setupFlockFieldsFromParams( flock, *trailFlock->flockParamsTemplate );
+		setupFlockFieldsFromParams( trailFlock, *trailFlock->flockParamsTemplate );
+
+		trailFlock->modulateByParentSize = paramsOfParticleTrail->modulateByParentSize;
 	}
 
 	if( paramsOfPolyTrail ) {
@@ -477,7 +484,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 						unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 						wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride )
+						int64_t currTime, signed signedStride, float extraScale )
 	-> FillFlockResult {
 	const vec3_t initialOrigin {
 		params->origin[0] + params->offset[0],
@@ -526,6 +533,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 	const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
 	const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
 	const bool isSpherical                = params->stretchScale == 1.0f;
+	const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
 	const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
 	const bool hasVariableDelay           = params->activationDelay.min < params->activationDelay.max;
 
@@ -542,6 +550,11 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 	}
 
 	assert( std::fabs( VectorLength( params->stretchDir ) - 1.0f ) < 1e-3f );
+
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
 	for( unsigned i = 0; i < numParticles; ++i ) {
 		Particle *const __restrict p = particles + signedStride * (signed)i;
@@ -582,6 +595,9 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		p->dynamicsVelocity[3] = 0.0f;
 
 		p->rotationAngle = 0.0f;
+		if( hasRandomInitialRotation ) {
+			p->rotationAngle += AngleNormalize360( rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max ) );
+		}
 		if( hasVariableAngularVelocity ) {
 			p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
 			p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
@@ -608,7 +624,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
 		p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
 
-		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = 1;
+		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
 
 		if( hasMultipleMaterials ) {
 			if( materialsIndexMask ) {
@@ -638,7 +654,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 						unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 						wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride )
+						int64_t currTime, signed signedStride, float extraScale )
 	-> FillFlockResult {
 	const vec3_t initialOrigin {
 		params->origin[0] + params->offset[0],
@@ -701,6 +717,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 	const bool hasMultipleMaterials       = appearanceRules->numMaterials > 1;
 	const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
 	const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
+	const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
 	const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
 	const bool hasVariableDelay           = params->activationDelay.min != params->activationDelay.max;
 
@@ -715,6 +732,11 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 			materialsIndexMask = maybeMask;
 		}
 	}
+
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
 	// TODO: Make cached conical samples for various angles?
 	for( unsigned i = 0; i < numParticles; ++i ) {
@@ -742,6 +764,9 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		p->dynamicsVelocity[3] = 0.0f;
 
 		p->rotationAngle = 0.0f;
+		if( hasRandomInitialRotation ) {
+			p->rotationAngle += rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max );
+		}
 		if( hasVariableAngularVelocity ) {
 			p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
 			p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
@@ -768,7 +793,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
 		p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
 
-		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = 1;
+		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
 
 		if( hasMultipleMaterials ) {
 			if( materialsIndexMask ) {
@@ -858,7 +883,8 @@ void updateParticleTrail( ParticleFlock *__restrict flock,
 																	  flock->particles + initialOffset,
 																	  updateParams.maxParticlesPerDrop,
 																	  std::addressof( flock->appearanceRules ),
-																	  rng, currTime, fillStride );
+																	  rng, currTime, fillStride,
+																	  updateParams.particleSizeMultiplier );
 				assert( fillResult.numParticles && fillResult.numParticles <= updateParams.maxParticlesPerDrop );
 
 				if( flockParamsTemplate->activationDelay.max == 0 ) {
@@ -1079,7 +1105,9 @@ void ParticleSystem::tryAddingFlares( ParticleFlock *flock, DrawSceneRequest *dr
 		assert( flareProps.radiusScale > 0.0f );
 		lightRadius *= flareProps.radiusScale;
 
-		if( lightRadius >= 1.0f ) {
+		static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+		const auto lightRadiusAsByte = wsw::clamp<uint8_t>( (uint8_t)( lightRadius * Particle::kUnitExtraScaleAsByte ), 0, 255 );
+		if( lightRadiusAsByte > 0 ) {
 			auto *const addedParticle = new( m_frameFlareParticles.unsafe_grow_back() )Particle( baseParticle );
 
 			addedParticle->lifetimeFrac          = 0.0f;
@@ -1087,7 +1115,7 @@ void ParticleSystem::tryAddingFlares( ParticleFlock *flock, DrawSceneRequest *dr
 			addedParticle->instanceMaterialIndex = 0;
 
 			// Keep radius in the appearance rules the same (the thing we have to do), modify instance radius scale
-			addedParticle->instanceRadiusExtraScale = (int8_t)lightRadius;
+			addedParticle->instanceRadiusExtraScale = lightRadiusAsByte;
 
 			// TODO: This kind of sucks, can't we just supply inline colors?
 			m_frameFlareColorLifespans.push_back( RgbaLifespan {
@@ -1192,24 +1220,24 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 			vec4_t perpendicularOffset;
 			// It is important that the axis is a unit vector for this step
 			VectorMA( particleOffsetFromOrigin, -lengthAlongAxis, flock->outflowAxis, perpendicularOffset );
-			if( const float radiusSquared = VectorLengthSquared( perpendicularOffset ); radiusSquared > 0.0f ) [[likely]] {
+			if( const float radiusSquared = VectorLengthSquared( perpendicularOffset ); radiusSquared > 1e-2f ) [[likely]] {
 				constexpr float referenceDistance    = 2.0f;
 				constexpr float rcpReferenceDistance = 1.0f / referenceDistance;
 				vec4_t outflowVec;
 				// Make the maximum the value at a radius of referenceDistance units
 				const float rcpRadiusSquared = wsw::min( Q_Rcp( radiusSquared ), wsw::square( rcpReferenceDistance ) );
-				// Make dependancy 1/r
+				// Make dependency 1/r
 				VectorScale( perpendicularOffset, rcpRadiusSquared, outflowVec );
 				VectorMA( particle->artificialVelocity, flock->outflowSpeed, outflowVec, particle->artificialVelocity );
 			}
 		}
 
-        if( flock->turbulenceSpeed > 0.0f && particle->lifetimeFrac > 0.1f ) {
+		if( flock->turbulenceSpeed > 0.0f && particle->lifetimeFrac > 0.1f ) {
 			vec3_t scaledOrigin;
 			VectorScale( particle->origin, flock->turbulenceCoordinateScale, scaledOrigin );
 			const Vec3 turbulence = calcSimplexNoiseCurl( scaledOrigin[0], scaledOrigin[1], scaledOrigin[2] );
 			VectorMA( particle->artificialVelocity, flock->turbulenceSpeed, turbulence.Data(), particle->artificialVelocity );
-        }
+		}
 
 		vec3_t effectiveVelocity;
 		VectorMA( particle->dynamicsVelocity, deltaSeconds, accel, particle->dynamicsVelocity );
@@ -1267,6 +1295,7 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 			timeoutOfParticlesLeft                 = std::max( timeoutOfParticlesLeft, timeoutOfActiveParticles );
 		} else {
 			assert( flock->restitution > 0.0f && flock->restitution <= 1.0f );
+			const float debugBeamScale = v_debugImpact.get();
 
 			trace_t trace;
 			unsigned particleIndex = 0;
@@ -1326,6 +1355,13 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 								// Save the trace endpos with a slight offset as an origin for the next step.
 								// This is not really correct but is OK.
 								VectorAdd( trace.endpos, reflectedVelocityDir, p->oldOrigin );
+
+								if( debugBeamScale > 0.0f ) {
+									vec3_t to;
+									VectorMA( p->oldOrigin, debugBeamScale, p->dynamicsVelocity, to );
+									vec3_t color { 0.0f, 1.0f, 0.0f };
+									cg.effectsSystem.spawnGameDebugBeam( p->oldOrigin, to, color, 0 );
+								}
 
 								keepTheParticleInGeneral = true;
 							}
@@ -1467,11 +1503,25 @@ void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock,
 		}
 	}
 
+	Particle::SpriteRules *spriteRules = std::get_if<Particle::SpriteRules>( &baseFlock->appearanceRules.geometryRules );
+	Particle::SparkRules *sparkRules   = std::get_if<Particle::SparkRules>( &baseFlock->appearanceRules.geometryRules );
+
+	const Particle::SizeBehaviour sizeBehaviour = spriteRules ? spriteRules->sizeBehaviour : sparkRules->sizeBehaviour;
+
+	const bool modulateSize = trailFlock->modulateByParentSize;
+
 	// Second, spawn particles if needed
 	for( unsigned i = 0; i < baseFlock->numActivatedParticles; ++i ) {
 		const Particle *const p     = &baseFlock->particles[i];
 		float *const lastDropOrigin = trailFlock->lastParticleTrailDropOrigins[p->originalIndex];
-		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, updateParams );
+		const float sizeFrac        = modulateSize ? calcSizeFracForLifetimeFrac( p->lifetimeFrac, sizeBehaviour ) : 1.0f;
+
+		const ParticleTrailUpdateParams instanceUpdateParams {
+			.maxParticlesPerDrop    = updateParams.maxParticlesPerDrop,
+			.dropDistance           = updateParams.dropDistance,
+			.particleSizeMultiplier = updateParams.particleSizeMultiplier * sizeFrac
+		};
+		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, instanceUpdateParams );
 	}
 
 	if( trailFlock->numActivatedParticles ) [[likely]] {
