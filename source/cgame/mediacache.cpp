@@ -55,14 +55,12 @@ void MediaCache::registerSounds() {
 void MediaCache::registerModels() {
 	for( CachedModel *model = m_models; model; model = (CachedModel *)model->m_next ) {
 		registerModel( model );
-        cgNotice() << "aaa";
 	}
 }
 
 void MediaCache::registerStaticCagedMeshes( SimulatedHullsSystem *hullsSystem ) {
 	for( CachedStaticCagedMesh *cagedMesh = m_staticCagedMeshes; cagedMesh; cagedMesh = (CachedStaticCagedMesh *)cagedMesh->m_next ) {
 		registerStaticCagedMesh( cagedMesh, hullsSystem );
-        cgNotice() << "bbb";
 	}
 }
 
@@ -115,8 +113,6 @@ struct model_s *CG_RegisterModel( const char *name ) {
 }
 
 SimulatedHullsSystem::StaticCagedMesh *CG_RegisterStaticCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem ) {
-    //struct SimulatedHullsSystem::StaticCagedMesh *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
-    cgNotice() << "AMK";
     return hullsSystem->RegisterStaticCagedMesh( name );
 }
 

@@ -10,6 +10,7 @@
 #include "../common/wswvector.h"
 #include "../common/geometry.h"
 #include "../common/wswstring.h"
+#include "polyeffectssystem.h"
 
 struct CMShapeList;
 
@@ -138,6 +139,7 @@ public:
         Geometry cageGeometry;
         wsw::String identifier;
         wsw::HeapBasedFreelistAllocator *allocator;
+        // StaticCagedHull *head;
     };
 
     wsw::Vector<StaticCage> LoadedStaticCages;
@@ -146,7 +148,7 @@ public:
         unsigned cageTriIdx;
         float coordsOnCageTri[3]; // barycentric coordinates
         float offset; // offset along direction
-        /// ? float moveDir ? precompute the moveDir?
+        /// ? float moveDir ? precompute the moveDir? -> this should be impossible ig
         float offsetFromLimit; // offset from boundaries like walls
     };
 
@@ -170,7 +172,9 @@ public:
         std::span<StaticCagedMesh> sharedCageCagedMeshes;
     };
 
-    void RegisterStaticCage( const wsw::String &identifier, StaticCage *cage );
+    unsigned maxCagedHullsPerType = 64;
+
+    void RegisterStaticCage( const wsw::String &identifier, StaticCage **cage );
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
 	struct OffsetKeyframe {
@@ -528,6 +532,8 @@ private:
 	};
 
 	struct BaseKeyframedHull {
+        StaticCagedMesh *sharedCageCagedMeshes[8];
+
 		float scale;
 		// Externally managed, should point to the unit mesh data
 		const vec4_t *vertexMoveDirections;
@@ -611,6 +617,7 @@ private:
 				assert( std::size( layer->submittedCloudMeshes ) == 1 );
 				layer->submittedCloudMeshes[0] = &storageOfCloudMeshes[i];
 			}
+            /// ... allocate stuff on heap with construct at
 		}
 	};
 
@@ -661,6 +668,7 @@ private:
 
 	void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets, float maxOffset,
+                            SimulatedHullsSystem::StaticCagedMesh *meshToRender, PolyEffectsSystem *effectSystem,
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
     void addHull( AppearanceRules appearanceRules, StaticKeyframedHullParams hullParams );

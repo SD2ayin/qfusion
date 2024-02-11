@@ -550,9 +550,17 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const float toonSmokeScale   = 38.0f * randomScaling;
 		const auto toonSmokeLifetime = (unsigned)( (float)toonSmokeKeyframes.kMinLifetime * randomScaling );
 		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
+            vec3_t color = { 0.1f, 0.4f, 0.99f };
+            //cg.effectsSystem.spawnGameDebugBeam( smokeOrigin, fireOrigin, color );
+            shader_s *material = cgs.media.shaderLaser;
+
+            SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample;
+
 			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
-			hull->compoundMeshKey = compoundMeshKey;
+											&toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset,
+                                            cgs.media.anotherExample2,
+                                            &cg.polyEffectsSystem );
+			//hull->compoundMeshKey = compoundMeshKey;
 		}
 
 #if 0

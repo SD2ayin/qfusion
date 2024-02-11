@@ -2965,6 +2965,7 @@ void EffectsSystemFacade::spawnInstagunBeam( const vec3_t start, const vec3_t en
 
 void EffectsSystemFacade::spawnWorldLaserBeam( const float *from, const float *to, float width ) {
 	// TODO: Either disable fading out or make it tracked
+    shader_s *material = cgs.media.shaderLaser;
 	const auto timeout = wsw::max( 2u, cgs.snapFrameTime );
 	cg.polyEffectsSystem.spawnTransientBeamEffect( from, to, {
 		.material      = cgs.media.shaderLaser,
@@ -2972,7 +2973,7 @@ void EffectsSystemFacade::spawnWorldLaserBeam( const float *from, const float *t
 	});
 }
 
-void EffectsSystemFacade::spawnGameDebugBeam( const float *from, const float *to, const float *color, int ) {
+void EffectsSystemFacade::spawnGameDebugBeam( const float *from, const float *to, const float *color, float width, unsigned lifetime ) {
 	// TODO: Utilize the parameter
 	cg.polyEffectsSystem.spawnTransientBeamEffect( from, to, {
 		.material          = cgs.media.shaderLaser,

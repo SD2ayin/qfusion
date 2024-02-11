@@ -167,6 +167,10 @@ public:
 	CachedModel modLasergunWallExplo { this, wsw::StringView( PATH_LASERGUN_IMPACT_MODEL ) };
 
     CachedStaticCagedMesh testExample { this, wsw::StringView( "gfx/hulls/testExample_mesh.md3" ) };
+    CachedStaticCagedMesh testExample2 { this, wsw::StringView( "gfx/hulls/testExample_second.md3" ) };
+
+    CachedStaticCagedMesh anotherExample { this, wsw::StringView( "gfx/hulls/anotherExample_mesh.md3" ) };
+    CachedStaticCagedMesh anotherExample2 { this, wsw::StringView( "gfx/hulls/anotherExample_second.md3" ) };
 
     CachedMaterial shaderLaserSpikeParticle { this, wsw::StringView( "gfx/effects/laser_spike_particle" ) };
 	CachedMaterial shaderLaserImpactParticle { this, wsw::StringView( "gfx/effects/laser_impact_particle" ) };
