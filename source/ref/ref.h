@@ -304,6 +304,10 @@ struct alignas( 16 ) Particle {
 	uint8_t rotationAxisIndex;
 };
 
+
+[[nodiscard]]
+static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour );
+
 struct VisualTrace {
 	shader_s *shader;
 	const char *name;
