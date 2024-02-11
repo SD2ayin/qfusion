@@ -1186,49 +1186,30 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 
 		// Negative values lead to rotation in the opposite direction
 		if( flock->vorticityAngularSpeedRadians != 0.0f ) {
-            // it is important the axis is a unit vector
+			float distance                     = 0.0f;
+			float angularSpeedScaleForDistance = 0.0f;
+			constexpr float referenceDistance  = 16.0f;
 
-            /*
-            to create a rotating motion around the axis, we express the coordinate of the particle into 3 new orthogonal
-            base vectors: 1) the axis  2) vector from particle to axis r 3) the crossproduct of (1) and (2) n. Then the
-            particle position after the timestep can be calculated as:
-            projection of particle on the axis + cos(strength/radius * deltaT) * r + sin(strength/radius * deltaT) * n
+			vec4_t particleOffsetFromOrigin, vortexDir;
+			VectorSubtract( particle->origin, flock->vorticityOrigin, particleOffsetFromOrigin );
+			CrossProduct( particleOffsetFromOrigin, flock->vorticityAxis, vortexDir );
 
-            using a third order taylor series approximation, when k=strength/radius:
-            projection of particle on the axis + (1-(k*deltaT)^2) * r + (k*deltaT-(k*deltaT)^3/6) * n
-            where the projection plus the radius is simply the initial position, thus the change in position is:
-            - (k*deltaT)^2 * r + (k*deltaT-(k*deltaT)^3/6) * n
-            then the velocity is change in position over time (deltaT) thus it is:
-            - k^2*deltaT * r + (k - k^3*deltaT^2/6) * n
-            */
+			if( const float squareDirLength = VectorLengthSquared( vortexDir ); squareDirLength > 0.0f ) [[likely]] {
+				// Normalize the vortex dir for further use
+				const float rcpDirLength = Q_RSqrt( squareDirLength );
+				VectorScale( vortexDir, rcpDirLength, vortexDir );
+				// The offset vector is an operand of the cross product, which is non-zero, so it's magnitude is non-zero
+				const float squaredOffsetMagnitude = VectorLengthSquared( particleOffsetFromOrigin );
+				assert( squaredOffsetMagnitude > 0.0f );
+				distance = squaredOffsetMagnitude * Q_RSqrt( squaredOffsetMagnitude );
+				// The scale is 1.0 for offsets less than this distance, otherwise it uses a reciprocal falloff
+				angularSpeedScaleForDistance = Q_Rcp( wsw::max( 1.0f, distance - referenceDistance ) );
+			}
 
-            vec3_t offsetFromVorticityOrigin;
-            VectorSubtract( particle->origin, flock->vorticityOrigin, offsetFromVorticityOrigin );
-            // compute the base vectors:
-            vec3_t inwardBaseVector; // the vector from the particle to the vorticity axis
-            const float offsetAlongAxis = DotProduct( offsetFromVorticityOrigin, flock->vorticityAxis );
-            VectorMA( offsetFromVorticityOrigin, -offsetAlongAxis, flock->vorticityAxis, inwardBaseVector );
-
-            vec3_t outwardBaseVector;
-            CrossProduct(offsetFromVorticityOrigin, flock->vorticityAxis, outwardBaseVector );
-
-            // get the radius from the vorticity origin and compute strength/radius
-            const float squaredRadiusToVorticityOrigin = VectorLengthSquared(offsetFromVorticityOrigin );
-            const float rcpRadiusToVorticityOrigin     = Q_RSqrt(squaredRadiusToVorticityOrigin );
-            const float effectiveStrength              = flock->vorticityAngularSpeedRadians * rcpRadiusToVorticityOrigin;
-
-            // compute the induced velocity with the taylor series approximation
-            vec3_t inducedVelocity = { 0.0f, 0.0f, 0.0f };
-            const float higherOrderTerm = effectiveStrength * deltaSeconds;
-
-            const float inwardComponent = - effectiveStrength * higherOrderTerm * 0.5f;
-            VectorMA( inducedVelocity, inwardComponent, inwardBaseVector, inducedVelocity );
-
-            constexpr float oneSixth = 1.0f/6.0f;
-            const float outwardComponent = effectiveStrength * (1 - higherOrderTerm * higherOrderTerm * oneSixth );
-            VectorMA( inducedVelocity, outwardComponent, outwardBaseVector, inducedVelocity );
-
-            VectorAdd( particle->artificialVelocity, inducedVelocity, particle->artificialVelocity );
+			assert( angularSpeedScaleForDistance >= 0.0f && angularSpeedScaleForDistance <= 1.0f );
+			const float particleVorticityAngularSpeed = flock->vorticityAngularSpeedRadians * angularSpeedScaleForDistance;
+			const float particleVorticityLinearSpeed  = particleVorticityAngularSpeed * distance;
+			VectorMA( particle->artificialVelocity, particleVorticityLinearSpeed, vortexDir, particle->artificialVelocity );
 		}
 
 		// Negative values lead to inflow
