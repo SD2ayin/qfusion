@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "materiallocal.h"
 #include "frontend.h"
 #include "../common/textstreamwriterextras.h"
+#include "../common/configvars.h"
 
 r_globals_t rf;
 
@@ -136,6 +137,8 @@ cvar_t *gl_cull;
 cvar_t *r_multithreading;
 
 cvar_t *r_showShaderCache;
+
+BoolConfigVar v_showFPS("showFPS"_asView, { .byDefault = true, .flags = CVAR_ARCHIVE } );
 
 static bool r_verbose;
 static bool r_postinit;
@@ -509,6 +512,10 @@ void R_BeginFrame( bool forceClear, int swapInterval ) {
 	rf.frameTime.time = time;
 	if( rf.frameTime.time - rf.frameTime.oldTime >= 50 ) {
 		rf.frameTime.average = time - rf.frameTime.oldTime;
+
+        if( v_showFPS.get() ){
+            Com_Printf("fps:%f\n", (float)( rf.frameTime.count - rf.frameTime.oldCount ) / (float)(time - rf.frameTime.oldTime)  * 1000.0f);
+        }
 		rf.frameTime.average = ((float)rf.frameTime.average / ( rf.frameTime.count - rf.frameTime.oldCount )) + 0.5f;
 		rf.frameTime.oldTime = time;
 		rf.frameTime.oldCount = rf.frameTime.count;

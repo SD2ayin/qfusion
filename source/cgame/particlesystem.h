@@ -12,6 +12,7 @@ template <typename> class SingletonHolder;
 // TODO: Lift it to the top level
 #include "../game/ai/vec3.h"
 #include "polyeffectssystem.h"
+#include "../common/geometry.h"
 
 #include <span>
 
@@ -52,6 +53,7 @@ struct EllipsoidalFlockParams {
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
 	struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+    struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
 	struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
 	struct { float min { 0.0f }, max { 1.0f }; } percentage;
 	struct { unsigned min { 300u }, max { 700u }; } timeout;
@@ -82,11 +84,44 @@ struct ConicalFlockParams {
 	struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
 	struct { float min { 300 }, max { 300 }; } speed;
 	struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+    struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
 	struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
 	struct { float min { 0.0f }, max { 1.0f }; } percentage;
 	struct { unsigned min { 300u }, max { 700u }; } timeout;
 	struct { unsigned min { 0 }, max { 0 }; } activationDelay;
 	unsigned startBounceCounterDelay { 0 };
+};
+
+// Mutability of fields makes adjusting parameters in a loop more convenient
+struct MeshFlockParams {
+    float origin[3] { 0.0f, 0.0f, 0.0f };
+    float offset[3] { 0.0f, 0.0f, 0.0f };
+    float dir[3] { 0.0f, 0.0f, 1.0f };
+    float shiftDir[3] { 0.0f, 0.0f, 1.0f };
+    Geometry *geometry;
+    float geometryScale { 0.0f };
+    float geometryRotation { 0.0f };
+    float gravity { 600 };
+    float drag { 0.0f };
+    // Degrees per second for points which are close to the origin
+    float vorticityAngularSpeed { 0.0f };
+    float vorticityAxis[3] { 0.0f, 0.0f, 1.0f };
+    // Units per second for points which are close to the origin
+    float outflowSpeed { 0.0f };
+    // Axis of the outflow, should be a unit vector
+    float outflowAxis[3] { 0.0f, 0.0f, 1.0f };
+    float turbulenceSpeed { 0.0f };
+    float turbulenceScale { 1.0f };
+    float restitution { 0.75f };
+    struct { unsigned minInclusive { 1 }, maxInclusive { 1 }; } bounceCount;
+    struct { float min { 300 }, max { 300 }; } speed;
+    struct { float min { 0.0f }, max { 0.0f }; } shiftSpeed;
+    struct { float min { 0.0f }, max { 0.0f }; } randomInitialRotation;
+    struct { float min { 0.0f }, max { 0.0f }; } angularVelocity;
+    struct { float min { 0.0f }, max { 1.0f }; } percentage;
+    struct { unsigned min { 300u }, max { 700u }; } timeout;
+    struct { unsigned min { 0 }, max { 0 }; } activationDelay;
+    unsigned startBounceCounterDelay { 0 };
 };
 
 struct FillFlockResult {
@@ -100,7 +135,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 				        unsigned maxParticles,
 				        const Particle::AppearanceRules *__restrict appearanceRules,
 				        wsw::RandomGenerator *__restrict rng,
-				        int64_t currTime, signed signedStride = 1 ) -> FillFlockResult;
+				        int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
 
 [[nodiscard]]
 auto fillParticleFlock( const ConicalFlockParams *__restrict params,
@@ -108,17 +143,27 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 				        unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 				  		wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride = 1 ) -> FillFlockResult;
+						int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
+
+[[nodiscard]]
+auto fillParticleFlock( const MeshFlockParams *__restrict params,
+                        Particle *__restrict particles,
+                        unsigned maxParticles,
+                        const Particle::AppearanceRules *__restrict appearanceRules,
+                        wsw::RandomGenerator *__restrict rng,
+                        int64_t currTime, signed signedStride = 1, float extraScale = 1.0f ) -> FillFlockResult;
 
 struct ParticleTrailUpdateParams {
 	unsigned maxParticlesPerDrop { 1 };
 	float dropDistance { 8.0f };
+	float particleSizeMultiplier { 1.0f };
 };
 
 struct ParamsOfParticleTrailOfParticles {
 	const Particle::AppearanceRules appearanceRules;
 	ConicalFlockParams flockParamsTemplate;
 	const ParticleTrailUpdateParams updateParams;
+    const bool modulateByParentSize;
 };
 
 struct ParamsOfPolyTrailOfParticles {
@@ -183,6 +228,7 @@ struct alignas( 16 ) ParticleFlock {
 	float outflowOrigin[3]; //
 	// Axis of the outflow, should be a unit vector
 	float outflowAxis[3] { 0.0f, 0.0f, 1.0f };
+    bool modulateByParentSize;
 };
 
 void updateParticleTrail( ParticleFlock *flock, ConicalFlockParams *flockParamsTemplate,
@@ -247,7 +293,7 @@ private:
 	static constexpr unsigned kMaxLargeFlocks  = 24;
 
 	static constexpr unsigned kMaxClippedTrailFlocks    = 32;
-	static constexpr unsigned kMaxNonClippedTrailFlocks = 16;
+	static constexpr unsigned kMaxNonClippedTrailFlocks = 48;
 
 	static constexpr unsigned kMaxSmallFlockSize  = 8;
 	static constexpr unsigned kMaxMediumFlockSize = 48;
@@ -326,6 +372,9 @@ public:
 	void addSmallParticleFlock( const Particle::AppearanceRules &rules, const ConicalFlockParams &flockParams,
 								const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
 								const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail = nullptr );
+    void addSmallParticleFlock( const Particle::AppearanceRules &rules, const MeshFlockParams &flockParams,
+                                const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
+                                const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail = nullptr );
 
 	void addMediumParticleFlock( const Particle::AppearanceRules &rules, const EllipsoidalFlockParams &flockParams,
 								 const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
@@ -333,6 +382,9 @@ public:
 	void addMediumParticleFlock( const Particle::AppearanceRules &rules, const ConicalFlockParams &flockParams,
 								 const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
 								 const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail = nullptr );
+    void addMediumParticleFlock( const Particle::AppearanceRules &rules, const MeshFlockParams &flockParams,
+                                 const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
+                                 const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail = nullptr );
 
 	void addLargeParticleFlock( const Particle::AppearanceRules &rules, const EllipsoidalFlockParams &flockParams,
 								const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
@@ -340,6 +392,9 @@ public:
 	void addLargeParticleFlock( const Particle::AppearanceRules &rules, const ConicalFlockParams &flockParams,
 								const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
 								const ParamsOfPolyTrailOfParticles *paramsOfTrails = nullptr );
+    void addLargeParticleFlock( const Particle::AppearanceRules &rules, const MeshFlockParams &flockParams,
+                                const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail = nullptr,
+                                const ParamsOfPolyTrailOfParticles *paramsOfTrails = nullptr );
 
 	[[nodiscard]]
 	auto createTrailFlock( const Particle::AppearanceRules &appearanceRules,

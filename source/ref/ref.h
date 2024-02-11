@@ -182,6 +182,9 @@ struct alignas( 16 ) Particle {
 		Expanding,
 		Shrinking,
 		ExpandingAndShrinking,
+        Thickening,
+        Thinning,
+        ThickeningAndThinning,
 	};
 
 	// Few notes on these value ranges:
@@ -277,7 +280,7 @@ struct alignas( 16 ) Particle {
 
 	// TODO: All of this ties Particle to fixed AppearanceRules, allow supplying different instance data
 
-	static constexpr float kByteParamNormalizer = 1.0f / 128.0f;
+	static constexpr float kByteSpreadNormalizer = 1.0f / 128.0f;
 
 	// Should be set once upon spawn. Fractions are stored in a compact representation,
 	// floating-point values should be reconstructed by multiplying by kByteParamNormalizer
@@ -285,6 +288,9 @@ struct alignas( 16 ) Particle {
 	int8_t instanceLengthSpreadFraction;
 	int8_t instanceWidthSpreadFraction;
 	int8_t instanceRadiusSpreadFraction;
+
+	static constexpr uint8_t kUnitExtraScaleAsByte = 16;
+	static constexpr float kScaleOfByteExtraScale  = 1.0f / kUnitExtraScaleAsByte;
 
 	uint8_t instanceLengthExtraScale;
 	uint8_t instanceWidthExtraScale;

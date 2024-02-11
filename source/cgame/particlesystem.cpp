@@ -3,6 +3,12 @@
 #include "../client/client.h"
 #include "../common/noise.h"
 #include "cg_local.h"
+#include "../common/configvars.h"
+#include "../common/geometry.h"
+
+using wsw::operator""_asView;
+
+FloatConfigVar v_debugImpact("debugImpact"_asView, { .byDefault = 0.0f, .flags = CVAR_ARCHIVE } );
 
 struct PolyTrailOfParticles {
 	int64_t spawnedAt { 0 };
@@ -364,7 +370,9 @@ void ParticleSystem::addParticleFlockImpl( const Particle::AppearanceRules &appe
 
 		assert( !trailFlock->numActivatedParticles && !trailFlock->numDelayedParticles );
 		trailFlock->timeoutAt = std::numeric_limits<int64_t>::max();
-		setupFlockFieldsFromParams( flock, *trailFlock->flockParamsTemplate );
+		setupFlockFieldsFromParams( trailFlock, *trailFlock->flockParamsTemplate );
+
+        trailFlock->modulateByParentSize = paramsOfParticleTrail->modulateByParentSize;
 	}
 
 	if( paramsOfPolyTrail ) {
@@ -430,6 +438,13 @@ void ParticleSystem::addSmallParticleFlock( const Particle::AppearanceRules &rul
 	addParticleFlockImpl<ConicalFlockParams>( rules, flockParams, 0, kMaxSmallFlockSize, paramsOfParticleTrail, paramsOfPolyTrail );
 }
 
+void ParticleSystem::addSmallParticleFlock( const Particle::AppearanceRules &rules,
+                                            const MeshFlockParams &flockParams,
+                                            const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail,
+                                            const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail ) {
+    addParticleFlockImpl<MeshFlockParams>( rules, flockParams, 0, kMaxSmallFlockSize, paramsOfParticleTrail, paramsOfPolyTrail );
+}
+
 void ParticleSystem::addMediumParticleFlock( const Particle::AppearanceRules &rules,
 											 const EllipsoidalFlockParams &flockParams,
 											 const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail,
@@ -444,6 +459,13 @@ void ParticleSystem::addMediumParticleFlock( const Particle::AppearanceRules &ru
 	addParticleFlockImpl<ConicalFlockParams>( rules, flockParams, 1, kMaxMediumFlockSize, paramsOfParticleTrail, paramsOfPolyTrail );
 }
 
+void ParticleSystem::addMediumParticleFlock( const Particle::AppearanceRules &rules,
+                                             const MeshFlockParams &flockParams,
+                                             const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail,
+                                             const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail ) {
+    addParticleFlockImpl<MeshFlockParams>( rules, flockParams, 1, kMaxMediumFlockSize, paramsOfParticleTrail, paramsOfPolyTrail );
+}
+
 void ParticleSystem::addLargeParticleFlock( const Particle::AppearanceRules &rules,
 											const EllipsoidalFlockParams &flockParams,
 											const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail,
@@ -456,6 +478,13 @@ void ParticleSystem::addLargeParticleFlock( const Particle::AppearanceRules &rul
 											const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail,
 											const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail ) {
 	addParticleFlockImpl<ConicalFlockParams>( rules, flockParams, 2, kMaxLargeFlockSize, paramsOfParticleTrail, paramsOfPolyTrail );
+}
+
+void ParticleSystem::addLargeParticleFlock( const Particle::AppearanceRules &rules,
+                                            const MeshFlockParams &flockParams,
+                                            const ParamsOfParticleTrailOfParticles *paramsOfParticleTrail,
+                                            const ParamsOfPolyTrailOfParticles *paramsOfPolyTrail ) {
+    addParticleFlockImpl<MeshFlockParams>( rules, flockParams, 2, kMaxLargeFlockSize, paramsOfParticleTrail, paramsOfPolyTrail );
 }
 
 auto ParticleSystem::createTrailFlock( const Particle::AppearanceRules &rules,
@@ -477,7 +506,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 						unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 						wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride )
+						int64_t currTime, signed signedStride, float extraScale )
 	-> FillFlockResult {
 	const vec3_t initialOrigin {
 		params->origin[0] + params->offset[0],
@@ -526,6 +555,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 	const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
 	const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
 	const bool isSpherical                = params->stretchScale == 1.0f;
+    const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
 	const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
 	const bool hasVariableDelay           = params->activationDelay.min < params->activationDelay.max;
 
@@ -542,6 +572,11 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 	}
 
 	assert( std::fabs( VectorLength( params->stretchDir ) - 1.0f ) < 1e-3f );
+
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
 	for( unsigned i = 0; i < numParticles; ++i ) {
 		Particle *const __restrict p = particles + signedStride * (signed)i;
@@ -582,6 +617,9 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		p->dynamicsVelocity[3] = 0.0f;
 
 		p->rotationAngle = 0.0f;
+        if( hasRandomInitialRotation ) {
+            p->rotationAngle += AngleNormalize360( rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max ) );
+        }
 		if( hasVariableAngularVelocity ) {
 			p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
 			p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
@@ -608,7 +646,7 @@ auto fillParticleFlock( const EllipsoidalFlockParams *__restrict params,
 		p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
 		p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
 
-		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = 1;
+		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
 
 		if( hasMultipleMaterials ) {
 			if( materialsIndexMask ) {
@@ -638,7 +676,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 						unsigned maxParticles,
 						const Particle::AppearanceRules *__restrict appearanceRules,
 						wsw::RandomGenerator *__restrict rng,
-						int64_t currTime, signed signedStride )
+						int64_t currTime, signed signedStride, float extraScale )
 	-> FillFlockResult {
 	const vec3_t initialOrigin {
 		params->origin[0] + params->offset[0],
@@ -701,6 +739,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 	const bool hasMultipleMaterials       = appearanceRules->numMaterials > 1;
 	const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
 	const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
+    const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
 	const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
 	const bool hasVariableDelay           = params->activationDelay.min != params->activationDelay.max;
 
@@ -715,6 +754,11 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 			materialsIndexMask = maybeMask;
 		}
 	}
+
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+	static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+	const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
 
 	// TODO: Make cached conical samples for various angles?
 	for( unsigned i = 0; i < numParticles; ++i ) {
@@ -741,7 +785,10 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 
 		p->dynamicsVelocity[3] = 0.0f;
 
-		p->rotationAngle = 0.0f;
+        p->rotationAngle = 0.0f;
+        if( hasRandomInitialRotation ) {
+            p->rotationAngle += rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max );
+        }
 		if( hasVariableAngularVelocity ) {
 			p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
 			p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
@@ -768,7 +815,7 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 		p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
 		p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
 
-		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = 1;
+		p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
 
 		if( hasMultipleMaterials ) {
 			if( materialsIndexMask ) {
@@ -791,6 +838,199 @@ auto fillParticleFlock( const ConicalFlockParams *__restrict params,
 	}
 
 	return FillFlockResult { .resultTimeout = resultTimeout, .numParticles = numParticles };
+}
+
+auto fillParticleFlock( const MeshFlockParams *__restrict params,
+                        Particle *__restrict particles,
+                        unsigned maxParticles,
+                        const Particle::AppearanceRules *__restrict appearanceRules,
+                        wsw::RandomGenerator *__restrict rng,
+                        int64_t currTime, signed signedStride, float extraScale )
+    -> FillFlockResult {
+    const vec3_t initialOrigin {
+            params->origin[0] + params->offset[0],
+            params->origin[1] + params->offset[1],
+            params->origin[2] + params->offset[2]
+    };
+
+    unsigned numParticles = maxParticles;
+    if( params->percentage.min != 1.0f && params->percentage.max != 1.0f ) {
+        assert( params->percentage.min >= 0.0f && params->percentage.min <= 1.0f );
+        assert( params->percentage.max >= 0.0f && params->percentage.min <= 1.0f );
+        // We do not specify the exact bounds but a percentage
+        // so we can use the same filler for different bin flocks.
+        const float percentage = rng->nextFloat( params->percentage.min, params->percentage.max );
+        numParticles = (unsigned)( (float)maxParticles * percentage );
+        numParticles = wsw::clamp( numParticles, 1u, maxParticles );
+    }
+
+    assert( params->speed.min >= 0.0f && params->speed.min <= 1000.0f );
+    assert( params->speed.max >= 0.0f && params->speed.max <= 1000.0f );
+    assert( params->speed.min <= params->speed.max );
+    assert( std::fabs( VectorLength( params->dir ) - 1.0f ) < 1e-3f );
+
+    // Negative shift speed could be feasible
+    assert( params->shiftSpeed.min <= params->shiftSpeed.max );
+    assert( std::fabs( VectorLength( params->shiftDir ) - 1.0f ) < 1e-3f );
+
+    assert( params->angularVelocity.min <= params->angularVelocity.max );
+
+    assert( params->activationDelay.min <= params->activationDelay.max );
+    assert( params->activationDelay.max <= 10'000 );
+
+    assert( params->vorticityAngularSpeed == 0.0f || std::fabs( VectorLengthFast( params->vorticityAxis ) - 1.0f ) < 1e-3f );
+    assert( std::fabs( params->vorticityAngularSpeed ) <= 10.0f * 360.0f );
+    assert( params->outflowSpeed == 0.0f || std::fabs( VectorLengthFast( params->outflowAxis ) - 1.0f ) < 1e-3f );
+    assert( std::fabs( params->outflowSpeed ) <= 1000.0f );
+    assert( params->turbulenceSpeed >= 0.0f && params->turbulenceSpeed <= 1000.0f );
+    assert( params->turbulenceScale >= 1.0f && params->turbulenceScale <= 1000.0f );
+
+    assert( params->timeout.min && params->timeout.min <= params->timeout.max && params->timeout.max < 3000 );
+    const unsigned timeoutSpread = params->timeout.max - params->timeout.min;
+    auto resultTimeout = std::numeric_limits<int64_t>::min();
+
+    const unsigned numFaces = params->geometry->triIndices.size();
+
+    mat3_t transformMatrixForDir;
+    Matrix3_ForRotationOfDirs( &axis_identity[AXIS_UP], params->dir, transformMatrixForDir );
+
+    // MULTIPLY WITH ROTATION ANGLE
+    mat3_t transformMatrix;
+    Matrix3_Rotate( transformMatrixForDir, params->geometryRotation, params->dir, transformMatrix );
+
+    const bool hasMultipleMaterials       = appearanceRules->numMaterials > 1;
+    const bool hasMultipleColors          = appearanceRules->colors.size() > 1;
+    const bool hasSpeedShift              = params->shiftSpeed.min != 0.0f || params->shiftSpeed.max != 0.0f;
+    const bool hasRandomInitialRotation   = params->randomInitialRotation.min != 0.0f || params->randomInitialRotation.max != 0.0f;
+    const bool hasVariableAngularVelocity = params->angularVelocity.min < params->angularVelocity.max;
+    const bool hasVariableDelay           = params->activationDelay.min != params->activationDelay.max;
+
+    unsigned colorsIndexMask = 0, materialsIndexMask = 0;
+    if( hasMultipleColors ) {
+        if( const unsigned maybeMask = appearanceRules->colors.size() - 1; ( maybeMask & ( maybeMask + 1 ) ) == 0 ) {
+            colorsIndexMask = maybeMask;
+        }
+    }
+    if( hasMultipleMaterials ) {
+        if( const unsigned maybeMask = appearanceRules->numMaterials - 1; ( maybeMask & ( maybeMask + 1 ) ) == 0 ) {
+            materialsIndexMask = maybeMask;
+        }
+    }
+
+    static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceWidthExtraScale )>, uint8_t> );
+    static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceLengthExtraScale )>, uint8_t> );
+    static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+    const auto extraScaleAsByte = wsw::clamp<uint8_t>( (uint8_t)( extraScale * Particle::kUnitExtraScaleAsByte ), 0, 255 );
+
+    for( unsigned i = 0; i < numParticles; ++i ) {
+        Particle *const __restrict p = particles + signedStride * (signed)i;
+
+        Vector4Set( p->accel, 0, 0, -params->gravity, 0 );
+
+        // choose a face
+        const unsigned faceIdx = rng->nextBounded(numFaces);
+        const unsigned *faceIndices = params->geometry->triIndices[faceIdx];
+        vec3_t triCoords[3];
+        getTriCoords( faceIndices, params->geometry, triCoords );
+        // choose a position on the face
+        vec2_t posOnTri = { rng->nextFloat(), rng->nextFloat() };
+        if( ( posOnTri[0] + posOnTri[1] ) > 1.0f ){
+            posOnTri[0] = 1 - posOnTri[0];
+            posOnTri[1] = 1 - posOnTri[1];
+        }
+
+        // calculate offsets of other vertices from the first one in the array
+        vec3_t vecToSecondVert;
+        vec3_t vecToThirdVert;
+        VectorSubtract( triCoords[1], triCoords[0], vecToSecondVert);
+        VectorSubtract( triCoords[2], triCoords[0], vecToThirdVert);
+
+        // calculate the coordinate for the chosen point on the tri
+        vec3_t posOnGeometry;
+        VectorCopy( triCoords[0], posOnGeometry );
+        VectorMA( posOnGeometry, posOnTri[0], vecToSecondVert, posOnGeometry );
+        VectorMA( posOnGeometry, posOnTri[1], vecToThirdVert, posOnGeometry );
+
+        // transform the positions according to dir and rotation
+        vec3_t transformedPos;
+        Matrix3_TransformVector( transformMatrix, posOnGeometry, transformedPos );
+        VectorMA( initialOrigin, params->geometryScale, transformedPos, p->oldOrigin );
+        p->oldOrigin[3] = 0.0f;
+
+        // calculate the tri normal
+        vec3_t normal;
+        CrossProduct( vecToThirdVert, vecToSecondVert, normal );
+        const float normalLengthSquared = VectorLengthSquared( normal );
+
+        const float speed = rng->nextFloat( params->speed.min, params->speed.max );
+        const float speedScalingFactor = Q_RSqrt( normalLengthSquared ) * speed;
+        vec3_t velocity;
+        VectorScale( normal, speedScalingFactor, velocity );
+        // transform the velocity according to dir and rotation and assign it to velocity
+        Matrix3_TransformVector( transformMatrix, velocity, p->dynamicsVelocity );
+
+        // We try relying on branch prediction facilities
+        // TODO: Add template/if constexpr specializations
+        if( hasSpeedShift ) {
+            const float shift = rng->nextFloat( params->shiftSpeed.min, params->shiftSpeed.max );
+            VectorMA( p->dynamicsVelocity, shift, params->shiftDir, p->dynamicsVelocity );
+        }
+
+        p->dynamicsVelocity[3] = 0.0f;
+
+        p->rotationAngle = 0.0f;
+        if( hasRandomInitialRotation ) {
+            p->rotationAngle += rng->nextFloat( params->randomInitialRotation.min, params->randomInitialRotation.max );
+        }
+        if( hasVariableAngularVelocity ) {
+            p->rotationAxisIndex = rng->nextBoundedFast( std::size( kPredefinedDirs ) );
+            p->angularVelocity   = rng->nextFloat( params->angularVelocity.min, params->angularVelocity.max );
+        } else {
+            p->rotationAxisIndex = 0;
+            p->angularVelocity   = params->angularVelocity.min;
+        }
+
+        p->spawnTime     = currTime;
+        p->lifetime      = params->timeout.min + rng->nextBoundedFast( timeoutSpread );
+        p->originalIndex = (uint8_t)i;
+        p->bounceCount   = 0;
+
+        p->activationDelay = params->activationDelay.min;
+        if( hasVariableDelay ) [[unlikely]] {
+            p->activationDelay += rng->nextBoundedFast( params->activationDelay.max - params->activationDelay.min );
+        }
+
+        // TODO: Branchless?
+        resultTimeout = wsw::max( p->spawnTime + p->lifetime, resultTimeout );
+
+        const uint32_t randomDword = rng->next();
+        p->instanceWidthSpreadFraction   = (int8_t)( ( randomDword >> 0 ) & 0xFF );
+        p->instanceLengthSpreadFraction  = (int8_t)( ( randomDword >> 8 ) & 0xFF );
+        p->instanceRadiusSpreadFraction  = (int8_t)( ( randomDword >> 16 ) & 0xFF );
+
+        p->instanceWidthExtraScale = p->instanceLengthExtraScale = p->instanceRadiusExtraScale = extraScaleAsByte;
+
+        if( hasMultipleMaterials ) {
+            if( materialsIndexMask ) {
+                p->instanceMaterialIndex = rng->next() & materialsIndexMask;
+            } else {
+                p->instanceMaterialIndex = (uint8_t)rng->nextBounded( appearanceRules->numMaterials );
+            }
+        } else {
+            p->instanceMaterialIndex = 0;
+        }
+        if( hasMultipleColors ) {
+            if( colorsIndexMask ) {
+                p->instanceColorIndex = rng->next() & colorsIndexMask;
+            } else {
+                p->instanceColorIndex = (uint8_t)rng->nextBounded( appearanceRules->colors.size() );
+            }
+        } else {
+            p->instanceColorIndex = 0;
+        }
+    }
+
+    return FillFlockResult { .resultTimeout = resultTimeout, .numParticles = numParticles };
 }
 
 void updateParticleTrail( ParticleFlock *__restrict flock,
@@ -858,7 +1098,8 @@ void updateParticleTrail( ParticleFlock *__restrict flock,
 																	  flock->particles + initialOffset,
 																	  updateParams.maxParticlesPerDrop,
 																	  std::addressof( flock->appearanceRules ),
-																	  rng, currTime, fillStride );
+																	  rng, currTime, fillStride,
+																	  updateParams.particleSizeMultiplier );
 				assert( fillResult.numParticles && fillResult.numParticles <= updateParams.maxParticlesPerDrop );
 
 				if( flockParamsTemplate->activationDelay.max == 0 ) {
@@ -1079,7 +1320,9 @@ void ParticleSystem::tryAddingFlares( ParticleFlock *flock, DrawSceneRequest *dr
 		assert( flareProps.radiusScale > 0.0f );
 		lightRadius *= flareProps.radiusScale;
 
-		if( lightRadius >= 1.0f ) {
+		static_assert( std::is_same_v<std::remove_cvref_t<decltype( Particle::instanceRadiusExtraScale )>, uint8_t> );
+		const auto lightRadiusAsByte = wsw::clamp<uint8_t>( (uint8_t)( lightRadius * Particle::kUnitExtraScaleAsByte ), 0, 255 );
+		if( lightRadiusAsByte > 0 ) {
 			auto *const addedParticle = new( m_frameFlareParticles.unsafe_grow_back() )Particle( baseParticle );
 
 			addedParticle->lifetimeFrac          = 0.0f;
@@ -1087,7 +1330,7 @@ void ParticleSystem::tryAddingFlares( ParticleFlock *flock, DrawSceneRequest *dr
 			addedParticle->instanceMaterialIndex = 0;
 
 			// Keep radius in the appearance rules the same (the thing we have to do), modify instance radius scale
-			addedParticle->instanceRadiusExtraScale = (int8_t)lightRadius;
+			addedParticle->instanceRadiusExtraScale = lightRadiusAsByte;
 
 			// TODO: This kind of sucks, can't we just supply inline colors?
 			m_frameFlareColorLifespans.push_back( RgbaLifespan {
@@ -1158,47 +1401,67 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 
 		// Negative values lead to rotation in the opposite direction
 		if( flock->vorticityAngularSpeedRadians != 0.0f ) {
-			float distance                     = 0.0f;
-			float angularSpeedScaleForDistance = 0.0f;
-			constexpr float referenceDistance  = 16.0f;
+            // it is important the axis is a unit vector
 
-			vec4_t particleOffsetFromOrigin, vortexDir;
-			VectorSubtract( particle->origin, flock->vorticityOrigin, particleOffsetFromOrigin );
-			CrossProduct( particleOffsetFromOrigin, flock->vorticityAxis, vortexDir );
+            /*
+            to create a rotating motion around the axis, we express the coordinate of the particle into 3 new orthogonal
+            base vectors: 1) the axis  2) vector from particle to axis r 3) the crossproduct of (1) and (2) n. Then the
+            particle position after the timestep can be calculated as:
+            projection of particle on the axis + cos(strength/radius * deltaT) * r + sin(strength/radius * deltaT) * n
 
-			if( const float squareDirLength = VectorLengthSquared( vortexDir ); squareDirLength > 0.0f ) [[likely]] {
-				// Normalize the vortex dir for further use
-				const float rcpDirLength = Q_RSqrt( squareDirLength );
-				VectorScale( vortexDir, rcpDirLength, vortexDir );
-				// The offset vector is an operand of the cross product, which is non-zero, so it's magnitude is non-zero
-				const float squaredOffsetMagnitude = VectorLengthSquared( particleOffsetFromOrigin );
-				assert( squaredOffsetMagnitude > 0.0f );
-				distance = squaredOffsetMagnitude * Q_RSqrt( squaredOffsetMagnitude );
-				// The scale is 1.0 for offsets less than this distance, otherwise it uses a reciprocal falloff
-				angularSpeedScaleForDistance = Q_Rcp( wsw::max( 1.0f, distance - referenceDistance ) );
-			}
+            using a third order taylor series approximation, when k=strength/radius:
+            projection of particle on the axis + (1-(k*deltaT)^2) * r + (k*deltaT-(k*deltaT)^3/6) * n
+            where the projection plus the radius is simply the initial position, thus the change in position is:
+            - (k*deltaT)^2 * r + (k*deltaT-(k*deltaT)^3/6) * n
+            then the velocity is change in position over time (deltaT) thus it is:
+            - k^2*deltaT * r + (k - k^3*deltaT^2/6) * n
+            */
 
-			assert( angularSpeedScaleForDistance >= 0.0f && angularSpeedScaleForDistance <= 1.0f );
-			const float particleVorticityAngularSpeed = flock->vorticityAngularSpeedRadians * angularSpeedScaleForDistance;
-			const float particleVorticityLinearSpeed  = particleVorticityAngularSpeed * distance;
-			VectorMA( particle->artificialVelocity, particleVorticityLinearSpeed, vortexDir, particle->artificialVelocity );
+            vec3_t offsetFromVorticityOrigin;
+            VectorSubtract( particle->origin, flock->vorticityOrigin, offsetFromVorticityOrigin );
+            // compute the base vectors:
+            vec3_t inwardBaseVector; // the vector from the particle to the vorticity axis
+            const float offsetAlongAxis = DotProduct( offsetFromVorticityOrigin, flock->vorticityAxis );
+            VectorMA( offsetFromVorticityOrigin, -offsetAlongAxis, flock->vorticityAxis, inwardBaseVector );
+
+            vec3_t outwardBaseVector;
+            CrossProduct(offsetFromVorticityOrigin, flock->vorticityAxis, outwardBaseVector );
+
+            // get the radius from the vorticity origin and compute strength/radius
+            const float squaredRadiusToVorticityOrigin = VectorLengthSquared(offsetFromVorticityOrigin );
+            const float rcpRadiusToVorticityOrigin     = Q_RSqrt(squaredRadiusToVorticityOrigin );
+            const float effectiveStrength              = flock->vorticityAngularSpeedRadians * rcpRadiusToVorticityOrigin;
+
+            // compute the induced velocity with the taylor series approximation
+            vec3_t inducedVelocity = { 0.0f, 0.0f, 0.0f };
+            const float higherOrderTerm = effectiveStrength * deltaSeconds;
+
+            const float inwardComponent = - effectiveStrength * higherOrderTerm * 0.5f;
+            VectorMA( inducedVelocity, inwardComponent, inwardBaseVector, inducedVelocity );
+
+            constexpr float oneSixth = 1.0f/6.0f;
+            const float outwardComponent = effectiveStrength * (1 - higherOrderTerm * higherOrderTerm * oneSixth );
+            VectorMA( inducedVelocity, outwardComponent, outwardBaseVector, inducedVelocity );
+
+            VectorAdd( particle->artificialVelocity, inducedVelocity, particle->artificialVelocity );
 		}
 
 		// Negative values lead to inflow
 		if( flock->outflowSpeed != 0.0f ) {
+
 			vec4_t particleOffsetFromOrigin;
 			VectorSubtract( particle->origin, flock->outflowOrigin, particleOffsetFromOrigin );
 			const float lengthAlongAxis = DotProduct( particleOffsetFromOrigin, flock->outflowAxis );
 			vec4_t perpendicularOffset;
 			// It is important that the axis is a unit vector for this step
 			VectorMA( particleOffsetFromOrigin, -lengthAlongAxis, flock->outflowAxis, perpendicularOffset );
-			if( const float radiusSquared = VectorLengthSquared( perpendicularOffset ); radiusSquared > 0.0f ) [[likely]] {
+			if( const float radiusSquared = VectorLengthSquared( perpendicularOffset ); radiusSquared > 1e-2f ) [[likely]] {
 				constexpr float referenceDistance    = 2.0f;
 				constexpr float rcpReferenceDistance = 1.0f / referenceDistance;
 				vec4_t outflowVec;
 				// Make the maximum the value at a radius of referenceDistance units
 				const float rcpRadiusSquared = wsw::min( Q_Rcp( radiusSquared ), wsw::square( rcpReferenceDistance ) );
-				// Make dependancy 1/r
+				// Make dependency 1/r
 				VectorScale( perpendicularOffset, rcpRadiusSquared, outflowVec );
 				VectorMA( particle->artificialVelocity, flock->outflowSpeed, outflowVec, particle->artificialVelocity );
 			}
@@ -1327,6 +1590,14 @@ void ParticleSystem::simulate( ParticleFlock *__restrict flock, wsw::RandomGener
 								// This is not really correct but is OK.
 								VectorAdd( trace.endpos, reflectedVelocityDir, p->oldOrigin );
 
+                                float debugBeamScale = v_debugImpact.get();
+                                if (debugBeamScale > 0.0f) {
+                                    vec3_t to;
+                                    VectorMA(p->oldOrigin, debugBeamScale, p->dynamicsVelocity, to);
+                                    vec3_t color = {0.0f, 1.0f, 0.0f};
+                                    cg.effectsSystem.spawnGameDebugBeam(p->oldOrigin, to, color, 0);
+                                }
+
 								keepTheParticleInGeneral = true;
 							}
 						}
@@ -1446,6 +1717,32 @@ auto ParticleSystem::activateDelayedParticles( ParticleFlock *flock, int64_t cur
 	return timeoutOfDelayedParticles ? std::optional( timeoutOfDelayedParticles ) : std::nullopt;
 }
 
+[[nodiscard]]
+static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour ) {
+    assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
+    // Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
+    assert( sizeBehaviour != Particle::SizeNotChanging );
+
+    float result;
+    if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
+        // Grow faster than the linear growth
+        result = Q_Sqrt( lifetimeFrac );
+    } else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
+        // Shrink faster than the linear growth
+        result = ( 1.0f - lifetimeFrac );
+        result *= result;
+    } else {
+        assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
+        if( lifetimeFrac < 0.5f ) {
+            result = 2.0f * lifetimeFrac;
+        } else {
+            result = 2.0f * ( 1.0f - lifetimeFrac );
+        }
+    }
+    assert( result >= 0.0f && result <= 1.0f );
+    return result;
+}
+
 void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock, wsw::RandomGenerator *rng,
 													   int64_t currTime, float deltaSeconds ) {
 	ParticleFlock *const __restrict trailFlock               = baseFlock->trailFlockOfParticles;
@@ -1467,11 +1764,25 @@ void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock,
 		}
 	}
 
+    Particle::SpriteRules *spriteRules = std::get_if<Particle::SpriteRules>( &baseFlock->appearanceRules.geometryRules );
+    Particle::SparkRules *sparkRules   = std::get_if<Particle::SparkRules>( &baseFlock->appearanceRules.geometryRules );
+
+    const Particle::SizeBehaviour sizeBehaviour = spriteRules ? spriteRules->sizeBehaviour : sparkRules->sizeBehaviour;
+
+    const bool modulateSize = trailFlock->modulateByParentSize;
+
 	// Second, spawn particles if needed
 	for( unsigned i = 0; i < baseFlock->numActivatedParticles; ++i ) {
 		const Particle *const p     = &baseFlock->particles[i];
 		float *const lastDropOrigin = trailFlock->lastParticleTrailDropOrigins[p->originalIndex];
-		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, updateParams );
+        const float sizeFrac        = modulateSize ? calcSizeFracForLifetimeFrac( p->lifetimeFrac, sizeBehaviour ) : 1.0f;
+
+		const ParticleTrailUpdateParams instanceUpdateParams {
+			.maxParticlesPerDrop    = updateParams.maxParticlesPerDrop,
+			.dropDistance           = updateParams.dropDistance,
+			.particleSizeMultiplier = updateParams.particleSizeMultiplier * sizeFrac
+		};
+		updateParticleTrail( trailFlock, flockParamsTemplate, p->origin, lastDropOrigin, rng, currTime, instanceUpdateParams );
 	}
 
 	if( trailFlock->numActivatedParticles ) [[likely]] {

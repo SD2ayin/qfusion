@@ -68,11 +68,11 @@ public:
 		touchGrenadeTrail( entNum, origin, currTime );
 	}
 
-	void touchBlastTrail( int entNum, const float *origin, int64_t currTime );
+	void touchBlastTrail( int entNum, const float *origin, const float *velocity, int64_t currTime );
 	void touchElectroTrail( int entNum, int ownerNum, const float *origin, int64_t currTime );
 
-	void touchStrongPlasmaTrail( int entNum, const float *origin, int64_t currTime );
-	void touchWeakPlasmaTrail( int entNum, const float *origin, int64_t currTime );
+	void touchStrongPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime );
+	void touchWeakPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime );
 
 	void detachPlayerTrail( int entNum );
 	void touchPlayerTrail( int entNum, const float *origin, int64_t currTime );
@@ -101,6 +101,7 @@ public:
 
 	void simulateFrameAndSubmit( int64_t currTime, DrawSceneRequest *drawSceneRequest );
 private:
+    //template <typename flockParams>
 	struct ParticleTrail {
 		ParticleTrail *prev { nullptr }, *next { nullptr };
 		ParticleFlock *particleFlock { nullptr };
@@ -117,6 +118,7 @@ private:
 		};
 
 		std::optional<AttachmentIndices> attachmentIndices;
+        bool linger {true};
 	};
 
 	struct StraightPolyTrail {

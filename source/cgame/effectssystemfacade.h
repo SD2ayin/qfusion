@@ -93,9 +93,9 @@ public:
 	void spawnWaterImpactRing( unsigned delay, const float *origin );
 
 	[[nodiscard]]
-	auto spawnBulletTracer( int owner, const float *from, const float *to ) -> unsigned;
+	auto spawnBulletTracer( int owner, const float *to ) -> unsigned;
 
-	void spawnPelletTracers( int owner, const float *from, std::span<const vec3_t> to, unsigned *timeoutsBuffer );
+	void spawnPelletTracers( int owner, std::span<const vec3_t> to, unsigned *timeoutsBuffer );
 
 	void spawnLandingDustImpactEffect( const float *origin, const float *dir ) {
 		spawnDustImpactEffect( origin, dir, 50.0f );
@@ -119,17 +119,17 @@ public:
 	void touchWeakGrenadeTrail( int entNum, const float *origin, int64_t currTime ) {
 		m_trackedEffectsSystem.touchWeakGrenadeTrail( entNum, origin, currTime );
 	}
-	void touchBlastTrail( int entNum, const float *origin, int64_t currTime ) {
-		m_trackedEffectsSystem.touchBlastTrail( entNum, origin, currTime );
+	void touchBlastTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
+		m_trackedEffectsSystem.touchBlastTrail( entNum, origin, velocity, currTime );
 	}
 	void touchElectroTrail( int entNum, int ownerNum, const float *origin, int64_t currTime ) {
 		m_trackedEffectsSystem.touchElectroTrail( entNum, ownerNum, origin, currTime );
 	}
-	void touchStrongPlasmaTrail( int entNum, const float *origin, int64_t currTime ) {
-		m_trackedEffectsSystem.touchStrongPlasmaTrail( entNum, origin, currTime );
+	void touchStrongPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
+		m_trackedEffectsSystem.touchStrongPlasmaTrail( entNum, origin, velocity, currTime );
 	}
-	void touchWeakPlasmaTrail( int entNum, const float *origin, int64_t currTime ) {
-		m_trackedEffectsSystem.touchWeakPlasmaTrail( entNum, origin, currTime );
+	void touchWeakPlasmaTrail( int entNum, const float *origin, const float *velocity, int64_t currTime ) {
+		m_trackedEffectsSystem.touchWeakPlasmaTrail( entNum, origin, velocity, currTime );
 	}
 
 	void detachPlayerTrail( int entNum ) {
@@ -211,8 +211,14 @@ private:
 	void spawnStoneDustParticles( unsigned delay, const FlockOrientation &orientation, float upShiftScale,
 								  unsigned materialParam, float dustPercentageScale = 1.0f );
 
+    void spawnStoneSmokeParticles( unsigned delay, const FlockOrientation &orientation, float upShiftScale,
+                                   unsigned materialParam, float dustPercentageScale = 1.0f );
+
 	void spawnStuccoDustParticles( unsigned delay, const FlockOrientation &orientation,
 								   float upShiftScale, unsigned materialParam );
+
+    void spawnStuccoSmokeParticles( unsigned delay, const FlockOrientation &orientation, float upShiftScale,
+                                   unsigned materialParam, float dustPercentageScale = 1.0f );
 
 	void spawnWoodBulletImpactParticles( unsigned delay, const FlockOrientation &orientation,
 										 float upShiftScale, unsigned materialParam,

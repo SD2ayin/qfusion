@@ -640,6 +640,7 @@ typedef void (*drawSurf_cb)( const FrontendToBackendShared *fsh, const entity_t 
 typedef void (*batchDrawSurf_cb)( const FrontendToBackendShared *fsh, const entity_t *, const struct shader_s *, const struct mfog_s *, const struct portalSurface_s *, std::span<const sortedDrawSurf_t> surfsSpan );
 
 #include "shader.h"
+#include "../common/geometry.h"
 
 enum {
 	RB_VBO_STREAM_COMPACT       = -2, // bind RB_VBO_STREAM instead

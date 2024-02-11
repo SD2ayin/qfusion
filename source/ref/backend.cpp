@@ -1350,21 +1350,21 @@ static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Pa
 	// Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
 	assert( sizeBehaviour != Particle::SizeNotChanging );
 
-	float result;
-	if( sizeBehaviour == Particle::Expanding ) {
-		// Grow faster than the linear growth
-		result = Q_Sqrt( lifetimeFrac );
-	} else if( sizeBehaviour == Particle::Shrinking ) {
-		// Shrink faster than the linear growth
-		result = ( 1.0f - lifetimeFrac );
-		result *= result;
-	} else {
-		assert( sizeBehaviour == Particle::ExpandingAndShrinking );
-		if( lifetimeFrac < 0.5f ) {
-			result = 2.0f * lifetimeFrac;
-		} else {
-			result = 2.0f * ( 1.0f - lifetimeFrac );
-		}
+    float result;
+    if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
+        // Grow faster than the linear growth
+        result = Q_Sqrt( lifetimeFrac );
+    } else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
+        // Shrink faster than the linear growth
+        result = ( 1.0f - lifetimeFrac );
+        result *= result;
+    } else {
+        assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
+        if( lifetimeFrac < 0.5f ) {
+            result = 2.0f * lifetimeFrac;
+        } else {
+            result = 2.0f * ( 1.0f - lifetimeFrac );
+        }
 	}
 	assert( result >= 0.0f && result <= 1.0f );
 	return result;
@@ -1420,10 +1420,10 @@ static void submitSpriteParticlesToBackend( const FrontendToBackendShared *fsh,
 		assert( spriteRules->radius.mean > 0.0f );
 		assert( spriteRules->radius.spread >= 0.0f );
 
-		float signedFrac = Particle::kByteParamNormalizer * (float)particle->instanceRadiusSpreadFraction;
+		float signedFrac = Particle::kByteSpreadNormalizer * (float)particle->instanceRadiusSpreadFraction;
 		float radius     = wsw::max( 0.0f, spriteRules->radius.mean + signedFrac * spriteRules->radius.spread );
 
-		radius *= (float)particle->instanceRadiusExtraScale;
+		radius *= Particle::kScaleOfByteExtraScale * (float)particle->instanceRadiusExtraScale;
 
 		if( spriteRules->sizeBehaviour != Particle::SizeNotChanging ) {
 			radius *= calcSizeFracForLifetimeFrac( particle->lifetimeFrac, spriteRules->sizeBehaviour );
@@ -1527,19 +1527,23 @@ static void submitSparkParticlesToBackend( const FrontendToBackendShared *fsh,
 		assert( sparkRules->length.mean >= 0.1f && sparkRules->width.mean >= 0.1f );
 		assert( sparkRules->length.spread >= 0.0f && sparkRules->width.spread >= 0.0f );
 
-		const float lengthSignedFrac = Particle::kByteParamNormalizer * (float)particle->instanceLengthSpreadFraction;
-		const float widthSignedFrac  = Particle::kByteParamNormalizer * (float)particle->instanceWidthSpreadFraction;
+		const float lengthSignedFrac = Particle::kByteSpreadNormalizer * (float)particle->instanceLengthSpreadFraction;
+		const float widthSignedFrac  = Particle::kByteSpreadNormalizer * (float)particle->instanceWidthSpreadFraction;
 
 		float length = wsw::max( 0.0f, sparkRules->length.mean + lengthSignedFrac * sparkRules->length.spread );
 		float width  = wsw::max( 0.0f, sparkRules->width.mean + widthSignedFrac * sparkRules->width.spread );
 
-		length *= (float)particle->instanceLengthExtraScale;
-		width  *= (float)particle->instanceWidthExtraScale;
+		length *= Particle::kScaleOfByteExtraScale * (float)particle->instanceLengthExtraScale;
+		width  *= Particle::kScaleOfByteExtraScale * (float)particle->instanceWidthExtraScale;
 
-		if( sparkRules->sizeBehaviour != Particle::SizeNotChanging ) {
-			const float sizeFrac = calcSizeFracForLifetimeFrac( particle->lifetimeFrac, sparkRules->sizeBehaviour );
-			length *= sizeFrac;
-			width  *= sizeFrac;
+        const Particle::SizeBehaviour sizeBehaviour = sparkRules->sizeBehaviour;
+
+		if( sizeBehaviour != Particle::SizeNotChanging ) {
+			const float sizeFrac = calcSizeFracForLifetimeFrac( particle->lifetimeFrac, sizeBehaviour );
+            if( sizeBehaviour != Particle::SizeBehaviour::Thinning && sizeBehaviour != Particle::SizeBehaviour::Thickening && sizeBehaviour != Particle::SizeBehaviour::ThickeningAndThinning ) {
+			    length *= sizeFrac;
+            }
+            width *= sizeFrac;
 		}
 
 		if( length < 0.1f || width < 0.1f ) {
