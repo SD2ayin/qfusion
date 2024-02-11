@@ -184,13 +184,13 @@ public:
 	CachedMaterial shaderElectroIonsTrailParticle { this, wsw::StringView( "gfx/effects/electro_ions_trail_particle" ) };
 	CachedMaterial shaderElectroPolyTrail { this, wsw::StringView( "gfx/effects/electro_poly_trail" ) };
 
-    CachedMaterial shaderPlasmaLingeringTrailParticle { this, wsw::StringView( "gfx/effects/pg/pg_lingering_trail_particle" ) };
+	CachedMaterial shaderPlasmaLingeringTrailParticle { this, wsw::StringView( "gfx/effects/pg/pg_lingering_trail_particle" ) };
 
-    CachedMaterial shaderPlasmaTrailParticle1 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle1" ) };
-    CachedMaterial shaderPlasmaTrailParticle2 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle2" ) };
-    CachedMaterial shaderPlasmaTrailParticle3 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle3" ) };
-    CachedMaterial shaderPlasmaTrailParticle4 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle4" ) };
-    CachedMaterial shaderPlasmaTrailParticle5 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle5" ) };
+	CachedMaterial shaderPlasmaTrailParticle1 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle1" ) };
+	CachedMaterial shaderPlasmaTrailParticle2 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle2" ) };
+	CachedMaterial shaderPlasmaTrailParticle3 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle3" ) };
+	CachedMaterial shaderPlasmaTrailParticle4 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle4" ) };
+	CachedMaterial shaderPlasmaTrailParticle5 { this, wsw::StringView( "gfx/effects/pg/pg_trail_particle5" ) };
 
 	CachedMaterial shaderPlasmaPolyTrail { this, wsw::StringView( "gfx/effects/plasma_poly_trail" ) };
 
@@ -228,7 +228,7 @@ public:
 	CachedMaterial shaderExplosionSpikeParticle { this, wsw::StringView( "gfx/effects/explosion_spike_particle" ) };
 	CachedMaterial shaderExplosionSpriteParticle { this, wsw::StringView( "gfx/effects/explosion_sprite_particle" ) };
 
-    CachedMaterial shaderSmokePolytrail { this, wsw::StringView( "gfx/effects/smokePolytrail/smoketrail0001" ) };
+	CachedMaterial shaderSmokePolytrail { this, wsw::StringView( "gfx/effects/smokePolytrail/smoketrail0001" ) };
 
 	CachedMaterial shaderBulletTracer { this, wsw::StringView( "gfx/effects/bullet_tracer" ) };
 	CachedMaterial shaderPelletTracer { this, wsw::StringView( "gfx/effects/pellet_tracer" ) };
@@ -260,7 +260,7 @@ public:
 	CachedMaterial shaderSmokePuff2 { this, wsw::StringView( "gfx/misc/smokepuff2" ) };
 	CachedMaterial shaderSmokePuff3 { this, wsw::StringView( "gfx/misc/smokepuff3" ) };
 
-    CachedMaterial realisticSmoke { this, wsw::StringView( "gfx/effects/realisticSmoke/smokeUp/smokeUp0001" )};
+	CachedMaterial realisticSmoke { this, wsw::StringView( "gfx/effects/realisticSmoke/smokeUp/smokeUp0001" )};
 
 	CachedMaterial shaderCartoonHit { this, wsw::StringView( "gfx/misc/cartoonhit" ) };
 	CachedMaterial shaderCartoonHit2 { this, wsw::StringView( "gfx/misc/cartoonhit2" ) };
