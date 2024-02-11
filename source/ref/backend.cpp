@@ -1344,32 +1344,6 @@ void R_SubmitDynamicMeshesToBackend( const FrontendToBackendShared *fsh, const e
 	}
 }
 
-[[nodiscard]]
-static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour ) {
-	assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
-	// Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
-	assert( sizeBehaviour != Particle::SizeNotChanging );
-
-    float result;
-    if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
-        // Grow faster than the linear growth
-        result = Q_Sqrt( lifetimeFrac );
-    } else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
-        // Shrink faster than the linear growth
-        result = ( 1.0f - lifetimeFrac );
-        result *= result;
-    } else {
-        assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
-        if( lifetimeFrac < 0.5f ) {
-            result = 2.0f * lifetimeFrac;
-        } else {
-            result = 2.0f * ( 1.0f - lifetimeFrac );
-        }
-	}
-	assert( result >= 0.0f && result <= 1.0f );
-	return result;
-}
-
 static wsw_forceinline void calcAddedParticleLight( const float *__restrict particleOrigin,
 													const Scene::DynamicLight *__restrict lights,
 													std::span<const uint16_t> affectingLightIndices,
@@ -1387,6 +1361,32 @@ static wsw_forceinline void calcAddedParticleLight( const float *__restrict part
 		VectorMA( addedLight, impactStrength, light->color, addedLight );
 	} while( ++lightNum < affectingLightIndices.size() );
 }
+
+[[nodiscard]]
+static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour )  {
+	assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
+	// Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
+	assert( sizeBehaviour != Particle::SizeNotChanging );
+
+	float result;
+	if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
+		// Grow faster than the linear growth
+		result = Q_Sqrt( lifetimeFrac );
+	} else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
+		// Shrink faster than the linear growth
+		result = ( 1.0f - lifetimeFrac );
+		result *= result;
+	} else {
+		assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
+		if( lifetimeFrac < 0.5f ) {
+			result = 2.0f * lifetimeFrac;
+		} else {
+			result = 2.0f * ( 1.0f - lifetimeFrac );
+		}
+	}
+	assert( result >= 0.0f && result <= 1.0f );
+	return result;
+};
 
 static void submitSpriteParticlesToBackend( const FrontendToBackendShared *fsh,
 											const Scene::ParticlesAggregate *aggregate,

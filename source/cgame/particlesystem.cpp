@@ -1502,6 +1502,32 @@ auto ParticleSystem::activateDelayedParticles( ParticleFlock *flock, int64_t cur
 	return timeoutOfDelayedParticles ? std::optional( timeoutOfDelayedParticles ) : std::nullopt;
 }
 
+[[nodiscard]]
+static wsw_forceinline float calcSizeFracForLifetimeFrac( float lifetimeFrac, Particle::SizeBehaviour sizeBehaviour )  {
+	assert( lifetimeFrac >= 0.0f && lifetimeFrac <= 1.0f );
+	// Disallowed intentionally to avoid extra branching while testing the final particle dimensions for feasibility
+	assert( sizeBehaviour != Particle::SizeNotChanging );
+
+	float result;
+	if( sizeBehaviour == Particle::Expanding || sizeBehaviour == Particle::Thickening ) {
+		// Grow faster than the linear growth
+		result = Q_Sqrt( lifetimeFrac );
+	} else if( sizeBehaviour == Particle::Shrinking || sizeBehaviour == Particle::Thinning ) {
+		// Shrink faster than the linear growth
+		result = ( 1.0f - lifetimeFrac );
+		result *= result;
+	} else {
+		assert( sizeBehaviour == Particle::ExpandingAndShrinking || sizeBehaviour == Particle::ThickeningAndThinning );
+		if( lifetimeFrac < 0.5f ) {
+			result = 2.0f * lifetimeFrac;
+		} else {
+			result = 2.0f * ( 1.0f - lifetimeFrac );
+		}
+	}
+	assert( result >= 0.0f && result <= 1.0f );
+	return result;
+};
+
 void ParticleSystem::simulateParticleTrailOfParticles( ParticleFlock *baseFlock, wsw::RandomGenerator *rng,
 													   int64_t currTime, float deltaSeconds ) {
 	ParticleFlock *const __restrict trailFlock               = baseFlock->trailFlockOfParticles;

@@ -12,7 +12,6 @@ template <typename> class SingletonHolder;
 // TODO: Lift it to the top level
 #include "../game/ai/vec3.h"
 #include "polyeffectssystem.h"
-#include "../common/geometry.h"
 
 #include <span>
 

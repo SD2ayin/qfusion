@@ -35,7 +35,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cg_local.h"
 #include "../ui/huddatamodel.h"
 #include "../common/noise.h"
-#include "../common/geometry.h"
 #include "../ref/local.h"
 
 using wsw::operator""_asView;
