@@ -1167,80 +1167,81 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 			laserOwner->localEffects[LOCALEFFECT_LASERBEAM_SMOKE_TRAIL] = cg.time;
 
 			if( v_particles.get() ) {
-                bool useTeamColors = false;
-                if (v_teamColoredBeams.get()) {
-                    if (const int team = laserOwner->current.team; team == TEAM_ALPHA || team == TEAM_BETA) {
-                        useTeamColors = true;
-                    }
-                }
+				bool useTeamColors = false;
+				if (v_teamColoredBeams.get()) {
+					if (const int team = laserOwner->current.team; team == TEAM_ALPHA || team == TEAM_BETA) {
+						useTeamColors = true;
+					}
+				}
 
-                const RgbaLifespan *singleColorAddress;
-                ParticleColorsForTeamHolder *holder = &::laserImpactParticleColorsHolder;
-                if (useTeamColors) {
-                    vec4_t teamColor;
-                    const int team = laserOwner->current.team;
-                    CG_TeamColor(team, teamColor);
-                    singleColorAddress = holder->getColorsForTeam(team, teamColor);
-                } else {
-                    singleColorAddress = &holder->defaultColors;
-                }
+				const RgbaLifespan *singleColorAddress;
+				ParticleColorsForTeamHolder *holder = &::laserImpactParticleColorsHolder;
+				if (useTeamColors) {
+					vec4_t teamColor;
+					const int team = laserOwner->current.team;
+					CG_TeamColor(team, teamColor);
+					singleColorAddress = holder->getColorsForTeam(team, teamColor);
+				} else {
+					singleColorAddress = &holder->defaultColors;
+				}
 
-                Particle::AppearanceRules appearanceRules{
-                        .materials = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
-                        .colors    = {singleColorAddress, singleColorAddress + 1},
-                        .geometryRules = Particle::SpriteRules{
-                                .radius = {.mean = 5.0f, .spread = 2.5f},
-                                .sizeBehaviour = Particle::Shrinking,
-                        }
-                };
+				Particle::AppearanceRules appearanceRules{
+					.materials = cgs.media.shaderLaserImpactParticle.getAddressOfHandle(),
+					.colors    = {singleColorAddress, singleColorAddress + 1},
+					.geometryRules = Particle::SpriteRules{
+						.radius = {.mean = 5.0f, .spread = 2.5f},
+						.sizeBehaviour = Particle::Shrinking,
+					}
+				};
 
-                ConicalFlockParams flockParams{
-                        .origin       = {trace->endpos[0], trace->endpos[1], trace->endpos[2]},
-                        .offset       = {trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2]},
-                        .gravity      = 0.0f,
-                        .drag         = 0.02f,
-                        .angle        = 12.0f,
-                        .bounceCount  = {.minInclusive = 1, .maxInclusive = 1},
-                        .speed        = {.min = 0.0f, .max = 400.0f},
-                        .percentage   = {.min = 0.0f, .max = 1.0f},
-                        .timeout      = {.min = 180, .max = 240},
-                };
 
-                vec3_t particleDir;
+				ConicalFlockParams flockParams{
+					.origin       = {trace->endpos[0], trace->endpos[1], trace->endpos[2]},
+					.offset       = {trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2]},
+					.gravity      = 0.0f,
+					.drag         = 0.02f,
+					.angle        = 12.0f,
+					.bounceCount  = {.minInclusive = 1, .maxInclusive = 1},
+					.speed        = {.min = 0.0f, .max = 400.0f},
+					.percentage   = {.min = 0.0f, .max = 1.0f},
+					.timeout      = {.min = 180, .max = 240},
+				};
 
-                // https://math.stackexchange.com/a/205589 for creation of the cone
-                constexpr float innerAngle = 30.0f;
-                constexpr float angle = 85.0f;
-                static float maxZ = std::cos((float) DEG2RAD(innerAngle));
-                static float minZ = std::cos((float) DEG2RAD(angle));
-                static float zRange = maxZ - minZ;
+				vec3_t particleDir;
 
-                constexpr unsigned numSpikes = 4;
-                constexpr float spikeFraction = 1 / numSpikes;
-                constexpr float laserShotTime = 1.0f / 20.0f;
+				// https://math.stackexchange.com/a/205589 for creation of the cone
+				constexpr float innerAngle = 30.0f;
+				constexpr float angle = 85.0f;
+				static float maxZ = std::cos((float) DEG2RAD(innerAngle));
+				static float minZ = std::cos((float) DEG2RAD(angle));
+				static float zRange = maxZ - minZ;
 
-                const unsigned i = (unsigned) (cg.time * laserShotTime) % numSpikes;
-                const float coord = cg.time * 5e-4f + i * 10.0f;
+				constexpr unsigned numSpikes = 4;
+				constexpr float spikeFraction = 1 / numSpikes;
+				constexpr float laserShotTime = 1.0f / 20.0f; // should be equal to fire rate
 
-                mat3_t transformMatrix;
-                Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], trace->plane.normal, transformMatrix);
+				const unsigned spikeNum = (unsigned) (cg.time * laserShotTime) % numSpikes;
+				const float coord = cg.time * 5e-4f + spikeNum * 10.0f;
 
-                const float z = minZ + calcSimplexNoise2D(-coord, 0.0f) * zRange;
-                const float r = Q_Sqrt(1.0f - z * z);
-                const float phi = DEG2RAD(
-                                          AngleNormalize360(
-                                                  360.0f *
-                                                  ((float) (i) * spikeFraction + calcSimplexNoise2D(coord, 0.0f))
-                                          )
-                                  );
-                const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
-                Matrix3_TransformVector(transformMatrix, untransformed, particleDir);
+				mat3_t transformMatrix;
+				Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], trace->plane.normal, transformMatrix);
 
-                VectorCopy(particleDir, flockParams.dir);
+				const float z = minZ + calcSimplexNoise2D(-coord, 0.0f) * zRange;
+				const float r = Q_Sqrt(1.0f - z * z);
+				const float phi = DEG2RAD(
+										  AngleNormalize360(
+												  360.0f *
+												  ((float) (spikeNum) * spikeFraction + calcSimplexNoise2D( coord, 0.0f))
+										  )
+								  );
+				const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
+				Matrix3_TransformVector( transformMatrix, untransformed, particleDir );
 
-                cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+				VectorCopy( particleDir, flockParams.dir );
 
-            }
+				cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
+
+			}
 
 			if( !laserViewStateMuted ) {
 				SoundSystem::instance()->startFixedSound( cgs.media.sndLasergunHit, trace->endpos, CHAN_AUTO,
@@ -4533,17 +4534,17 @@ void CG_LerpEntities( ViewState *viewState ) {
 		spatialize = true;
 
 		switch( cent->type ) {
-            case ET_PLASMA: {
-                vec3_t zeroVector = {0.0f, 0.0f, 0.0f};
-                VectorCopy(zeroVector, cent->current.angles);
-                VectorCopy(zeroVector, cent->prev.angles);
-                if( state->linearMovement ) {
-                    CG_ExtrapolateLinearProjectile( cent );
-                } else {
-                    CG_LerpGenericEnt( cent, viewState );
-                }
-                break;
-            }
+			case ET_PLASMA: {
+				vec3_t zeroVector = {0.0f, 0.0f, 0.0f};
+				VectorCopy(zeroVector, cent->current.angles);
+				VectorCopy(zeroVector, cent->prev.angles);
+				if( state->linearMovement ) {
+					CG_ExtrapolateLinearProjectile( cent );
+				} else {
+					CG_LerpGenericEnt( cent, viewState );
+				}
+				break;
+			}
 			case ET_GENERIC:
 			case ET_GIB:
 			case ET_BLASTER:

@@ -243,13 +243,13 @@ static void makeRegularExplosionImpacts( const float *fireOrigin, float radius, 
 
 
 static const RgbaLifespan kExplosionSparksColors[1] {
-        {
-                .initial  = { 1.0f, 0.55f, 0.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.4f, 0.0f, 1.0f },
-                .fadedOut = { 1.0f, 0.28f, 0.0f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.25f,
-                .startFadingOutAtLifetimeFrac = 0.50f,
-        }
+		{
+			.initial  = { 1.0f, 0.55f, 0.0f, 1.0f },
+			.fadedIn  = { 1.0f, 0.4f, 0.0f, 1.0f },
+			.fadedOut = { 1.0f, 0.28f, 0.0f, 1.0f },
+			.finishFadingInAtLifetimeFrac = 0.25f,
+			.startFadingOutAtLifetimeFrac = 0.50f,
+		}
 };
 
 static const LightLifespan kExplosionSparksFlareProps[1] {
@@ -264,20 +264,20 @@ static const LightLifespan kExplosionSparksFlareProps[1] {
 };
 
 static const RgbaLifespan kExplosionMultipleColors[2] {
-        {
-                .initial  = { 1.0f, 0.48f, 0.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.33f, 0.0f, 1.0f },
-                .fadedOut = { 1.0f, 0.21f, 0.0f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.25f,
-                .startFadingOutAtLifetimeFrac = 0.50f,
-        },
-        {
-                .initial  = { 1.0f, 0.28f, 0.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.24f, 0.0f, 1.0f },
-                .fadedOut = { 1.0f, 0.20f, 0.0f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.25f,
-                .startFadingOutAtLifetimeFrac = 0.50f,
-        },
+		{
+			.initial  = { 1.0f, 0.48f, 0.0f, 1.0f },
+			.fadedIn  = { 1.0f, 0.33f, 0.0f, 1.0f },
+			.fadedOut = { 1.0f, 0.21f, 0.0f, 1.0f },
+			.finishFadingInAtLifetimeFrac = 0.25f,
+			.startFadingOutAtLifetimeFrac = 0.50f,
+		},
+		{
+			.initial  = { 1.0f, 0.28f, 0.0f, 1.0f },
+			.fadedIn  = { 1.0f, 0.24f, 0.0f, 1.0f },
+			.fadedOut = { 1.0f, 0.20f, 0.0f, 1.0f },
+			.finishFadingInAtLifetimeFrac = 0.25f,
+			.startFadingOutAtLifetimeFrac = 0.50f,
+		},
 };
 
 void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float *dir, const SoundSet *sound,
@@ -378,41 +378,41 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 				.particleFrameAffinityModulo = 4,
 			},
 			.geometryRules = Particle::SpriteRules {
-                .radius = { .mean = 14.5f, .spread = 3.0f },
-                .sizeBehaviour = Particle::Shrinking
-            },
+				.radius = { .mean = 14.5f, .spread = 3.0f },
+				.sizeBehaviour = Particle::Shrinking
+			},
 		};
 
-        // explosion smoke trails effect
+		// explosion smoke trails effect
 
 		ConicalFlockParams flockParams {
 			.origin        = { origin[0], origin[1], origin[2] },
 			.offset        = { dir[0], dir[1], dir[2] },
-            .dir           = { particleDir[0], particleDir[1], particleDir[2] },
+			.dir           = { particleDir[0], particleDir[1], particleDir[2] },
 			.gravity       = 0.7f * GRAVITY,
 			.restitution   = 0.8f,
-            .angle         = 85.0f,
-            .speed         = { .min = 225.f , .max = 400.f },
-            .shiftSpeed    = { .min = 100.f, .max = 200.f },
+			.angle         = 85.0f,
+			.speed         = { .min = 225.f , .max = 400.f },
+			.shiftSpeed    = { .min = 100.f, .max = 200.f },
 			.percentage    = { .min = 0.15f, .max = 0.23f },
 			.timeout       = { .min = 500, .max = 820 },
 		};
 
-        static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
-                .props = {
-                        .width     = 20.0f,
-                        .fromColor = { 1.0f, 1.0f, 1.0f, 0.0f },
-                        .toColor   = { 0.7f, 0.4f, 0.3f, 0.5f },
-                },
-                .material = cgs.media.shaderSmokePolytrail
-        };
+		static ParamsOfPolyTrailOfParticles explosionPolyParamsOfTrails {
+			.props = {
+				.width     = 20.0f,
+				.fromColor = { 1.0f, 1.0f, 1.0f, 0.0f },
+				.toColor   = { 0.7f, 0.4f, 0.3f, 0.5f },
+			},
+			.material = cgs.media.shaderSmokePolytrail
+		};
 
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, nullptr, &explosionPolyParamsOfTrails );
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, nullptr, &explosionPolyParamsOfTrails );
 
-        // explosion spikes effect
+		// explosion spikes effect
 
 		appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
-        appearanceRules.colors    = kExplosionMultipleColors;
+		appearanceRules.colors    = kExplosionMultipleColors;
 
 		appearanceRules.geometryRules = Particle::SparkRules {
 			.length        = { .mean = 25.0f, .spread = 7.5f },
@@ -421,34 +421,34 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
 		};
 
 		flockParams.speed       = { .min = 200.f, .max = 600.f };
-        flockParams.angle       = 180.0f;
-        flockParams.gravity     = 0.0f;
+		flockParams.angle       = 180.0f;
+		flockParams.gravity     = 0.0f;
 		flockParams.drag        = 0.01f;
-        flockParams.bounceCount = { .minInclusive = 0, .maxInclusive = 0 };
+		flockParams.bounceCount = { .minInclusive = 0, .maxInclusive = 0 };
 		flockParams.timeout     = { .min = 150, .max = 200 };
 		flockParams.percentage  = { .min = 0.8f, .max = 1.0f };
 		flockParams.shiftSpeed  = { .min = 0.0f, .max = 0.0f };
 
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 
-        // explosion embers effect
+		// explosion embers effect
 
-        appearanceRules.materials = cgs.media.shaderExplosionSpriteParticle.getAddressOfHandle();
+		appearanceRules.materials = cgs.media.shaderExplosionSpriteParticle.getAddressOfHandle();
 
-        appearanceRules.geometryRules = Particle::SpriteRules {
-                .radius        = { .mean = 7.5f, .spread = 1.0f },
-                .sizeBehaviour = Particle::Shrinking,
-        };
+		appearanceRules.geometryRules = Particle::SpriteRules {
+				.radius        = { .mean = 7.5f, .spread = 1.0f },
+				.sizeBehaviour = Particle::Shrinking,
+		};
 
-        flockParams.speed           = { .min = 300.0f, .max = 450.0f};
-        flockParams.drag            = 0.03f;
-        flockParams.gravity         = -0.4f * GRAVITY;
-        flockParams.turbulenceSpeed = 60.0f;
-        flockParams.turbulenceScale = 80.0f;
-        flockParams.timeout         = { .min = 500, .max = 1200 };
-        flockParams.percentage      = { .min = 0.38, .max = 0.5 };
+		flockParams.speed           = { .min = 300.0f, .max = 450.0f};
+		flockParams.drag            = 0.03f;
+		flockParams.gravity         = -0.4f * GRAVITY;
+		flockParams.turbulenceSpeed = 60.0f;
+		flockParams.turbulenceScale = 80.0f;
+		flockParams.timeout         = { .min = 500, .max = 1200 };
+		flockParams.percentage      = { .min = 0.38, .max = 0.5 };
 
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 	}
 
 	m_transientEffectsSystem.spawnExplosionHulls( fireOrigin, smokeOrigin );
@@ -490,14 +490,14 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 		ConicalFlockParams flockParams {
 			.origin          = { origin[0], origin[1], origin[2] },
 			.offset          = { impactNormal[0], impactNormal[1], impactNormal[2] },
-            .gravity         = 0.0f,
-            .drag            = 0.005f,
-            .turbulenceSpeed = 60.0f,
-            .turbulenceScale = 100.0f,
-            .angle           = 5.0f,
-            .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
-            .speed           = { .min = 0.0f, .max = 400.0f },
-            .percentage      = { .min = 0.6f, .max = 0.9f },
+			.gravity         = 0.0f,
+			.drag            = 0.005f,
+			.turbulenceSpeed = 60.0f,
+			.turbulenceScale = 100.0f,
+			.angle           = 5.0f,
+			.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
+			.speed           = { .min = 0.0f, .max = 400.0f },
+			.percentage      = { .min = 0.6f, .max = 0.9f },
 			.timeout         = { .min = 250, .max = 260 },
 		};
 		Particle::AppearanceRules appearanceRules {
@@ -514,48 +514,48 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 			},
 		};
 
-        vec3_t dir;
+		vec3_t dir;
 
-        constexpr float angle = 70.0f;
-        float maxZ = 1.0f;
-        static float minZ = std::cos((float) DEG2RAD(angle));
-        mat3_t transformMatrix;
-        Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], impactNormal, transformMatrix);
+		constexpr float angle = 70.0f;
+		float maxZ = 1.0f;
+		static float minZ = std::cos((float) DEG2RAD(angle));
+		mat3_t transformMatrix;
+		Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], impactNormal, transformMatrix);
 
-        // https://math.stackexchange.com/a/205589
-        const float z = m_rng.nextFloat(minZ, maxZ);
-        const float r = Q_Sqrt(1.0f - z * z);
-        const float phi = m_rng.nextFloat(0.0f, 2.0f * (float) M_PI);
-        const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
-        Matrix3_TransformVector(transformMatrix, untransformed, dir);
+		// https://math.stackexchange.com/a/205589
+		const float z = m_rng.nextFloat(minZ, maxZ);
+		const float r = Q_Sqrt(1.0f - z * z);
+		const float phi = m_rng.nextFloat(0.0f, 2.0f * (float) M_PI);
+		const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
+		Matrix3_TransformVector(transformMatrix, untransformed, dir);
 
-        VectorCopy( dir, flockParams.dir );
+		VectorCopy( dir, flockParams.dir );
 
-        cg.particleSystem.addSmallParticleFlock(appearanceRules, flockParams);
+		cg.particleSystem.addSmallParticleFlock(appearanceRules, flockParams);
 
-        // plasma explosion spikes effect
+		// plasma explosion spikes effect
 
-        appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
-        appearanceRules.colors    = kPlasmaParticlesColors;
+		appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
+		appearanceRules.colors    = kPlasmaParticlesColors;
 
-        appearanceRules.geometryRules = Particle::SparkRules {
-                .length        = { .mean = 8.0f, .spread = 2.5f },
-                .width         = { .mean = 4.0f, .spread = 1.0f },
-                .sizeBehaviour = Particle::SizeNotChanging,
-        };
+		appearanceRules.geometryRules = Particle::SparkRules {
+			.length        = { .mean = 8.0f, .spread = 2.5f },
+			.width         = { .mean = 4.0f, .spread = 1.0f },
+			.sizeBehaviour = Particle::SizeNotChanging,
+		};
 
-        flockParams.speed           = { .min = 400.0f, .max = 600.0f };
-        flockParams.angle           = 180.0f;
-        flockParams.turbulenceSpeed = 0.0f;
-        flockParams.innerAngle      = 0.0f;
-        flockParams.gravity         = 0.0f;
-        flockParams.drag            = 0.02f;
-        flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
-        flockParams.timeout         = { .min = 60, .max = 100 };
-        flockParams.percentage      = { .min = 0.15, .max = 0.2 };
-        flockParams.shiftSpeed      = { .min = 0.0f, .max = 0.0f };
+		flockParams.speed           = { .min = 400.0f, .max = 600.0f };
+		flockParams.angle           = 180.0f;
+		flockParams.turbulenceSpeed = 0.0f;
+		flockParams.innerAngle      = 0.0f;
+		flockParams.gravity         = 0.0f;
+		flockParams.drag            = 0.02f;
+		flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
+		flockParams.timeout         = { .min = 60, .max = 100 };
+		flockParams.percentage      = { .min = 0.15, .max = 0.2 };
+		flockParams.shiftSpeed      = { .min = 0.0f, .max = 0.0f };
 
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 
 	}
 
@@ -685,11 +685,11 @@ static ParticleColorsForTeamHolder electroboltParticleColorsHolder {
 };
 
 static const RgbaLifespan kElectroParticlesColors[1] {
-    {
-        .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-        .fadedIn  = { 0.7f, 0.7f, 1.0f, 1.0f },
-        .fadedOut = { 0.1f, 0.1f, 1.0f, 0.0f },
-    }
+	{
+		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+		.fadedIn  = { 0.7f, 0.7f, 1.0f, 1.0f },
+		.fadedOut = { 0.1f, 0.1f, 1.0f, 0.0f },
+	}
 };
 
 [[nodiscard]]
@@ -728,65 +728,65 @@ void EffectsSystemFacade::spawnElectroboltHitEffect( const float *origin, const 
 			singleColorAddress = &colorsHolder->defaultColors;
 		}
 
-        constexpr float length = 8;
-        constexpr float lengthSpread = 3.5;
+		constexpr float length = 8;
+		constexpr float lengthSpread = 3.5;
 
-        constexpr float width = 9.0f;
-        constexpr float widthSpread = 3.5f;
+		constexpr float width = 9.0f;
+		constexpr float widthSpread = 3.5f;
 
-        constexpr unsigned particleLifetimeMin = 175;
-        constexpr unsigned particleLifetimeMax = 210;
+		constexpr unsigned particleLifetimeMin = 175;
+		constexpr unsigned particleLifetimeMax = 210;
 
-        Particle::AppearanceRules appearanceRules {
-            .materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
-            .colors        = { singleColorAddress, 1 },
-            .geometryRules = Particle::SparkRules {
-                    .length = { .mean = length, .spread = lengthSpread },
-                    .width  = { .mean = width, .spread = widthSpread },
-                    .sizeBehaviour = Particle::Thinning,
-            },
-        };
+		Particle::AppearanceRules appearanceRules {
+			.materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
+			.colors        = { singleColorAddress, 1 },
+			.geometryRules = Particle::SparkRules {
+				.length = { .mean = length, .spread = lengthSpread },
+				.width  = { .mean = width, .spread = widthSpread },
+				.sizeBehaviour = Particle::Thinning,
+			},
+		};
 
-        EllipsoidalFlockParams flockParams {
-            .origin     = { origin[0], origin[1], origin[2] },
-            .offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
-            .gravity         = 0.0f,
-            .drag            = 0.03f,
-            .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
-            .speed           = { .min = 900.0f, .max = 1000.0f },
-            .angularVelocity = { .min = -5.0f, .max = +5.0f },
-            .percentage      = { .min = 0.65, .max = 0.78 },
-            .timeout         = { .min = 175, .max = 210 },
-        };
+		EllipsoidalFlockParams flockParams {
+			.origin     = { origin[0], origin[1], origin[2] },
+			.offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
+			.gravity         = 0.0f,
+			.drag            = 0.03f,
+			.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
+			.speed           = { .min = 900.0f, .max = 1000.0f },
+			.angularVelocity = { .min = -5.0f, .max = +5.0f },
+			.percentage      = { .min = 0.65, .max = 0.78 },
+			.timeout         = { .min = 175, .max = 210 },
+		};
 
-        Particle::AppearanceRules LightningTrailAppearanceRules {
-            .materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
-            .colors        = { singleColorAddress, 1 },
-            .geometryRules = Particle::SparkRules {
-                    .length = { .mean = length, .spread = lengthSpread },
-                    .width  = { .mean = width, .spread = widthSpread },
-                    .sizeBehaviour = Particle::Thinning,
-            },
-        };
+		Particle::AppearanceRules LightningTrailAppearanceRules {
+			.materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
+			.colors        = { singleColorAddress, 1 },
+			.geometryRules = Particle::SparkRules {
+				.length = { .mean = length, .spread = lengthSpread },
+				.width  = { .mean = width, .spread = widthSpread },
+				.sizeBehaviour = Particle::Thinning,
+			},
+		};
 
-        ConicalFlockParams LightningTrailFlockParams {
-            .gravity    = 0.0f,
-            .drag       = 0.01f,
-            .angle      = 25.0f,
-            .speed      = { .min = 1.f, .max = 1.5f },
-            .angularVelocity = { .min = -5.0f, .max = +5.0f },
-            .percentage = { .min = 0.5f, .max = 0.8f },
-            .timeout    = { .min = particleLifetimeMin - 50, .max = particleLifetimeMax - 50 },
-        };
+		ConicalFlockParams LightningTrailFlockParams {
+			.gravity    = 0.0f,
+			.drag       = 0.01f,
+			.angle      = 25.0f,
+			.speed      = { .min = 1.f, .max = 1.5f },
+			.angularVelocity = { .min = -5.0f, .max = +5.0f },
+			.percentage = { .min = 0.5f, .max = 0.8f },
+			.timeout    = { .min = particleLifetimeMin - 50, .max = particleLifetimeMax - 50 },
+		};
 
-        constexpr float dropDistance = ( length - lengthSpread ) * 0.8f;
+		constexpr float dropDistance = ( length - lengthSpread ) * 0.8f;
 
-        ParamsOfParticleTrailOfParticles LightningParamsOfTrails {
-            .appearanceRules = LightningTrailAppearanceRules,
-            .flockParamsTemplate = LightningTrailFlockParams,
-            .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = dropDistance },
-            .modulateByParentSize = false
-        };
+		ParamsOfParticleTrailOfParticles LightningParamsOfTrails {
+			.appearanceRules = LightningTrailAppearanceRules,
+			.flockParamsTemplate = LightningTrailFlockParams,
+			.updateParams = { .maxParticlesPerDrop = 1, .dropDistance = dropDistance },
+			.modulateByParentSize = false
+		};
 
 		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &LightningParamsOfTrails );
 	}
@@ -834,67 +834,67 @@ void EffectsSystemFacade::spawnInstagunHitEffect( const float *origin, const flo
 			singleColorAddress = &colorsHolder->defaultColors;
 		}
 
-        constexpr float length = 8;
-        constexpr float lengthSpread = 3.5;
+		constexpr float length = 8;
+		constexpr float lengthSpread = 3.5;
 
-        constexpr float width = 9.0f;
-        constexpr float widthSpread = 3.5f;
+		constexpr float width = 9.0f;
+		constexpr float widthSpread = 3.5f;
 
-        constexpr unsigned particleLifetimeMin = 175;
-        constexpr unsigned particleLifetimeMax = 210;
+		constexpr unsigned particleLifetimeMin = 175;
+		constexpr unsigned particleLifetimeMax = 210;
 
-        Particle::AppearanceRules appearanceRules {
-                .materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
-                .colors        = { singleColorAddress, 1 },
-                .geometryRules = Particle::SparkRules {
-                        .length = { .mean = length, .spread = lengthSpread },
-                        .width  = { .mean = width, .spread = widthSpread },
-                        .sizeBehaviour = Particle::Thinning,
-                },
-        };
+		Particle::AppearanceRules appearanceRules {
+			.materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
+			.colors        = { singleColorAddress, 1 },
+			.geometryRules = Particle::SparkRules {
+				.length = { .mean = length, .spread = lengthSpread },
+				.width  = { .mean = width, .spread = widthSpread },
+				.sizeBehaviour = Particle::Thinning,
+			},
+		};
 
-        EllipsoidalFlockParams flockParams {
-                .origin     = { origin[0], origin[1], origin[2] },
-                .offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
-                .gravity         = 0.0f,
-                .drag            = 0.03f,
-                .bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
-                .speed           = { .min = 900.0f, .max = 1000.0f },
-                .angularVelocity = { .min = -5.0f, .max = +5.0f },
-                .percentage      = { .min = 0.65, .max = 0.78 },
-                .timeout         = { .min = 175, .max = 210 },
-        };
+		EllipsoidalFlockParams flockParams {
+			.origin     = { origin[0], origin[1], origin[2] },
+			.offset     = { impactNormal[0], impactNormal[1], impactNormal[2] },
+			.gravity         = 0.0f,
+			.drag            = 0.03f,
+			.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 },
+			.speed           = { .min = 900.0f, .max = 1000.0f },
+			.angularVelocity = { .min = -5.0f, .max = +5.0f },
+			.percentage      = { .min = 0.65, .max = 0.78 },
+			.timeout         = { .min = 175, .max = 210 },
+		};
 
-        Particle::AppearanceRules LightningTrailAppearanceRules {
-                .materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
-                .colors        = { singleColorAddress, 1 },
-                .geometryRules = Particle::SparkRules {
-                        .length = { .mean = length, .spread = lengthSpread },
-                        .width  = { .mean = width, .spread = widthSpread },
-                        .sizeBehaviour = Particle::Thinning,
-                },
-        };
+		Particle::AppearanceRules LightningTrailAppearanceRules {
+			.materials     = cgs.media.shaderElectroImpactParticle.getAddressOfHandle(),
+			.colors        = { singleColorAddress, 1 },
+			.geometryRules = Particle::SparkRules {
+				.length = { .mean = length, .spread = lengthSpread },
+				.width  = { .mean = width, .spread = widthSpread },
+				.sizeBehaviour = Particle::Thinning,
+			},
+		};
 
-        ConicalFlockParams LightningTrailFlockParams {
-                .gravity    = 0.0f,
-                .drag       = 0.01f,
-                .angle      = 25.0f,
-                .speed      = { .min = 1.f, .max = 1.5f },
-                .angularVelocity = { .min = -5.0f, .max = +5.0f },
-                .percentage = { .min = 0.5f, .max = 0.8f },
-                .timeout    = { .min = particleLifetimeMin - 50, .max = particleLifetimeMax - 50 },
-        };
+		ConicalFlockParams LightningTrailFlockParams {
+			.gravity    = 0.0f,
+			.drag       = 0.01f,
+			.angle      = 25.0f,
+			.speed      = { .min = 1.f, .max = 1.5f },
+			.angularVelocity = { .min = -5.0f, .max = +5.0f },
+			.percentage = { .min = 0.5f, .max = 0.8f },
+			.timeout    = { .min = particleLifetimeMin - 50, .max = particleLifetimeMax - 50 },
+		};
 
-        constexpr float dropDistance = ( length - lengthSpread ) * 0.8f;
+		constexpr float dropDistance = ( length - lengthSpread ) * 0.8f;
 
-        ParamsOfParticleTrailOfParticles LightningParamsOfTrails {
-                .appearanceRules = LightningTrailAppearanceRules,
-                .flockParamsTemplate = LightningTrailFlockParams,
-                .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = dropDistance },
-                .modulateByParentSize = false
-        };
+		ParamsOfParticleTrailOfParticles LightningParamsOfTrails {
+			.appearanceRules = LightningTrailAppearanceRules,
+			.flockParamsTemplate = LightningTrailFlockParams,
+			.updateParams = { .maxParticlesPerDrop = 1, .dropDistance = dropDistance },
+			.modulateByParentSize = false
+		};
 
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &LightningParamsOfTrails );
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams, &LightningParamsOfTrails );
 	}
 
 	// TODO: Don't we need an IG-specific sound
@@ -964,59 +964,35 @@ void EffectsSystemFacade::spawnGunbladeBladeHitEffect( const float *pos, const f
 }
 
 static const RgbaLifespan kGunbladeBlastColors[4] {
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.42f, 0.15f, 1.0f },
-                .fadedOut = { 0.4f, 0.15f, 0.04f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.85f,
-        },
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.75f, 0.32f, 1.0f },
-                .fadedOut = { 0.4f, 0.3f, 0.12f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.75f,
-        },
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.58f, 0.23f, 1.0f },
-                .fadedOut = { 0.4f, 0.28f, 0.1f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.85f,
-        },
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.84f, 0.32f, 1.0f },
-                .fadedOut = { 0.4f, 0.35f, 0.06f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.85f,
-        },
+	{
+		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+		.fadedIn  = { 1.0f, 0.42f, 0.15f, 1.0f },
+		.fadedOut = { 0.4f, 0.15f, 0.04f, 1.0f },
+		.finishFadingInAtLifetimeFrac = 0.35f,
+		.startFadingOutAtLifetimeFrac = 0.85f,
+	},
+	{
+		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+		.fadedIn  = { 1.0f, 0.75f, 0.32f, 1.0f },
+		.fadedOut = { 0.4f, 0.3f, 0.12f, 1.0f },
+		.finishFadingInAtLifetimeFrac = 0.35f,
+		.startFadingOutAtLifetimeFrac = 0.75f,
+	},
+	{
+		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+		.fadedIn  = { 1.0f, 0.58f, 0.23f, 1.0f },
+		.fadedOut = { 0.4f, 0.28f, 0.1f, 1.0f },
+		.finishFadingInAtLifetimeFrac = 0.35f,
+		.startFadingOutAtLifetimeFrac = 0.85f,
+	},
+	{
+		.initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
+		.fadedIn  = { 1.0f, 0.84f, 0.32f, 1.0f },
+		.fadedOut = { 0.4f, 0.35f, 0.06f, 1.0f },
+		.finishFadingInAtLifetimeFrac = 0.35f,
+		.startFadingOutAtLifetimeFrac = 0.85f,
+	},
 };
-
-/*static const RgbaLifespan kGunbladeBlastColors[3] {
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.75f, 0.32f, 1.0f },
-                .fadedOut = { 0.4f, 0.3f, 0.12f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.75f,
-        },
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.62f, 0.23f, 1.0f },
-                .fadedOut = { 0.4f, 0.31f, 0.1f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.75f,
-        },
-        {
-                .initial  = { 1.0f, 1.0f, 1.0f, 1.0f },
-                .fadedIn  = { 1.0f, 0.86f, 0.32f, 1.0f },
-                .fadedOut = { 0.4f, 0.36f, 0.06f, 1.0f },
-                .finishFadingInAtLifetimeFrac = 0.35f,
-                .startFadingOutAtLifetimeFrac = 0.75f,
-        },
-};*/
 
 static const LightLifespan kGunbladeBlastFlareProps[1] {
         {
@@ -1032,57 +1008,57 @@ static const LightLifespan kGunbladeBlastFlareProps[1] {
 void EffectsSystemFacade::spawnGunbladeBlastHitEffect( const float *origin, const float *dir ) {
 	startSound( cgs.media.sndGunbladeStrongHit, origin, ATTN_IDLE );
 
-    if( v_particles.get() ) {
-        EllipsoidalFlockParams flockParams {
-            .origin          = { origin[0], origin[1], origin[2] },
-            .offset          = { dir[0], dir[1], dir[2] },
-            .gravity         = -0.3f * GRAVITY,
-            .drag            = 0.01f,
-            .turbulenceSpeed = 85.0f,
-            .turbulenceScale = 155.0f,
-            .bounceCount     = { .minInclusive = 1, .maxInclusive = 2 },
-            .speed           = { .min = 100.0f, .max = 350.0f },
-            .percentage      = { .min = 0.5f, .max = 0.6f },
-            .timeout         = { .min = 450, .max = 800 },
-            .activationDelay = { .min = 50, .max = 225 }
-        };
-        Particle::AppearanceRules appearanceRules {
-            .materials     = cgs.media.shaderBlastImpactParticle.getAddressOfHandle(),
-            .colors        = kGunbladeBlastColors,
-            .flareProps    = Particle::FlareProps {
-                    .lightProps                  = kGunbladeBlastFlareProps,
-                    .alphaScale                  = 0.09f,
-                    .particleFrameAffinityModulo = 4,
-            },
-            .geometryRules = Particle::SparkRules {
-                    .length = { .mean = 7.0f, .spread = 3.2f },
-                    .width  = { .mean = 9.0f, .spread = 3.5f },
-                    .sizeBehaviour = Particle::Thinning
-            },
-        };
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+	if( v_particles.get() ) {
+		EllipsoidalFlockParams flockParams {
+			.origin          = { origin[0], origin[1], origin[2] },
+			.offset          = { dir[0], dir[1], dir[2] },
+			.gravity         = -0.3f * GRAVITY,
+			.drag            = 0.01f,
+			.turbulenceSpeed = 85.0f,
+			.turbulenceScale = 155.0f,
+			.bounceCount     = { .minInclusive = 1, .maxInclusive = 2 },
+			.speed           = { .min = 100.0f, .max = 350.0f },
+			.percentage      = { .min = 0.5f, .max = 0.6f },
+			.timeout         = { .min = 450, .max = 800 },
+			.activationDelay = { .min = 50, .max = 225 }
+		};
+		Particle::AppearanceRules appearanceRules {
+			.materials     = cgs.media.shaderBlastImpactParticle.getAddressOfHandle(),
+			.colors        = kGunbladeBlastColors,
+			.flareProps    = Particle::FlareProps {
+				.lightProps                  = kGunbladeBlastFlareProps,
+				.alphaScale                  = 0.09f,
+				.particleFrameAffinityModulo = 4,
+			},
+			.geometryRules = Particle::SparkRules {
+				.length = { .mean = 7.0f, .spread = 3.2f },
+				.width  = { .mean = 9.0f, .spread = 3.5f },
+				.sizeBehaviour = Particle::Thinning
+			},
+		};
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 
-        // GB spike effect
+		// GB spike effect
 
-        appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
+		appearanceRules.materials = cgs.media.shaderExplosionSpikeParticle.getAddressOfHandle();
 
-        appearanceRules.geometryRules = Particle::SparkRules {
-                .length = { .mean = 12.0f, .spread = 5.0f },
-                .width  = { .mean = 4.0f, .spread = 1.0f },
-                .sizeBehaviour = Particle::SizeNotChanging,
-        };
+		appearanceRules.geometryRules = Particle::SparkRules {
+			.length = { .mean = 12.0f, .spread = 5.0f },
+			.width  = { .mean = 4.0f, .spread = 1.0f },
+			.sizeBehaviour = Particle::SizeNotChanging,
+		};
 
-        flockParams.speed           = { .min = 100.0f, .max = 600.0f };
-        flockParams.turbulenceSpeed = 0.0f;
-        flockParams.gravity         = 0.0f;
-        flockParams.drag            = 0.02f;
-        flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
-        flockParams.timeout         = { .min = 85, .max = 125 };
-        flockParams.percentage      = { .min = 0.55f, .max = 0.8f };
-        flockParams.activationDelay = { .min = 0, .max = 0 };
+		flockParams.speed           = { .min = 100.0f, .max = 600.0f };
+		flockParams.turbulenceSpeed = 0.0f;
+		flockParams.gravity         = 0.0f;
+		flockParams.drag            = 0.02f;
+		flockParams.bounceCount     = { .minInclusive = 0, .maxInclusive = 0 };
+		flockParams.timeout         = { .min = 85, .max = 125 };
+		flockParams.percentage      = { .min = 0.55f, .max = 0.8f };
+		flockParams.activationDelay = { .min = 0, .max = 0 };
 
-        cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
-    }
+		cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
+	}
 
 
 	m_transientEffectsSystem.spawnGunbladeBlastImpactEffect( origin, dir );
@@ -1096,7 +1072,7 @@ static auto makeRicochetFlockOrientation( const SolidImpact &impact, wsw::Random
 	assert( std::fabs( VectorLengthSquared( impact.normal ) - 1.0f ) < 0.1f );
 	assert( DotProduct( impact.incidentDir, impact.normal ) <= 0 );
 
-    vec3_t flockDir;
+	vec3_t flockDir;
 	VectorReflect( impact.incidentDir, impact.normal, 0.0f, flockDir );
 
 	const float coneAngleCosine = Q_Sqrt( rng->nextFloat( angleCosineRange.first, angleCosineRange.second ) );
@@ -1425,15 +1401,6 @@ void EffectsSystemFacade::spawnBulletMetalDebrisParticles( unsigned delay, const
 	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
 }
 
-/*static const RgbaLifespan kGreyDustColors[1] {
-	{
-		.initial  = { 0.5f, 0.5f, 0.5f, 0.1f },
-		.fadedIn  = { 0.5f, 0.5f, 0.5f, 0.1f },
-		.fadedOut = { 0.5f, 0.5f, 0.5f, 0.0f },
-		.startFadingOutAtLifetimeFrac = 0.67f
-	}
-};*/
-
 static const RgbaLifespan kGreyDustColors[1] {
         {
                 .initial  = { 0.75f, 0.75f, 0.75f, 1.0f },
@@ -1441,15 +1408,6 @@ static const RgbaLifespan kGreyDustColors[1] {
                 .fadedOut = { 0.75f, 0.75f, 0.75f, 0.8f },
         }
 };
-/*
-static const RgbaLifespan kSoftDustColors[1] {
-        {
-                .initial  = { 0.5f, 0.5f, 0.5f, 0.1f },
-                .fadedIn  = { 0.5f, 0.5f, 0.5f, 0.1f },
-                .fadedOut = { 0.5f, 0.5f, 0.5f, 0.0f },
-                .startFadingOutAtLifetimeFrac = 0.67f
-        }
-};*/
 
 static const RgbaLifespan kSoftDustColors[1] {
         {
@@ -1472,7 +1430,7 @@ void EffectsSystemFacade::spawnStoneDustParticles( unsigned delay, const FlockOr
 		.colors              = kGreyDustColors,
 		.geometryRules       = Particle::SpriteRules {
 			.radius = { .mean = radius, .spread = radiusSpread },
-            .sizeBehaviour = Particle::Shrinking
+			.sizeBehaviour = Particle::Shrinking
 		},
 		.applyVertexDynLight = true
 	};
@@ -1489,32 +1447,32 @@ void EffectsSystemFacade::spawnStoneDustParticles( unsigned delay, const FlockOr
 
     orientation.copyToFlockParams( &flockParams );
 
-    Particle::AppearanceRules SmokeTrailAppearanceRules {
-            .materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
-            .colors              = kGreyDustColors,
-            .geometryRules       = Particle::SpriteRules {
-                    .radius = { .mean = radius - radiusSpread, .spread = 5.0f },
-                    .sizeBehaviour = Particle::Shrinking
-            },
-            .applyVertexDynLight = true
-    };
+	Particle::AppearanceRules SmokeTrailAppearanceRules {
+		.materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
+		.colors              = kGreyDustColors,
+		.geometryRules       = Particle::SpriteRules {
+			.radius = { .mean = radius - radiusSpread, .spread = 5.0f },
+			.sizeBehaviour = Particle::Shrinking
+		},
+		.applyVertexDynLight = true
+	};
 
-    ConicalFlockParams SmokeTrailFlockParams {
-            .gravity    = -0.025f * GRAVITY,
-            .drag       = 0.0f,
-            .speed      = { .min = 0.f, .max = 1.f },
-            .percentage = { .min = 0.5f, .max = 0.8f },
-            .timeout    = { .min = 600, .max = 800 },
-    };
+	ConicalFlockParams SmokeTrailFlockParams {
+		.gravity    = -0.025f * GRAVITY,
+		.drag       = 0.0f,
+		.speed      = { .min = 0.f, .max = 1.f },
+		.percentage = { .min = 0.5f, .max = 0.8f },
+		.timeout    = { .min = 600, .max = 800 },
+	};
 
-    ParamsOfParticleTrailOfParticles SmokeParamsOfTrails {
-            .appearanceRules = SmokeTrailAppearanceRules,
-            .flockParamsTemplate = SmokeTrailFlockParams,
-            .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 10.0f },
-            .modulateByParentSize = true
-    };
+	ParamsOfParticleTrailOfParticles SmokeParamsOfTrails {
+		.appearanceRules = SmokeTrailAppearanceRules,
+		.flockParamsTemplate = SmokeTrailFlockParams,
+		.updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 10.0f },
+		.modulateByParentSize = true
+	};
 
-    orientation.copyToFlockParams( &SmokeTrailFlockParams );
+	orientation.copyToFlockParams( &SmokeTrailFlockParams );
 
 	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 900.0f, 950.0f );
 	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules, TransientEffectsSystem::ParticleFlockBin::Small, &SmokeParamsOfTrails );
@@ -1522,129 +1480,129 @@ void EffectsSystemFacade::spawnStoneDustParticles( unsigned delay, const FlockOr
 }
 
 void EffectsSystemFacade::spawnStoneSmokeParticles( unsigned delay, const FlockOrientation &orientation,
-                                                   float upShiftScale, unsigned materialParam,
-                                                   float dustPercentageScale ) {
+												   float upShiftScale, unsigned materialParam,
+												   float dustPercentageScale ) {
 
-    Particle::AppearanceRules appearanceRules {
-            .materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle(),
-            .colors              = kSoftDustColors,
-            .geometryRules       = Particle::SpriteRules {
-                .radius = {.mean = 25.0f, .spread = 7.5f},
-                .sizeBehaviour = Particle::Expanding
-            },
-            .applyVertexDynLight = true,
-    };
+	Particle::AppearanceRules appearanceRules {
+		.materials           = cgs.media.shaderStoneDustSoft.getAddressOfHandle(),
+		.colors              = kSoftDustColors,
+		.geometryRules       = Particle::SpriteRules {
+			.radius = {.mean = 25.0f, .spread = 7.5f},
+			.sizeBehaviour = Particle::Expanding
+		},
+		.applyVertexDynLight = true,
+	};
 
-    ConicalFlockParams flockParams{
-            .gravity = 0.059f * GRAVITY,
-            .drag            = 0.03f,
-            .restitution     = 1.0f,
-            .angle           = 30.0f,
-            .speed           = { .min = 100.0f, .max = 500.0f },
-            .percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
-            .timeout         = { .min = 750, .max = 1000 },
-    };
+	ConicalFlockParams flockParams{
+		.gravity = 0.059f * GRAVITY,
+		.drag            = 0.03f,
+		.restitution     = 1.0f,
+		.angle           = 30.0f,
+		.speed           = { .min = 100.0f, .max = 500.0f },
+		.percentage      = { .min = 0.7f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
+		.timeout         = { .min = 750, .max = 1000 },
+	};
 
-    orientation.copyToFlockParams( &flockParams );
-    assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
-    spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
+	orientation.copyToFlockParams( &flockParams );
+	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
+	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
 }
 
 static shader_s *g_stuccoDustMaterialsStorage[3];
 
 static const RgbaLifespan kStuccoDustColors[1] {
-        {
-                .initial  = { 0.92f, 0.92f, 0.92f, 1.0f },
-                .fadedIn  = { 0.92f, 0.92f, 0.92f, 0.9f },
-                .fadedOut = { 0.92f, 0.92f, 0.92f, 0.8f },
-        }
+		{
+			.initial  = { 0.92f, 0.92f, 0.92f, 1.0f },
+			.fadedIn  = { 0.92f, 0.92f, 0.92f, 0.9f },
+			.fadedOut = { 0.92f, 0.92f, 0.92f, 0.8f },
+		}
 };
 
 void EffectsSystemFacade::spawnStuccoDustParticles( unsigned delay, const FlockOrientation &orientation,
 													float upShiftScale, unsigned materialParam ) {
-    const float radius = 25.0f;
-    const float radiusSpread = 5.0f;
+	const float radius = 25.0f;
+	const float radiusSpread = 5.0f;
 
-    Particle::AppearanceRules appearanceRules {
-            .materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
-            .colors              = kStuccoDustColors,
-            .geometryRules       = Particle::SpriteRules {
-                    .radius = { .mean = radius, .spread = radiusSpread },
-                    .sizeBehaviour = Particle::Shrinking
-            },
-            .applyVertexDynLight = true
-    };
+	Particle::AppearanceRules appearanceRules {
+		.materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
+		.colors              = kStuccoDustColors,
+		.geometryRules       = Particle::SpriteRules {
+			.radius = { .mean = radius, .spread = radiusSpread },
+			.sizeBehaviour = Particle::Shrinking
+		},
+		.applyVertexDynLight = true
+	};
 
-    ConicalFlockParams flockParams {
-            .gravity         = 0.8f * GRAVITY,
-            .drag            = 0.04f,
-            .restitution     = 0.8f,
-            .angle           = 90.0f,
-            .speed           = { .min = 800.0f, .max = 990.0f },
-            .percentage      = { .min = 0.15f, .max = 0.2f },
-            .timeout         = { .min = 400, .max = 500},
-    };
+	ConicalFlockParams flockParams {
+		.gravity         = 0.8f * GRAVITY,
+		.drag            = 0.04f,
+		.restitution     = 0.8f,
+		.angle           = 90.0f,
+		.speed           = { .min = 800.0f, .max = 990.0f },
+		.percentage      = { .min = 0.15f, .max = 0.2f },
+		.timeout         = { .min = 400, .max = 500},
+	};
 
-    orientation.copyToFlockParams( &flockParams );
+	orientation.copyToFlockParams( &flockParams );
 
-    Particle::AppearanceRules SmokeTrailAppearanceRules {
-            .materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
-            .colors              = kGreyDustColors,
-            .geometryRules       = Particle::SpriteRules {
-                    .radius = { .mean = radius - radiusSpread, .spread = 5.0f },
-                    .sizeBehaviour = Particle::Shrinking
-            },
-            .applyVertexDynLight = true
-    };
+	Particle::AppearanceRules SmokeTrailAppearanceRules {
+		.materials           = cgs.media.shaderStoneDustHard.getAddressOfHandle(),
+		.colors              = kGreyDustColors,
+		.geometryRules       = Particle::SpriteRules {
+			.radius = { .mean = radius - radiusSpread, .spread = 5.0f },
+			.sizeBehaviour = Particle::Shrinking
+		},
+		.applyVertexDynLight = true
+	};
 
-    ConicalFlockParams SmokeTrailFlockParams {
-            .gravity    = -0.025f * GRAVITY,
-            .drag       = 0.0f,
-            .speed      = { .min = 0.f, .max = 1.f },
-            .percentage = { .min = 0.5f, .max = 0.8f },
-            .timeout    = { .min = 600, .max = 800 },
-    };
+	ConicalFlockParams SmokeTrailFlockParams {
+		.gravity    = -0.025f * GRAVITY,
+		.drag       = 0.0f,
+		.speed      = { .min = 0.f, .max = 1.f },
+		.percentage = { .min = 0.5f, .max = 0.8f },
+		.timeout    = { .min = 600, .max = 800 },
+	};
 
-    ParamsOfParticleTrailOfParticles SmokeParamsOfTrails {
-            .appearanceRules = SmokeTrailAppearanceRules,
-            .flockParamsTemplate = SmokeTrailFlockParams,
-            .updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 10.0f },
-            .modulateByParentSize = true
-    };
+	ParamsOfParticleTrailOfParticles SmokeParamsOfTrails {
+		.appearanceRules = SmokeTrailAppearanceRules,
+		.flockParamsTemplate = SmokeTrailFlockParams,
+		.updateParams = { .maxParticlesPerDrop = 1, .dropDistance = 10.0f },
+		.modulateByParentSize = true
+	};
 
-    orientation.copyToFlockParams( &SmokeTrailFlockParams );
+	orientation.copyToFlockParams( &SmokeTrailFlockParams );
 
-    assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 900.0f, 950.0f );
-    spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules, TransientEffectsSystem::ParticleFlockBin::Small, &SmokeParamsOfTrails );
+	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 900.0f, 950.0f );
+	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules, TransientEffectsSystem::ParticleFlockBin::Small, &SmokeParamsOfTrails );
 }
 
 void EffectsSystemFacade::spawnStuccoSmokeParticles( unsigned delay, const FlockOrientation &orientation,
-                                                    float upShiftScale, unsigned materialParam,
-                                                    float dustPercentageScale ) {
+													float upShiftScale, unsigned materialParam,
+													float dustPercentageScale ) {
 
-    Particle::AppearanceRules appearanceRules {
-            .materials = cgs.media.shaderStoneDustSoft.getAddressOfHandle(),
-            .colors              = kSoftDustColors,
-            .geometryRules       = Particle::SpriteRules {
-                .radius = {.mean = 25.0f, .spread = 7.5f},
-                .sizeBehaviour = Particle::Expanding
-            },
-            .applyVertexDynLight = true,
-    };
+	Particle::AppearanceRules appearanceRules {
+		.materials = cgs.media.shaderStoneDustSoft.getAddressOfHandle(),
+		.colors              = kSoftDustColors,
+		.geometryRules       = Particle::SpriteRules {
+			.radius = {.mean = 25.0f, .spread = 7.5f},
+			.sizeBehaviour = Particle::Expanding
+		},
+		.applyVertexDynLight = true,
+	};
 
-    ConicalFlockParams flockParams {
-        .gravity         = 0.059f * GRAVITY,
-        .drag            = 0.03f,
-        .restitution     = 1.0f,
-        .angle           = 30.0f,
-        .speed           = { .min = 100.0f, .max = 500.0f },
-        .percentage      = { .min = 0.8f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
-        .timeout         = { .min = 750, .max = 1000 },
-    };
+	ConicalFlockParams flockParams {
+		.gravity         = 0.059f * GRAVITY,
+		.drag            = 0.03f,
+		.restitution     = 1.0f,
+		.angle           = 30.0f,
+		.speed           = { .min = 100.0f, .max = 500.0f },
+		.percentage      = { .min = 0.8f * dustPercentageScale, .max = 1.0f * dustPercentageScale },
+		.timeout         = { .min = 750, .max = 1000 },
+	};
 
-    orientation.copyToFlockParams( &flockParams );
-    assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
-    spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
+	orientation.copyToFlockParams( &flockParams );
+	assignUpShiftAndModifyBaseSpeed( &flockParams, upShiftScale, 10.0f, 20.0f );
+	spawnOrPostponeImpactParticleEffect( delay, flockParams, appearanceRules );
 }
 
 static const RgbaLifespan kWoodImpactColors[1] {
@@ -2753,11 +2711,11 @@ bool EffectsSystemFacade::MultiGroupEventRateLimiter::acquirePermission( int64_t
 
 auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> unsigned {
 
-    ViewState *viewState = getPrimaryViewState();
-    orientation_t projection;
-    CG_PModel_GetProjectionSource(owner, &projection, viewState);
+	ViewState *viewState = getPrimaryViewState();
+	orientation_t projection;
+	CG_PModel_GetProjectionSource(owner, &projection, viewState);
 
-    projection.origin[2] -= 10.0f;
+	projection.origin[2] -= 10.0f;
 
 	const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to, {
 		.material           = cgs.media.shaderBulletTracer,
@@ -2778,11 +2736,11 @@ auto EffectsSystemFacade::spawnBulletTracer( int owner, const float *to ) -> uns
 void EffectsSystemFacade::spawnPelletTracers( int owner, std::span<const vec3_t> to,
 											  unsigned *timeoutsBuffer ) {
 
-    ViewState *viewState = getPrimaryViewState();
-    orientation_t projection;
-    CG_PModel_GetProjectionSource( owner, &projection, viewState );
+	ViewState *viewState = getPrimaryViewState();
+	orientation_t projection;
+	CG_PModel_GetProjectionSource( owner, &projection, viewState );
 
-    projection.origin[2] -= 10.0f;
+	projection.origin[2] -= 10.0f;
 
 	for( size_t i = 0; i < to.size(); ++i ) {
 		const std::optional<unsigned> maybeTimeout = cg.polyEffectsSystem.spawnTracerEffect( projection.origin, to[i], {
@@ -2882,33 +2840,33 @@ void EffectsSystemFacade::spawnElectroboltBeam( const vec3_t start, const vec3_t
 		.tileLength = 128.0f,
 		.timeout    = (unsigned) ( timeoutMillis * 0.7f ),
 	});
-    cg.polyEffectsSystem.spawnTransientBeamEffect( start, end, {
-            .material          = material,
-            .beamColorLifespan = RgbaLifespan {
-                    .initial  = { 1.0f, 1.0f, 1.0f, color[3] },
-                    .fadedIn  = { color[0], color[1], color[2], color[3] },
-                    .fadedOut = { 0.0f, 0.0f, 0.0f, 0.0f },
-                    .finishFadingInAtLifetimeFrac = 0.2f,
-                    .startFadingOutAtLifetimeFrac = 0.5f,
-            },
-            .lightProps        = std::pair<unsigned, LightLifespan> {
-                    lightTimeout, LightLifespan {
-                            .colorLifespan = {
-                                    .initial  = { 1.0f, 1.0f, 1.0f },
-                                    .fadedIn  = { color[0], color[1], color[2] },
-                                    .fadedOut = { color[0], color[1], color[2] },
-                            },
-                            .radiusLifespan = {
-                                    .initial  = 100.0f,
-                                    .fadedIn  = 250.0f,
-                                    .fadedOut = 100.0f,
-                            },
-                    }
-            },
-            .width      = wsw::clamp( v_ebBeamWidth.get() * 0.5f, 0.0f, 128.0f ),
-            .tileLength = 128.0f,
-            .timeout    = timeoutMillis,
-    });
+	cg.polyEffectsSystem.spawnTransientBeamEffect( start, end, {
+		.material          = material,
+		.beamColorLifespan = RgbaLifespan {
+			.initial  = { 1.0f, 1.0f, 1.0f, color[3] },
+			.fadedIn  = { color[0], color[1], color[2], color[3] },
+			.fadedOut = { 0.0f, 0.0f, 0.0f, 0.0f },
+			.finishFadingInAtLifetimeFrac = 0.2f,
+			.startFadingOutAtLifetimeFrac = 0.5f,
+		},
+		.lightProps        = std::pair<unsigned, LightLifespan> {
+			lightTimeout, LightLifespan {
+				.colorLifespan = {
+					.initial  = { 1.0f, 1.0f, 1.0f },
+					.fadedIn  = { color[0], color[1], color[2] },
+					.fadedOut = { color[0], color[1], color[2] },
+				},
+				.radiusLifespan = {
+						.initial  = 100.0f,
+						.fadedIn  = 250.0f,
+						.fadedOut = 100.0f,
+				},
+			}
+		},
+		.width      = wsw::clamp( v_ebBeamWidth.get() * 0.5f, 0.0f, 128.0f ),
+		.tileLength = 128.0f,
+		.timeout    = timeoutMillis,
+	});
 
 }
 
