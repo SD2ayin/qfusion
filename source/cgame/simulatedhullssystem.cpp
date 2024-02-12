@@ -343,22 +343,21 @@ SimulatedHullsSystem::~SimulatedHullsSystem() {
 
 void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
 
-void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier, StaticCage **cage ) {
-    LoadedStaticCages.emplace_back();
-    *cage = &LoadedStaticCages.back();
+SimulatedHullsSystem::StaticCage *SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
+    m_loadedStaticCages.emplace_back();
+    StaticCage *cage = std::addressof( m_loadedStaticCages.back() );
 
-    //LoadedStaticCages.back().identifier = identifier;
+    //m_loadedStaticCages.back().identifier = identifier;
 
-    StaticCage *pCage = *cage;
-    pCage->identifier = identifier;
+    cage->identifier = identifier;
 
-    cgNotice() << "cage identifier found:" << pCage->identifier;
+    cgNotice() << "cage identifier found:" << cage->identifier;
 
     const char *format = ".md3"; // we are only using md3 format for now
-    auto filepathToCage = wsw::String( pCage->identifier.data(), pCage->identifier.length() ).append( format );
+    auto filepathToCage = wsw::String( cage->identifier.data(), cage->identifier.length() ).append( format );
     cgNotice() << "path to cage:" << filepathToCage;
 
-    Geometry *cageGeometry = &pCage->cageGeometry;
+    Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
     unitizeGeometry( cageGeometry );
 
@@ -370,7 +369,9 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier, St
     size_t sizeOfLimits = sizeof( *BaseKeyframedHull::limitsAtDirections ) * numCageVertices;
     size_t requiredSize = sizeOfBaseHull + sizeOfMoveDirs + sizeOfLimits;
 
-    pCage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
+    cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
+
+    return cage;
 }
 
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
@@ -386,24 +387,20 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
         unsigned suffixLength = filepath.length() - suffixIdx;
         auto identifier = filepath.dropRight( suffixLength );
 
-        unsigned loadedCageNum = 0;
-        bool foundCageAlreadyLoaded = false;
-        if( unsigned numLoadedCages = LoadedStaticCages.size(); numLoadedCages > 0 ) {
-            for( ; loadedCageNum < numLoadedCages; loadedCageNum++ ) {
-                StaticCage loadedCage = LoadedStaticCages[loadedCageNum];
-                if( wsw::StringView( loadedCage.identifier.data(), loadedCage.identifier.size() ).equals( identifier ) ){
-                    foundCageAlreadyLoaded = true;
-                    break;
-                }
+        StaticCage *foundCage = nullptr;
+        for( StaticCage &loadedCage: m_loadedStaticCages ) {
+            if( wsw::StringView( loadedCage.identifier.data(), loadedCage.identifier.size() ).equals( identifier ) ){
+                foundCage = std::addressof( loadedCage );
+                break;
             }
         }
 
-        if( foundCageAlreadyLoaded ) {
-            cagedMesh->cage = &LoadedStaticCages[loadedCageNum];
+        if( foundCage ) {
+            cagedMesh->cage = foundCage;
 
             cgNotice() << "cage" << cagedMesh->cage->identifier << "was already loaded";
         } else {
-            RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ), &cagedMesh->cage );
+            cagedMesh->cage = RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ) );
         }
     }
 
@@ -782,8 +779,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         cgNotice() << "identifier size" << cage->identifier.size();
         cgNotice() << "vertices size" << cage->cageGeometry.vertexPositions.size();
 
-        //cgNotice() << "identifier" << LoadedStaticCages[0].identifier;
-        //cgNotice() << "num verts" << LoadedStaticCages[0].cageGeometry.vertexPositions.size();
+        //cgNotice() << "identifier" << m_loadedStaticCages[0].identifier;
+        //cgNotice() << "num verts" << m_loadedStaticCages[0].cageGeometry.vertexPositions.size();
 
         /*
         for( size_t i = 0; i < wsw::min(size_t(20), cageGeometry->vertexPositions.size()); i++ ) {

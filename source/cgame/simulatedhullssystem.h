@@ -142,7 +142,7 @@ public:
         // StaticCagedHull *head;
     };
 
-    wsw::Vector<StaticCage> LoadedStaticCages;
+    wsw::Vector<StaticCage> m_loadedStaticCages;
 
     struct StaticCageCoordinate {
         unsigned cageTriIdx;
@@ -174,7 +174,9 @@ public:
 
     unsigned maxCagedHullsPerType = 64;
 
-    void RegisterStaticCage( const wsw::String &identifier, StaticCage **cage );
+    [[nodiscard]]
+    SimulatedHullsSystem::StaticCage *RegisterStaticCage( const wsw::String &identifier );
+
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
 	struct OffsetKeyframe {
