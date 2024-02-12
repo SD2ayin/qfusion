@@ -514,22 +514,9 @@ void EffectsSystemFacade::spawnPlasmaExplosionEffect( const float *origin, const
 			},
 		};
 
-		vec3_t dir;
-
-		constexpr float angle = 70.0f;
-		float maxZ = 1.0f;
-		static float minZ = std::cos((float) DEG2RAD(angle));
-		mat3_t transformMatrix;
-		Matrix3_ForRotationOfDirs(&axis_identity[AXIS_UP], impactNormal, transformMatrix);
-
-		// https://math.stackexchange.com/a/205589
-		const float z = m_rng.nextFloat(minZ, maxZ);
-		const float r = Q_Sqrt(1.0f - z * z);
-		const float phi = m_rng.nextFloat(0.0f, 2.0f * (float) M_PI);
-		const vec3_t untransformed{r * std::cos(phi), r * std::sin(phi), z};
-		Matrix3_TransformVector(transformMatrix, untransformed, dir);
-
-		VectorCopy( dir, flockParams.dir );
+		constexpr float maxAngleCosine = 1.0f; // cos(0deg)
+		constexpr float minAngleCosine = 0.342f; // cos(70deg)
+		addRandomRotationToDir( flockParams.dir, &m_rng, minAngleCosine, maxAngleCosine );
 
 		cg.particleSystem.addSmallParticleFlock(appearanceRules, flockParams);
 
