@@ -949,6 +949,7 @@ struct FlockOrientation {
 
 void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float minConeAngleCosine, float maxConeAngleCosine );
 void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float coneAngleCosine );
+void addRotationToDir( float *dir, float coneAngleCosine, float angleAlongCone );
 
 [[nodiscard]]
 auto getSurfFlagsForImpact( const trace_t &trace, const float *impactDir ) -> int;

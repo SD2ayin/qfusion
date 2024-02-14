@@ -1203,32 +1203,24 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 					.timeout      = { .min = 180, .max = 240 },
 				};
 
-				vec3_t particleDir;
-
-				// https://math.stackexchange.com/a/205589 for creation of the cone
 				constexpr float innerAngle = 30.0f;
 				constexpr float angle      = 85.0f;
-				const float maxZ           = std::cos( (float)DEG2RAD( innerAngle ) );
-				const float minZ           = std::cos( (float)DEG2RAD( angle ) );
-				const float zRange         = maxZ - minZ;
+				static float maxAngleCos   = std::cos((float) DEG2RAD( innerAngle ) );
+				static float minAngleCos   = std::cos((float) DEG2RAD( angle ) );
+				static float angleCosRange = maxAngleCos - minAngleCos;
 
-				constexpr unsigned numSpikes   = 4;
+				constexpr unsigned numSpikes  = 4;
+				constexpr float spikeSpeed    = 5e-4f;
 				constexpr float spikeFraction = 1.0f / numSpikes;
 				constexpr float laserShotTime = 1.0f / 20.0f; // should be equal to fire rate
 
 				const unsigned spikeNum = (unsigned)( (float)cg.time * laserShotTime ) % numSpikes;
-				const float coord       = (float)cg.time * 5e-4f + (float)spikeNum * 10.0f;
+				const float coord       = (float)cg.time * spikeSpeed + (float)spikeNum * 10.0f;
 
-				mat3_t transformMatrix;
-				Matrix3_ForRotationOfDirs( &axis_identity[AXIS_UP], trace->plane.normal, transformMatrix );
+				const float coneAngleCosine = minAngleCos + calcSimplexNoise2D( -coord, 0.0f ) * angleCosRange;
+				const float angleAlongCone  = DEG2RAD( AngleNormalize360( 360.0f * ( (float)spikeNum * spikeFraction + calcSimplexNoise2D( coord, 0.0f ) ) ) );
 
-				const float z   = minZ + calcSimplexNoise2D( -coord, 0.0f ) * zRange;
-				const float r   = Q_Sqrt( 1.0f - z * z );
-				const float phi = DEG2RAD( AngleNormalize360( 360.0f * ( (float)spikeNum * spikeFraction + calcSimplexNoise2D( coord, 0.0f ) ) ) );
-				const vec3_t untransformed { r * std::cos( phi ), r * std::sin( phi ), z };
-				Matrix3_TransformVector( transformMatrix, untransformed, particleDir );
-
-				VectorCopy( particleDir, flockParams.dir );
+				addRotationToDir( flockParams.dir, coneAngleCosine, angleAlongCone );
 
 				cg.particleSystem.addSmallParticleFlock( appearanceRules, flockParams );
 			}

@@ -1077,10 +1077,17 @@ void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float minCon
 }
 
 void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float coneAngleCosine ) {
-	assert( coneAngleCosine > 0.0f && coneAngleCosine < 1.0f );
+	assert( coneAngleCosine => 0.0f && coneAngleCosine <= 1.0f );
+	const float angleAlongCone = rng->nextFloat( 0.0f, 2.0f * (float)M_PI );
+	addRotationToDir( dir, coneAngleCosine, angleAlongCone );
+}
+
+void addRotationToDir( float *dir, float coneAngleCosine, float angleAlongCone ) {
+	assert( coneAngleCosine => 0.0f && coneAngleCosine <= 1.0f );
+	assert( angleAlongCone => 0.0f && angleAlongCone <= 2.0f * (float)M_PI );
 	const float z     = coneAngleCosine;
 	const float r     = Q_Sqrt( 1.0f - z * z );
-	const float phi   = rng->nextFloat( 0.0f, 2.0f * (float)M_PI );
+	const float phi   = angleAlongCone;
 	const vec3_t newZDir { r * std::cos( phi ), r * std::sin( phi ), z };
 
 	mat3_t transformMatrix;
@@ -1088,8 +1095,6 @@ void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float coneAn
 
 	vec3_t result;
 	Matrix3_TransformVector( transformMatrix, dir, result );
-	// wtf?
-	VectorNormalizeFast( result );
 	VectorCopy( result, dir );
 }
 
