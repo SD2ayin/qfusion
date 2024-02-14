@@ -5659,9 +5659,8 @@ static void CG_RegisterModels( void ) {
 	cgs.media.registerModels();
     cgs.media.registerStaticCagedMeshes( &cg.simulatedHullsSystem );
     SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
-    cgNotice() << "cage identifier of another example:" << cagedMesh->cage->identifier;
-    SimulatedHullsSystem::StaticCagedMesh *viaHandle = *cgs.media.anotherExample2.getAddressOfHandle();
-    cgNotice() << "via handle:" << viaHandle->cage->identifier;
+	SimulatedHullsSystem::StaticCage *cage = std::addressof( cg.simulatedHullsSystem.m_loadedStaticCages[cagedMesh->loadedCageKey] );
+    cgNotice() << "cage identifier of another example:" << cage->identifier;
 
 	CG_RegisterBasePModel(); // never before registering the weapon models
 	CG_RegisterWeaponModels();

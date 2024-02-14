@@ -343,11 +343,9 @@ SimulatedHullsSystem::~SimulatedHullsSystem() {
 
 void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
 
-SimulatedHullsSystem::StaticCage *SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
+void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     m_loadedStaticCages.emplace_back();
     StaticCage *cage = std::addressof( m_loadedStaticCages.back() );
-
-    //m_loadedStaticCages.back().identifier = identifier;
 
     cage->identifier = identifier;
 
@@ -370,8 +368,6 @@ SimulatedHullsSystem::StaticCage *SimulatedHullsSystem::RegisterStaticCage( cons
     size_t requiredSize = sizeOfBaseHull + sizeOfMoveDirs + sizeOfLimits;
 
     cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
-
-    return cage;
 }
 
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
@@ -387,24 +383,29 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
         unsigned suffixLength = filepath.length() - suffixIdx;
         auto identifier = filepath.dropRight( suffixLength );
 
-        StaticCage *foundCage = nullptr;
-        for( StaticCage &loadedCage: m_loadedStaticCages ) {
-            if( wsw::StringView( loadedCage.identifier.data(), loadedCage.identifier.size() ).equals( identifier ) ){
-                foundCage = std::addressof( loadedCage );
+		bool foundCage = false;
+		unsigned loadedCageNum = 0;
+        for( ; ++loadedCageNum < m_loadedStaticCages.size(); loadedCageNum++ ) {
+			StaticCage *loadedCage = std::addressof( m_loadedStaticCages[loadedCageNum] );
+            if( wsw::StringView( loadedCage->identifier.data(), loadedCage->identifier.size() ).equals( identifier ) ){
+                foundCage = true;
                 break;
             }
         }
 
         if( foundCage ) {
-            cagedMesh->cage = foundCage;
+            //cagedMesh->cage = foundCage;
+			cagedMesh->loadedCageKey = loadedCageNum;
 
-            cgNotice() << "cage" << cagedMesh->cage->identifier << "was already loaded";
+			StaticCage *cage = std::addressof( m_loadedStaticCages[loadedCageNum] );
+            cgNotice() << "cage" << cage->identifier << "was already loaded";
         } else {
-            cagedMesh->cage = RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ) );
+            RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ) );
+			cagedMesh->loadedCageKey = m_loadedStaticCages.size();
         }
     }
 
-    cgNotice() << "test" << cagedMesh->cage->cageGeometry.vertexPositions.size();
+    //cgNotice() << "test" << cagedMesh->cage->cageGeometry.vertexPositions.size();
 
     return cagedMesh;
 }
@@ -739,6 +740,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
 	const vec4_t *__restrict vertices = verticesSpan.data();
 
+	cgNotice() << "set up hull vertices";
 	// Calculate move limits in each direction
 
 	const float radius = maxOffset * scale;
@@ -751,28 +753,16 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
-    if( v_showVectorsToLim.get() ) {
-        effectsSystem->spawnTransientBeamEffect( growthMins, growthMaxs, {
-                .material          = cgs.media.shaderLaser,
-                .beamColorLifespan = {
-                        .initial  = {color[0], color[1], color[2]},
-                        .fadedIn  = {color[0], color[1], color[2]},
-                        .fadedOut = {color[0], color[1], color[2]},
-                },
-                .width             = 8.0f,
-                .timeout           = 500u,
-        } );
-    }
-
 	if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
 		// Limits at each direction just match the given radius in this case
 		std::fill( hull->limitsAtDirections, hull->limitsAtDirections + verticesSpan.size(), radius );
+		cgNotice() << "no shapes";
 	} else {
-		//trace_t trace;
+		trace_t trace;
 
-        StaticCage *cage = meshToRender->cage;
-        //Geometry *cageGeometry = &cage->cageGeometry;
-        //vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
+        StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
+        Geometry *cageGeometry = &cage->cageGeometry;
+        vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
 
         //cgNotice() << "size"<<  cageGeometry->vertexPositions.size();
 
@@ -781,11 +771,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
         //cgNotice() << "identifier" << m_loadedStaticCages[0].identifier;
         //cgNotice() << "num verts" << m_loadedStaticCages[0].cageGeometry.vertexPositions.size();
-
-        /*
-        for( size_t i = 0; i < wsw::min(size_t(20), cageGeometry->vertexPositions.size()); i++ ) {
-            cgNotice() << vertexPositions[i][0] << vertexPositions[i][1] << vertexPositions[i][2];
-        }
 
         for( size_t i = 0; i < wsw::min(size_t(20), cageGeometry->vertexPositions.size()); i++ ) {
             vec3_t limitPoint;
@@ -806,7 +791,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
                         .timeout           = 500u,
                 } );
             }
-        }*/
+        }
         /*
 		for( size_t i = 0; i < verticesSpan.size(); ++i ) {
 

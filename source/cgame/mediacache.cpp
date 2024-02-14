@@ -62,7 +62,6 @@ void MediaCache::registerStaticCagedMeshes( SimulatedHullsSystem *hullsSystem ) 
 	for( CachedStaticCagedMesh *cagedMesh = m_staticCagedMeshes; cagedMesh; cagedMesh = (CachedStaticCagedMesh *)cagedMesh->m_next ) {
 		registerStaticCagedMesh( cagedMesh, hullsSystem );
         SimulatedHullsSystem::StaticCagedMesh *mesh = *cagedMesh->getAddressOfHandle();
-        cgNotice() << "identifier again" << mesh->cage->identifier;
 	}
 }
 
@@ -89,7 +88,6 @@ void MediaCache::registerStaticCagedMesh( CachedStaticCagedMesh *cagedMesh, Simu
     if( !cagedMesh->m_handle ) {
         cagedMesh->m_handle = CG_RegisterStaticCagedMesh( cagedMesh->m_name.data(), hullsSystem );
 		SimulatedHullsSystem::StaticCagedMesh *mesh = *cagedMesh->getAddressOfHandle();
-		cgNotice() << "identifier via handle in register stage" << mesh->cage->identifier;
     }
 }
 
@@ -118,8 +116,6 @@ struct model_s *CG_RegisterModel( const char *name ) {
 
 SimulatedHullsSystem::StaticCagedMesh *CG_RegisterStaticCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem ) {
     SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullsSystem->RegisterStaticCagedMesh( name );
-    cgNotice() << "identifier size" << cagedMesh->cage->identifier.length();
-    cgNotice() << "identifier" << cagedMesh->cage->identifier;
     return cagedMesh;
 }
 

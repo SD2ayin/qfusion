@@ -547,17 +547,21 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const float randomFactor  = 0.4f;
 		const float randomScaling = 1.0f + randomFactor * m_rng.nextFloat();
 
-		const float toonSmokeScale   = 38.0f * randomScaling;
+		//const float toonSmokeScale   = 38.0f * randomScaling;
+		const float toonSmokeScale   = 3.80f * randomScaling;
 		const auto toonSmokeLifetime = (unsigned)( (float)toonSmokeKeyframes.kMinLifetime * randomScaling );
+		cgNotice() << "before alloc";
 		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
             vec3_t color = { 0.1f, 0.4f, 0.99f };
             //cg.effectsSystem.spawnGameDebugBeam( smokeOrigin, fireOrigin, color );
+			cgNotice() << "after alloc";
 
-            SimulatedHullsSystem::StaticCagedMesh *cagedMesh = *cgs.media.anotherExample2.getAddressOfHandle();
-            cgNotice() << "cage identifier:" << cagedMesh->cage->identifier;
+            SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
+			SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
+			cgNotice() << "identifier" << cage->identifier;
 
 			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset,
+											&toonSmokeKeyframeSet, 60.0f,
                                             cagedMesh,
                                             &cg.polyEffectsSystem );
 			//hull->compoundMeshKey = compoundMeshKey;
