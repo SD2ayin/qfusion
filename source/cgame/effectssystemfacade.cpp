@@ -2825,34 +2825,7 @@ void EffectsSystemFacade::spawnElectroboltBeam( const vec3_t start, const vec3_t
 		},
 		.width      = wsw::clamp( v_ebBeamWidth.get(), 0.0f, 128.0f ),
 		.tileLength = 128.0f,
-		.timeout    = (unsigned) ( timeoutMillis * 0.7f ),
-	});
-	cg.polyEffectsSystem.spawnTransientBeamEffect( start, end, {
-		.material          = material,
-		.beamColorLifespan = RgbaLifespan {
-			.initial  = { 1.0f, 1.0f, 1.0f, color[3] },
-			.fadedIn  = { color[0], color[1], color[2], color[3] },
-			.fadedOut = { 0.0f, 0.0f, 0.0f, 0.0f },
-			.finishFadingInAtLifetimeFrac = 0.2f,
-			.startFadingOutAtLifetimeFrac = 0.5f,
-		},
-		.lightProps        = std::pair<unsigned, LightLifespan> {
-			lightTimeout, LightLifespan {
-				.colorLifespan = {
-					.initial  = { 1.0f, 1.0f, 1.0f },
-					.fadedIn  = { color[0], color[1], color[2] },
-					.fadedOut = { color[0], color[1], color[2] },
-				},
-				.radiusLifespan = {
-						.initial  = 100.0f,
-						.fadedIn  = 250.0f,
-						.fadedOut = 100.0f,
-				},
-			}
-		},
-		.width      = wsw::clamp( v_ebBeamWidth.get() * 0.5f, 0.0f, 128.0f ),
-		.tileLength = 128.0f,
-		.timeout    = timeoutMillis,
+		.timeout    = (unsigned) ( timeoutMillis ),
 	});
 
 }
