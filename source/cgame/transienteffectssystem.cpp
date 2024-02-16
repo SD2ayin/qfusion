@@ -548,7 +548,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const float randomScaling = 1.0f + randomFactor * m_rng.nextFloat();
 
 		//const float toonSmokeScale   = 38.0f * randomScaling;
-		const float toonSmokeScale   = 3.80f * randomScaling;
+		const float toonSmokeScale   = 38.0f * randomScaling;
 		const auto toonSmokeLifetime = (unsigned)( (float)toonSmokeKeyframes.kMinLifetime * randomScaling );
 		cgNotice() << "before alloc";
 		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
@@ -561,7 +561,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 			cgNotice() << "identifier" << cage->identifier;
 
 			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet, 60.0f,
+											&toonSmokeKeyframeSet, 1.0f,
                                             cagedMesh,
                                             &cg.polyEffectsSystem );
 			//hull->compoundMeshKey = compoundMeshKey;

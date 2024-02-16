@@ -357,10 +357,16 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
 
     Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
-    unitizeGeometry( cageGeometry );
+    //unitizeGeometry( cageGeometry );
 
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
+
+	for( unsigned i = 0; i < numCageVertices; i++ ){
+		if( VectorLengthFast( cageGeometry->vertexPositions[i] ) > 1.0f + 1e-1f ){
+			cgNotice() << "radius:" << VectorLengthFast( cageGeometry->vertexPositions[i] );
+		}
+	}
 
     size_t sizeOfBaseHull = sizeof( SimulatedHullsSystem::BaseKeyframedHull ); // TODO: templates need to be removed
     size_t sizeOfMoveDirs = sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numCageVertices;
@@ -729,6 +735,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 }
 
 BoolConfigVar v_showVectorsToLim( wsw::StringView("showVectorsToLim"), { .byDefault = false, .flags = CVAR_ARCHIVE } );
+IntConfigVar v_numVecs( wsw::StringView("numVecs"), { .byDefault = 20, .flags = CVAR_ARCHIVE } );
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 											  float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets,
@@ -772,12 +779,15 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         //cgNotice() << "identifier" << m_loadedStaticCages[0].identifier;
         //cgNotice() << "num verts" << m_loadedStaticCages[0].cageGeometry.vertexPositions.size();
 
-        for( size_t i = 0; i < wsw::min(size_t(20), cageGeometry->vertexPositions.size()); i++ ) {
+        for( size_t i = 0; i < wsw::min( v_numVecs.get(), (int)cageGeometry->vertexPositions.size() ); i++ ) {
+			const float *dir = vertexPositions[i];
             vec3_t limitPoint;
-            VectorMA( origin, scale, vertexPositions[i], limitPoint );
+            VectorMA( origin, scale, dir, limitPoint );
 
             CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin,
                                 MASK_SOLID);
+
+			VectorMA( origin, scale * trace.fraction, dir, limitPoint );
 
             if ( v_showVectorsToLim.get()) {
                 effectsSystem->spawnTransientBeamEffect( origin, limitPoint, {
