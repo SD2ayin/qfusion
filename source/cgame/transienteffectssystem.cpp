@@ -468,7 +468,7 @@ static SimulatedHullsSystem::CloudMeshProps g_fireOuterCloudMeshProps {
 static SimulatedHullsSystem::AppearanceRules g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 static SimulatedHullsSystem::AppearanceRules g_fireOuterCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 
-void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, float radius ) {
+void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, const float *dir, float radius ) {
 	// 250 for radius of 64
 	// TODO: Make radius affect hulls
 	constexpr float lightRadiusScale = 1.0f / 64.0f;
@@ -560,11 +560,25 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 			SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
 			cgNotice() << "identifier" << cage->identifier;
 
-			hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-											&toonSmokeKeyframeSet, 1.0f,
-                                            cagedMesh,
-                                            &cg.polyEffectsSystem );
-			//hull->compoundMeshKey = compoundMeshKey;
+			/*hullsSystem->setupHullVertices( hull, smokeOrigin,
+                                            toonSmokeScale,cagedMesh,
+                                            &cg.polyEffectsSystem );*/
+
+            SimulatedHullsSystem::SolidAppearanceRules solidAppearanceRules = {
+                    .material = nullptr,
+            };
+
+            SimulatedHullsSystem::AppearanceRules appearanceRules = solidAppearanceRules;
+
+            SimulatedHullsSystem::StaticKeyframedHullParams hullParams = {
+                    .origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
+                    .dir      = { dir[0], dir[1], dir[2] },
+                    .rotation = m_rng.nextFloat( 0.0f, M_PI * 2.0f ),
+                    .timeout  = toonSmokeLifetime,
+                    .sharedCageCagedMeshes = cagedMesh,
+            };
+
+			hullsSystem->addHull( appearanceRules, hullParams );
 		}
 
 #if 0

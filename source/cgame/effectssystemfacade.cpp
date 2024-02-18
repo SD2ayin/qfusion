@@ -451,7 +451,7 @@ void EffectsSystemFacade::spawnExplosionEffect( const float *origin, const float
         cg.particleSystem.addMediumParticleFlock( appearanceRules, flockParams );
 	}
 
-	m_transientEffectsSystem.spawnExplosionHulls( fireOrigin, smokeOrigin );
+	m_transientEffectsSystem.spawnExplosionHulls( fireOrigin, smokeOrigin, dir );
 
 	spawnMultipleExplosionImpactEffects( solidImpacts );
 	spawnMultipleLiquidImpactEffects( waterImpacts, 1.0f, { 0.7f, 0.9f }, std::make_pair( 0u, 100u ) );

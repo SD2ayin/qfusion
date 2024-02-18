@@ -735,11 +735,12 @@ void SimulatedHullsSystem::setupHullVertices( BaseConcentricSimulatedHull *hull,
 }
 
 BoolConfigVar v_showVectorsToLim( wsw::StringView("showVectorsToLim"), { .byDefault = false, .flags = CVAR_ARCHIVE } );
+BoolConfigVar v_showTris( wsw::StringView("showTris"), { .byDefault = false, .flags = CVAR_ARCHIVE } );
 IntConfigVar v_numVecs( wsw::StringView("numVecs"), { .byDefault = 20, .flags = CVAR_ARCHIVE } );
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-											  float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets,
-											  const float maxOffset, SimulatedHullsSystem::StaticCagedMesh *meshToRender,
+											  const float scale, const float *dir, const float rotation,
+                                              SimulatedHullsSystem::StaticCagedMesh *meshToRender,
                                               PolyEffectsSystem *effectsSystem,
                                               const AppearanceRules &appearanceRules ) {
 	const float originX = origin[0], originY = origin[1], originZ = origin[2];
@@ -750,13 +751,24 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	cgNotice() << "set up hull vertices";
 	// Calculate move limits in each direction
 
-	const float radius = maxOffset * scale;
+	const float radius = scale;
 	const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
 	const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
 
 	// TODO: Add a fused call
 	CM_BuildShapeList( cl.cms, m_tmpShapeList, growthMins, growthMaxs, MASK_SOLID );
 	CM_ClipShapeList( cl.cms, m_tmpShapeList, m_tmpShapeList, growthMins, growthMaxs );
+
+    mat3_t transformMatrixForDir;
+    Matrix3_ForRotationOfDirs( &axis_identity[AXIS_UP], dir, transformMatrixForDir );
+
+    // MULTIPLY WITH ROTATION ANGLE
+    mat3_t transformMatrix;
+    Matrix3_Rotate( transformMatrixForDir, rotation, dir, transformMatrix );
+
+    for( unsigned matElem = 0; matElem < 3*3; matElem++ ){
+        transformMatrix[matElem] *= scale; // add the scaling to the transform
+    }
 
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
@@ -770,24 +782,26 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
         Geometry *cageGeometry = &cage->cageGeometry;
         vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
+        unsigned numVerts = cageGeometry->vertexPositions.size();
 
-        //cgNotice() << "size"<<  cageGeometry->vertexPositions.size();
+        auto *positionsStorage = new vec3_t[numVerts];
 
         cgNotice() << "identifier size" << cage->identifier.size();
         cgNotice() << "vertices size" << cage->cageGeometry.vertexPositions.size();
 
-        //cgNotice() << "identifier" << m_loadedStaticCages[0].identifier;
-        //cgNotice() << "num verts" << m_loadedStaticCages[0].cageGeometry.vertexPositions.size();
+        for( size_t i = 0; i < wsw::min( v_numVecs.get(), (int)numVerts ); i++ ) {
+			vec3_t vertDir;
+            Matrix3_TransformVector( transformMatrix, vertexPositions[i], vertDir );
 
-        for( size_t i = 0; i < wsw::min( v_numVecs.get(), (int)cageGeometry->vertexPositions.size() ); i++ ) {
-			const float *dir = vertexPositions[i];
             vec3_t limitPoint;
-            VectorMA( origin, scale, dir, limitPoint );
+            VectorAdd(origin, vertDir, limitPoint );
 
             CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin,
                                 MASK_SOLID);
 
-			VectorMA( origin, scale * trace.fraction, dir, limitPoint );
+			VectorMA( origin, trace.fraction, vertDir, limitPoint );
+
+            VectorCopy( limitPoint, positionsStorage[i] );
 
             if ( v_showVectorsToLim.get()) {
                 effectsSystem->spawnTransientBeamEffect( origin, limitPoint, {
@@ -800,6 +814,33 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
                         .width             = 8.0f,
                         .timeout           = 500u,
                 } );
+            }
+
+        }
+        vec3_t colorB { 0.1f, 0.4f, 0.99f };
+
+        for( size_t i = 0; i < wsw::min( (int) ( v_numVecs.get() / 3 ), (int)numVerts ); i++ ){
+            tri *tris = cageGeometry->triIndices.data();
+            unsigned numTris = cageGeometry->triIndices.size();
+
+            for( int triNum = 0; triNum < numTris; triNum++ ){
+                for( int idxNum = 0; idxNum < 3; idxNum++ ){
+                    unsigned firstIdx  = idxNum;
+                    unsigned secondIdx = ( idxNum + 1 ) % 3;
+                    float *firstPosition  = positionsStorage[tris[triNum][firstIdx]];
+                    float *secondPosition = positionsStorage[tris[triNum][secondIdx]];
+
+                    effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
+                            .material          = cgs.media.shaderLaser,
+                            .beamColorLifespan = {
+                                    .initial  = {colorB[0], colorB[1], colorB[2]},
+                                    .fadedIn  = {colorB[0], colorB[1], colorB[2]},
+                                    .fadedOut = {colorB[0], colorB[1], colorB[2]},
+                            },
+                            .width             = 8.0f,
+                            .timeout           = 500u,
+                    } );
+                }
             }
         }
         /*
@@ -849,7 +890,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
 		BaseKeyframedHull::Layer *layer    = &hull->layers[layerNum];
 		layer->drawOrderDesignator         = (float)( hull->numLayers - layerNum );
-		layer->offsetKeyframeSet           = offsetKeyframeSets[layerNum];
+		//layer->offsetKeyframeSet           = offsetKeyframeSets[layerNum];
 		vec4_t *const __restrict positions = layer->vertexPositions;
 
 		for( size_t i = 0; i < verticesSpan.size(); ++i ) {
@@ -865,12 +906,31 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	hull->appearanceRules = appearanceRules;
 }
 
-void SimulatedHullsSystem::addHull( AppearanceRules appearanceRules, StaticKeyframedHullParams hullParams ) {
+void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyframedHullParams &hullParams ) {
     //if( auto *const hull = hullsSystem->allocStaticCagedHull( m_lastTime, toonSmokeLifetime ) ) {
     //    hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
     //                                    &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
     //    hull->compoundMeshKey = compoundMeshKey;
     //}
+    if( auto *const hull = SimulatedHullsSystem::allocToonSmokeHull( m_lastTime, hullParams.timeout ) ) {
+        const vec3_t hullOrigin {
+                hullParams.origin[0] + hullParams.offset[0],
+                hullParams.origin[1] + hullParams.offset[1],
+                hullParams.origin[2] + hullParams.offset[2]
+        };
+
+        cgNotice() << "after alloc";
+
+        //SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
+        //SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
+        //cgNotice() << "identifier" << cage->identifier;
+        SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullParams.sharedCageCagedMeshes;
+        SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
+        cgNotice() << "identifier" << cage->identifier;
+
+        SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
+                                                 hullParams.rotation, cagedMesh,&cg.polyEffectsSystem );
+    }
 }
 
 void SimulatedHullsSystem::calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes ) {

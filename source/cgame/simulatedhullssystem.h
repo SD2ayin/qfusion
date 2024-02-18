@@ -165,12 +165,14 @@ public:
     };
 
     struct StaticKeyframedHullParams {
-        vec3_t origin;
-        vec3_t offset;
-        vec3_t dir;
-        float rotation;
-        float scale;
-        std::span<StaticCagedMesh> sharedCageCagedMeshes;
+        vec3_t origin { 0.0f, 0.0f, 0.0f };
+        vec3_t offset { 0.0f, 0.0f, 0.0f };
+        vec3_t dir { 0.0f, 0.0f, 1.0f };
+        float rotation { 0.0f };
+        float scale { 32.0f };
+        unsigned timeout { 400u };
+        StaticCagedMesh *sharedCageCagedMeshes { nullptr };
+        unsigned numCagedMeshes { 1u };
     };
 
     unsigned maxCagedHullsPerType = 64;
@@ -669,11 +671,11 @@ private:
 							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
 	void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
-							float scale, const std::span<const OffsetKeyframe> *offsetKeyframeSets, float maxOffset,
+							float scale, const float *dir, const float rotation,
                             SimulatedHullsSystem::StaticCagedMesh *meshToRender, PolyEffectsSystem *effectSystem,
-							const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
-    void addHull( AppearanceRules appearanceRules, StaticKeyframedHullParams hullParams );
+    void addHull( AppearanceRules &appearanceRules, StaticKeyframedHullParams &hullParams );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
