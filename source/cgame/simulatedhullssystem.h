@@ -570,9 +570,11 @@ private:
 
 		KeyframedHull( unsigned numVerts, void *addressOfMem ) {
 			unsigned offset = sizeof( BaseKeyframedHull );
-			auto storageOfCageVertexDirs = new( (uint8_t*)addressOfMem + offset )vec3_t[numVerts];
+			auto storageOfCageVertexDirs = new( (uint8_t*)addressOfMem + offset )vec4_t[numVerts];
+			this->vertexMoveDirections = storageOfCageVertexDirs;
 			offset += sizeof( vec3_t ) * numVerts;
 			auto storageOfCageVertexLims = new( (uint8_t*)addressOfMem + offset )float[numVerts];
+			this->limitsAtDirections = storageOfCageVertexLims;
 
             /// ... allocate stuff on heap with construct at
 		}
