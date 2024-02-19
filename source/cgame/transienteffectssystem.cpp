@@ -551,35 +551,27 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const float toonSmokeScale   = 38.0f * randomScaling;
 		const auto toonSmokeLifetime = (unsigned)( (float)toonSmokeKeyframes.kMinLifetime * randomScaling );
 		cgNotice() << "before alloc";
-		if( auto *const hull = hullsSystem->allocToonSmokeHull( m_lastTime, toonSmokeLifetime ) ) {
-            vec3_t color = { 0.1f, 0.4f, 0.99f };
-            //cg.effectsSystem.spawnGameDebugBeam( smokeOrigin, fireOrigin, color );
-			cgNotice() << "after alloc";
 
-            SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
-			SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
-			cgNotice() << "identifier" << cage->identifier;
+		SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
+		SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
+		cgNotice() << "identifier" << cage->identifier;
 
-			/*hullsSystem->setupHullVertices( hull, smokeOrigin,
-                                            toonSmokeScale,cagedMesh,
-                                            &cg.polyEffectsSystem );*/
+		SimulatedHullsSystem::SolidAppearanceRules solidAppearanceRules = {
+				.material = nullptr,
+		};
 
-            SimulatedHullsSystem::SolidAppearanceRules solidAppearanceRules = {
-                    .material = nullptr,
-            };
+		SimulatedHullsSystem::AppearanceRules appearanceRules = solidAppearanceRules;
 
-            SimulatedHullsSystem::AppearanceRules appearanceRules = solidAppearanceRules;
+		SimulatedHullsSystem::StaticKeyframedHullParams hullParams = {
+				.origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
+				.dir      = { dir[0], dir[1], dir[2] },
+				.rotation = m_rng.nextFloat( 0.0f, M_PI * 2.0f ),
+				.timeout  = toonSmokeLifetime,
+				.sharedCageCagedMeshes = cagedMesh,
+		};
 
-            SimulatedHullsSystem::StaticKeyframedHullParams hullParams = {
-                    .origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
-                    .dir      = { dir[0], dir[1], dir[2] },
-                    .rotation = m_rng.nextFloat( 0.0f, M_PI * 2.0f ),
-                    .timeout  = toonSmokeLifetime,
-                    .sharedCageCagedMeshes = cagedMesh,
-            };
+		hullsSystem->addHull( appearanceRules, hullParams );
 
-			hullsSystem->addHull( appearanceRules, hullParams );
-		}
 
 #if 0
 		g_smokeOuterLayerCloudMeshProps[0].material = cgs.media.shaderSmokeHullHardParticle;
