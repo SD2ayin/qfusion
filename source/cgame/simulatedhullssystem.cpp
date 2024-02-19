@@ -843,48 +843,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
                 }
             }
         }
-        /*
-		for( size_t i = 0; i < verticesSpan.size(); ++i ) {
-
-
-			// Vertices of the unit hull define directions
-			const float *dir = verticesSpan[i];
-
-			vec3_t limitPoint;
-			VectorMA( origin, radius, dir, limitPoint );
-
-			CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin, MASK_SOLID );
-			hull->limitsAtDirections[i] = trace.fraction * radius;
-		}
-        */
-/*
-        StaticCage *cage = meshToRender->cage;
-        Geometry *cageGeometry = &cage->cageGeometry;
-        vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
-        for( size_t i = 0; i < cageGeometry->vertexPositions.size(); i++ ) {
-            vec3_t limitPoint;
-            VectorMA( origin, scale, vertexPositions[i], limitPoint );
-
-            CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin, MASK_SOLID );
-            vec3_t color { 0.1f, 0.4f, 0.99f };
-
-            if( v_showVectorsToLim.get() ) {
-                effectsSystem->spawnTransientBeamEffect( origin, limitPoint, {
-                        .material          = cgs.media.shaderLaser,
-                        .beamColorLifespan = {
-                                .initial  = {color[0], color[1], color[2]},
-                                .fadedIn  = {color[0], color[1], color[2]},
-                                .fadedOut = {color[0], color[1], color[2]},
-                        },
-                        .width             = 8.0f,
-                        .timeout           = 500u,
-                } );
-            }
-
-
-        }*/
 	}
-
+/*
 	// Setup layers data
 	assert( hull->numLayers >= 1 && hull->numLayers <= kMaxHullLayers );
 	for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
@@ -898,7 +858,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 			positions[i][3] = 1.0f;
 		}
 	}
-
+*/
 	VectorCopy( origin, hull->origin );
 	hull->vertexMoveDirections = vertices;
 	hull->scale                = scale;
@@ -1060,7 +1020,7 @@ auto SimulatedHullsSystem::buildMatchingHullPairs( const BaseKeyframedHull **too
 		if( concentricHull->compoundMeshKey != 0 ) {
 			for( unsigned keyframedHullIndex = 0; keyframedHullIndex < numToonHulls; ++keyframedHullIndex ) {
 				const BaseKeyframedHull *keyframedHull = toonHulls[keyframedHullIndex];
-				if( concentricHull->compoundMeshKey == keyframedHull->compoundMeshKey ) {
+				if( concentricHull->compoundMeshKey == 0 ) {
 					( *pairIndicesForConcentricHulls )[concentricHullIndex] = (uint8_t)numMatchedPairs;
 					( *pairIndicesForKeyframedHulls )[keyframedHullIndex]   = (uint8_t)numMatchedPairs;
 					++numMatchedPairs;
@@ -1918,6 +1878,7 @@ void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTi
 }
 
 void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds ) {
+	/*
 	const float lifetimeFrac         = (float)( currTime - spawnTime ) * Q_Rcp( (float)lifetime );
 	// Just move all vertices along directions clipping by limits
 
@@ -1983,7 +1944,8 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
 	// TODO: Allow storing 4-component float vectors to memory directly
 	hullBoundsBuilder.storeTo( this->mins, this->maxs );
-	this->mins[3] = 0.0f, this->maxs[3] = 1.0f;
+	this->mins[3] = 0.0f, this->maxs[3] = 1.0f;*/
+	int num = 0;
 }
 
 auto SimulatedHullsSystem::computePrevKeyframeIndex( unsigned startFromIndex, int64_t currTime,

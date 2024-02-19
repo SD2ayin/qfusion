@@ -536,7 +536,6 @@ private:
 	};
 
 	struct BaseKeyframedHull {
-        StaticCagedMesh *sharedCageCagedMeshes[8];
 
 		float scale;
 		// Externally managed, should point to the unit mesh data
@@ -546,38 +545,18 @@ private:
 		float *limitsAtDirections;
 		int64_t spawnTime { 0 };
 
-		struct Layer {
-			// Externally managed, the keyframe data of the hull
-			//const OffsetKeyframe *offsetKeyframeSet;
-			std::span<const OffsetKeyframe> offsetKeyframeSet;
-			unsigned lastKeyframeNum;
-			float lerpFrac { 0.0f };
-			float drawOrderDesignator { 0.0f };
-
-			vec4_t mins, maxs;
-			vec4_t *vertexPositions;
-			byte_vec4_t *vertexColors;
-			SharedMeshData *sharedMeshData;
-			HullSolidDynamicMesh *submittedSolidMesh;
-			HullCloudDynamicMesh *submittedCloudMeshes[1];
-
-			// Subtracted from limitsAtDirections for this layer, must be non-negative.
-			// This offset is supposed to prevent hulls from ending at the same distance in the end position.
-			float finalOffset { 0 };
-
-			const AppearanceRules *overrideAppearanceRules;
-		};
+		///SharedCageData *sharedCageData;
 
 		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
 
-		Layer *layers { nullptr };
+		StaticCagedMesh *sharedCageCagedMeshes[16];
 
-		vec4_t mins, maxs;
+		vec4_t mins, maxs; // of the cage
 		vec3_t origin;
 
 		unsigned numLayers { 0 };
+		unsigned numSharedCageCagedMeshes { 0 };
 		unsigned lifetime { 0 };
-		unsigned compoundMeshKey { 0 };
 
 		uint8_t subdivLevel { 0 };
 		//bool applyVertexDynLight { false }; should be re-implemented, if useful
@@ -585,42 +564,16 @@ private:
 		void simulate( int64_t currTime, float timeDeltaSeconds );
 	};
 
-	template <unsigned SubdivLevel, unsigned NumLayers>
 	struct KeyframedHull : public BaseKeyframedHull {
-		static constexpr auto kNumVertices = kNumVerticesForSubdivLevel[SubdivLevel];
 
-		KeyframedHull<SubdivLevel, NumLayers> *prev { nullptr }, *next { nullptr };
+		KeyframedHull *prev { nullptr }, *next { nullptr };
 
-		Layer storageOfLayers[NumLayers];
-		float storageOfLimits[kNumVertices];
-		vec4_t storageOfPositions[kNumVertices * NumLayers];
-        vec4_t storageOfMoveDirections[kNumVertices];
+		KeyframedHull( unsigned numVerts, void *addressOfMem ) {
+			unsigned offset = sizeof( BaseKeyframedHull );
+			auto storageOfCageVertexDirs = new( (uint8_t*)addressOfMem + offset )vec3_t[numVerts];
+			offset += sizeof( vec3_t ) * numVerts;
+			auto storageOfCageVertexLims = new( (uint8_t*)addressOfMem + offset )float[numVerts];
 
-		byte_vec4_t storageOfColors[kNumVertices * NumLayers];
-		SharedMeshData storageOfSharedMeshData[NumLayers];
-		// TODO: Allocate dynamically on demand?
-		// TODO: Optimize the memory layout
-		HullSolidDynamicMesh storageOfSolidMeshes[NumLayers];
-		HullCloudDynamicMesh storageOfCloudMeshes[NumLayers];
-
-		KeyframedHull() {
-			this->numLayers                  = NumLayers;
-			this->subdivLevel                = SubdivLevel;
-			this->layers                     = &storageOfLayers[0];
-			this->limitsAtDirections         = &storageOfLimits[0];
-            this->vertexMoveDirections       = &storageOfMoveDirections[0];
-			for( unsigned i = 0; i < NumLayers; ++i ) {
-				Layer *const layer              = &layers[i];
-				layer->lastKeyframeNum          = 0;
-				layer->vertexPositions          = &storageOfPositions[i * kNumVertices];
-				layer->vertexColors             = &storageOfColors[i * kNumVertices];
-				layer->sharedMeshData           = &storageOfSharedMeshData[i];
-				layer->submittedSolidMesh       = &storageOfSolidMeshes[i];
-
-				// There is a single mesh per layer
-				assert( std::size( layer->submittedCloudMeshes ) == 1 );
-				layer->submittedCloudMeshes[0] = &storageOfCloudMeshes[i];
-			}
             /// ... allocate stuff on heap with construct at
 		}
 	};
@@ -633,7 +586,7 @@ private:
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
 	using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
-	using ToonSmokeHull   = KeyframedHull<4, kNumToonSmokeHullLayers>;
+	using ToonSmokeHull   = KeyframedHull;
 
 	void unlinkAndFreeFireHull( FireHull *hull );
 	void unlinkAndFreeFireClusterHull( FireClusterHull *hull );
