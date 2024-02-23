@@ -568,14 +568,15 @@ private:
 
 		KeyframedHull *prev { nullptr }, *next { nullptr };
 
-		KeyframedHull( unsigned numVerts, void *addressOfMem ) {
-			unsigned offset = sizeof( BaseKeyframedHull );
-			auto storageOfCageVertexDirs = new( (uint8_t*)addressOfMem + offset )vec4_t[numVerts];
-			this->vertexMoveDirections = storageOfCageVertexDirs;
-			offset += sizeof( vec3_t ) * numVerts;
-			auto storageOfCageVertexLims = new( (uint8_t*)addressOfMem + offset )float[numVerts];
-			this->limitsAtDirections = storageOfCageVertexLims;
-
+		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
+            if( addressOfMem ) {
+                unsigned offset = sizeof( BaseKeyframedHull );
+                auto storageOfCageVertexDirs = new((uint8_t *) addressOfMem + offset)vec4_t[numVerts];
+                this->vertexMoveDirections = storageOfCageVertexDirs;
+                offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
+                auto storageOfCageVertexLims = new((uint8_t *) addressOfMem + offset)float[numVerts];
+                this->limitsAtDirections = storageOfCageVertexLims;
+            }
             /// ... allocate stuff on heap with construct at
 		}
 	};

@@ -358,6 +358,7 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
     //unitizeGeometry( cageGeometry );
+    /// ^~~~enable and test
 
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
