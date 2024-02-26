@@ -139,7 +139,7 @@ public:
         Geometry cageGeometry;
         wsw::String identifier;
         wsw::HeapBasedFreelistAllocator *allocator;
-        // StaticCagedHull *head;
+        void *head;
     };
 
     wsw::Vector<StaticCage> m_loadedStaticCages;
@@ -579,6 +579,11 @@ private:
             }
             /// ... allocate stuff on heap with construct at
 		}
+
+        ~KeyframedHull() {
+            delete[] this->vertexMoveDirections;
+            delete[] this->limitsAtDirections;
+        }
 	};
 
 	static constexpr unsigned kNumFireHullLayers      = 5;
@@ -590,6 +595,8 @@ private:
 	using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
 	using ToonSmokeHull   = KeyframedHull;
+
+    void unlinkAndFreeStaticCageHull( KeyframedHull *hull );
 
 	void unlinkAndFreeFireHull( FireHull *hull );
 	void unlinkAndFreeFireClusterHull( FireClusterHull *hull );
@@ -604,6 +611,9 @@ private:
 
 	// TODO: Having these specialized methods while the actual setup is performed by the caller feels wrong...
 
+    [[nodiscard]]
+    auto allocStaticCageHull( KeyframedHull **head, wsw::FreelistAllocator *allocator, int64_t currTime, unsigned lifetime,
+                                                    unsigned numVertices ) -> KeyframedHull *;
 	[[nodiscard]]
 	auto allocFireHull( int64_t currTime, unsigned lifetime ) -> FireHull *;
 	[[nodiscard]]

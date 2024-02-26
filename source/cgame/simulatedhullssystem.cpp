@@ -357,7 +357,7 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
 
     Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
-    //unitizeGeometry( cageGeometry );
+    unitizeGeometry( cageGeometry );
     /// ^~~~enable and test
 
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
@@ -438,6 +438,15 @@ void SimulatedHullsSystem::clear() {
 	}
 }
 
+void SimulatedHullsSystem::unlinkAndFreeStaticCageHull( KeyframedHull *hull ) {
+    unsigned cageKey = hull->sharedCageCagedMeshes[0]->loadedCageKey;
+    StaticCage *cage = std::addressof( m_loadedStaticCages[cageKey] );
+    KeyframedHull *head = ( KeyframedHull * ) cage->head;
+    wsw::unlink( hull, &head );
+    hull->~KeyframedHull();
+    m_smokeHullsAllocator.free( hull );
+}
+
 void SimulatedHullsSystem::unlinkAndFreeSmokeHull( SmokeHull *hull ) {
 	wsw::unlink( hull, &m_smokeHullsHead );
 	m_freeShapeLists.push_back( hull->shapeList );
@@ -481,6 +490,37 @@ void SimulatedHullsSystem::unlinkAndFreeToonSmokeHull( ToonSmokeHull *hull ) {
     allocator = cage->allocator;
     allocator.free( hull );
      */
+}
+
+auto SimulatedHullsSystem::allocStaticCageHull( KeyframedHull **head, wsw::FreelistAllocator *allocator,
+                                                int64_t currTime, unsigned lifetime,
+                                                unsigned numVertices ) -> KeyframedHull * {
+    void *mem = allocator->allocOrNull();
+    CMShapeList *hullShapeList = nullptr;
+    if( mem ) [[likely]] {
+        hullShapeList = m_freeShapeLists.back();
+        m_freeShapeLists.pop_back();
+    } else {
+        KeyframedHull *oldestHull = nullptr;
+        int64_t oldestSpawnTime = std::numeric_limits<int64_t>::max();
+        for( KeyframedHull *hull = *head; hull; hull = hull->next ) {
+            if( oldestSpawnTime > hull->spawnTime ) {
+                oldestSpawnTime = hull->spawnTime;
+                oldestHull = hull;
+            }
+        }
+        assert( oldestHull );
+        wsw::unlink( oldestHull, head );
+        oldestHull->~KeyframedHull();
+        mem = oldestHull;
+    }
+
+    auto *const hull = new( mem )KeyframedHull( numVertices, ( void* )mem );
+    hull->spawnTime  = currTime;
+    hull->lifetime   = lifetime;
+
+    wsw::link( hull, head );
+    return hull;
 }
 
 auto SimulatedHullsSystem::allocFireHull( int64_t currTime, unsigned lifetime ) -> FireHull * {
@@ -873,7 +913,14 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
     //                                    &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
     //    hull->compoundMeshKey = compoundMeshKey;
     //}
-    if( auto *const hull = SimulatedHullsSystem::allocToonSmokeHull( m_lastTime, hullParams.timeout ) ) {
+    SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullParams.sharedCageCagedMeshes;
+    SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
+    unsigned numVertices = cage->cageGeometry.vertexPositions.size();
+    wsw::HeapBasedFreelistAllocator *allocator = cage->allocator;
+    KeyframedHull *head = (KeyframedHull *) cage->head;
+    cgNotice() << "identifier" << cage->identifier;
+
+    if( auto *const hull = SimulatedHullsSystem::allocStaticCageHull( &head, allocator, m_lastTime, hullParams.timeout, numVertices ) ){
         const vec3_t hullOrigin {
                 hullParams.origin[0] + hullParams.offset[0],
                 hullParams.origin[1] + hullParams.offset[1],
@@ -882,15 +929,8 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
 
         cgNotice() << "after alloc";
 
-        //SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
-        //SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
-        //cgNotice() << "identifier" << cage->identifier;
-        SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullParams.sharedCageCagedMeshes;
-        SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
-        cgNotice() << "identifier" << cage->identifier;
-
         SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
-                                                 hullParams.rotation, cagedMesh,&cg.polyEffectsSystem );
+                                                 hullParams.rotation, cagedMesh, &cg.polyEffectsSystem );
     }
 }
 
@@ -1093,19 +1133,19 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             ;
 		}
 	}
-    /*
-    for( int i = 0; i < loadedStaticCages.size(); i++ ) {
-        cage = &loadedStaticCages[i];
-        head = cage->head;
-        for( StaticCagedHull *hull = head, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
+
+    for( auto & m_loadedStaticCage : m_loadedStaticCages ) {
+        StaticCage *cage = std::addressof( m_loadedStaticCage );
+        auto *head = (KeyframedHull *) cage->head;
+        for( KeyframedHull *hull = head, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
             if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
-                activeCagedHulls.push_back( hull );
+                activeKeyframedHulls.push_back( hull);
             } else {
-                unlinkAndFreeHull( hull );
+                unlinkAndFreeStaticCageHull( hull );
             }
         }
     }
-     */
+
 
 	m_frameSharedOverrideColorsBuffer.clear();
 
