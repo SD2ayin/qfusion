@@ -539,7 +539,11 @@ private:
 
 		float scale;
 		// Externally managed, should point to the unit mesh data
-		const vec4_t *vertexMoveDirections;
+		vec3_t *vertexMoveDirections;
+
+        /// BGN TEMP!
+        unsigned numVerts;
+        /// END TEMP!
 
 		// Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
 		float *limitsAtDirections;
@@ -561,7 +565,8 @@ private:
 		uint8_t subdivLevel { 0 };
 		//bool applyVertexDynLight { false }; should be re-implemented, if useful
 
-		void simulate( int64_t currTime, float timeDeltaSeconds );
+		void simulate( int64_t currTime, float timeDeltaSeconds,
+                       PolyEffectsSystem *effectsSystem );
 	};
 
 	struct KeyframedHull : public BaseKeyframedHull {
@@ -571,7 +576,7 @@ private:
 		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
             if( addressOfMem ) {
                 unsigned offset = sizeof( BaseKeyframedHull );
-                auto storageOfCageVertexDirs = new((uint8_t *) addressOfMem + offset)vec4_t[numVerts];
+                auto storageOfCageVertexDirs = new((uint8_t *) addressOfMem + offset)vec3_t[numVerts];
                 this->vertexMoveDirections = storageOfCageVertexDirs;
                 offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
                 auto storageOfCageVertexLims = new((uint8_t *) addressOfMem + offset)float[numVerts];

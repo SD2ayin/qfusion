@@ -807,10 +807,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
     mat3_t transformMatrix;
     Matrix3_Rotate( transformMatrixForDir, rotation, dir, transformMatrix );
 
-    for( unsigned matElem = 0; matElem < 3*3; matElem++ ){
-        transformMatrix[matElem] *= scale; // add the scaling to the transform
-    }
-
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
 	if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
@@ -825,24 +821,26 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
         unsigned numVerts = cageGeometry->vertexPositions.size();
 
-        auto *positionsStorage = new vec3_t[numVerts];
+        hull->numVerts = numVerts;
+
+        vec3_t *moveDirections = hull->vertexMoveDirections;
+        float *limitsAtDirections = hull->limitsAtDirections;
 
         cgNotice() << "identifier size" << cage->identifier.size();
         cgNotice() << "vertices size" << cage->cageGeometry.vertexPositions.size();
 
         for( size_t i = 0; i < wsw::min( v_numVecs.get(), (int)numVerts ); i++ ) {
-			vec3_t vertDir;
-            Matrix3_TransformVector( transformMatrix, vertexPositions[i], vertDir );
+            Matrix3_TransformVector( transformMatrix, vertexPositions[i], moveDirections[i] );
 
             vec3_t limitPoint;
-            VectorAdd(origin, vertDir, limitPoint );
+            VectorMA( origin, scale, moveDirections[i], limitPoint );
 
             CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin,
                                 MASK_SOLID);
 
-			VectorMA( origin, trace.fraction, vertDir, limitPoint );
+            limitsAtDirections[i] = trace.fraction;
 
-            VectorCopy( limitPoint, positionsStorage[i] );
+			VectorMA( origin, scale * trace.fraction, moveDirections[i], limitPoint );
 
             if ( v_showVectorsToLim.get()) {
                 effectsSystem->spawnTransientBeamEffect( origin, limitPoint, {
@@ -868,8 +866,18 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
                 for( int idxNum = 0; idxNum < 3; idxNum++ ){
                     unsigned firstIdx  = idxNum;
                     unsigned secondIdx = ( idxNum + 1 ) % 3;
-                    float *firstPosition  = positionsStorage[tris[triNum][firstIdx]];
-                    float *secondPosition = positionsStorage[tris[triNum][secondIdx]];
+
+                    unsigned firstVertex  = tris[triNum][firstIdx];
+                    unsigned secondVertex = tris[triNum][secondIdx];
+
+                    vec3_t firstPosition;
+                    vec3_t secondPosition;
+
+                    VectorMA( origin, scale * limitsAtDirections[firstVertex], moveDirections[firstVertex], firstPosition );
+                    VectorMA( origin, scale * limitsAtDirections[secondVertex], moveDirections[secondVertex], secondPosition );
+
+                    //float *firstPosition  = positionsStorage[tris[triNum][firstIdx]];
+                    //float *secondPosition = positionsStorage[tris[triNum][secondIdx]];
 
                     effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
                             .material          = cgs.media.shaderLaser,
@@ -901,7 +909,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	}
 */
 	VectorCopy( origin, hull->origin );
-	hull->vertexMoveDirections = vertices;
+	//hull->vertexMoveDirections = vertices;
 	hull->scale                = scale;
 
 	hull->appearanceRules = appearanceRules;
@@ -926,6 +934,10 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
                 hullParams.origin[1] + hullParams.offset[1],
                 hullParams.origin[2] + hullParams.offset[2]
         };
+
+        if( head ){
+            cgNotice() << "head is not null";
+        }
 
         cgNotice() << "after alloc";
 
@@ -1137,10 +1149,17 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
     for( auto & m_loadedStaticCage : m_loadedStaticCages ) {
         StaticCage *cage = std::addressof( m_loadedStaticCage );
         auto *head = (KeyframedHull *) cage->head;
+        if( head ){
+            cgNotice() << "head is not null during simulate&submit";
+        }
         for( KeyframedHull *hull = head, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
+            cgNotice() << "found a hull";
             if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
+                cgNotice() << "simulating";
+                hull->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem );
                 activeKeyframedHulls.push_back( hull);
             } else {
+                cgNotice() << "unlinking";
                 unlinkAndFreeStaticCageHull( hull );
             }
         }
@@ -1918,75 +1937,29 @@ void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTi
 	}
 }
 
-void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds ) {
-	/*
-	const float lifetimeFrac         = (float)( currTime - spawnTime ) * Q_Rcp( (float)lifetime );
-	// Just move all vertices along directions clipping by limits
+void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds,
+                                                        PolyEffectsSystem *effectsSystem ) {
 
-	BoundsBuilder hullBoundsBuilder;
+    vec3_t *vertexPositions = vertexMoveDirections;
 
-	const float *__restrict growthOrigin = this->origin;
-	const unsigned numVertices = basicHullsHolder.getIcosphereForLevel( subdivLevel ).vertices.size();
+    vec3_t color { 0.1f, 0.99f, 0.4f };
+    unsigned currVec = cg.time % numVerts;
 
-	// Sanity check
-	assert( numLayers >= 1 && numLayers < kMaxHullLayers );
-	for( unsigned layerNum = 0; layerNum < numLayers; ++layerNum ) {
-		BoundsBuilder layerBoundsBuilder;
+    vec3_t endPoint;
 
-		BaseKeyframedHull::Layer *__restrict layer  = &layers[layerNum];
-		vec4_t *const __restrict positions          = layer->vertexPositions;
-		const auto offsetKeyframeSet                = layer->offsetKeyframeSet;
+    VectorMA( origin, scale * limitsAtDirections[currVec], vertexMoveDirections[currVec], endPoint );
 
-		layer->lastKeyframeNum  = computePrevKeyframeIndex( layer->lastKeyframeNum, currTime, spawnTime,
-															lifetime, offsetKeyframeSet );
+    effectsSystem->spawnTransientBeamEffect( origin, endPoint, {
+            .material          = cgs.media.shaderLaser,
+            .beamColorLifespan = {
+                    .initial  = {color[0], color[1], color[2]},
+                    .fadedIn  = {color[0], color[1], color[2]},
+                    .fadedOut = {color[0], color[1], color[2]},
+            },
+            .width             = 8.0f,
+            .timeout           = 100u,
+    } );
 
-		const OffsetKeyframe &__restrict currKeyframe = layer->offsetKeyframeSet[layer->lastKeyframeNum];
-		const OffsetKeyframe &__restrict nextKeyframe = layer->offsetKeyframeSet[layer->lastKeyframeNum + 1];
-
-		const float offsetInFrame        = lifetimeFrac - currKeyframe.lifetimeFraction;
-		const float frameLength          = nextKeyframe.lifetimeFraction - currKeyframe.lifetimeFraction;
-		assert( offsetInFrame >= 0.0f && offsetInFrame <= frameLength );
-		const float fracFromCurrKeyframe = wsw::clamp( offsetInFrame * Q_Rcp( frameLength ), 0.0f, 1.0f );
-		layer->lerpFrac                  = fracFromCurrKeyframe;
-
-		const float finalOffset = layer->finalOffset;
-		unsigned vertexNum      = 0;
-		do {
-			float offset = std::lerp( currKeyframe.offsets[vertexNum],
-									  nextKeyframe.offsets[vertexNum],
-									  fracFromCurrKeyframe );
-			offset *= scale;
-
-			float offsetFromLimit = std::lerp( currKeyframe.offsetsFromLimit[vertexNum],
-											   nextKeyframe.offsetsFromLimit[vertexNum],
-											   fracFromCurrKeyframe );
-			offsetFromLimit *= scale;
-
-			// Limit growth by the precomputed obstacle distance
-			const float limit = wsw::max( 0.0f, limitsAtDirections[vertexNum] - offsetFromLimit );
-			offset = wsw::min( offset - finalOffset, limit );
-
-			VectorMA( growthOrigin, offset, vertexMoveDirections[vertexNum], positions[vertexNum] );
-
-			// TODO: Allow supplying 4-component in-memory vectors directly
-			layerBoundsBuilder.addPoint( positions[vertexNum] );
-		} while( ++vertexNum < numVertices );
-
-		// TODO: Allow storing 4-component float vectors to memory directly
-		layerBoundsBuilder.storeTo( layer->mins, layer->maxs );
-		layer->mins[3] = 0.0f, layer->maxs[3] = 1.0f;
-
-		// Don't relying on what hull is external is more robust
-
-		// TODO: Allow adding other builder directly
-		hullBoundsBuilder.addPoint( layer->mins );
-		hullBoundsBuilder.addPoint( layer->maxs );
-	}
-
-	// TODO: Allow storing 4-component float vectors to memory directly
-	hullBoundsBuilder.storeTo( this->mins, this->maxs );
-	this->mins[3] = 0.0f, this->maxs[3] = 1.0f;*/
-	int num = 0;
 }
 
 auto SimulatedHullsSystem::computePrevKeyframeIndex( unsigned startFromIndex, int64_t currTime,
