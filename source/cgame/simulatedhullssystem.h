@@ -579,16 +579,11 @@ private:
 		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
             if( addressOfMem ) {
                 unsigned offset = sizeof( KeyframedHull );
-                this->vertexMoveDirections = new((uint8_t *) addressOfMem + offset)vec3_t[numVerts];
+                this->vertexMoveDirections = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );
                 offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
-                this->limitsAtDirections = new((uint8_t *) addressOfMem + offset)float[numVerts];
+                this->limitsAtDirections = ( float* )( ( uint8_t* )addressOfMem + offset );
             }
 		}
-
-        ~KeyframedHull() {
-            delete[] this->vertexMoveDirections;
-            delete[] this->limitsAtDirections;
-        }
 	};
 
 	static constexpr unsigned kNumFireHullLayers      = 5;
