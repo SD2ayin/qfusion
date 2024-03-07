@@ -358,7 +358,6 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
     unitizeGeometry( cageGeometry );
-    /// ^~~~enable and test
 
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
@@ -369,7 +368,7 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
 		}
 	}
 
-    size_t sizeOfBaseHull = sizeof( SimulatedHullsSystem::BaseKeyframedHull ); // TODO: templates need to be removed
+    size_t sizeOfBaseHull = sizeof( SimulatedHullsSystem::KeyframedHull );
     size_t sizeOfMoveDirs = sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numCageVertices;
     size_t sizeOfLimits = sizeof( *BaseKeyframedHull::limitsAtDirections ) * numCageVertices;
     size_t requiredSize = sizeOfBaseHull + sizeOfMoveDirs + sizeOfLimits;
@@ -429,10 +428,10 @@ void SimulatedHullsSystem::clear() {
 	}
 	for( SmokeHull *hull = m_smokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeSmokeHull( hull );
-	}
+	}/*
 	for( ToonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeToonSmokeHull( hull );
-	}
+	}*/
 	for( WaveHull *hull = m_waveHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeWaveHull( hull );
 	}
@@ -440,11 +439,13 @@ void SimulatedHullsSystem::clear() {
 
 void SimulatedHullsSystem::unlinkAndFreeStaticCageHull( KeyframedHull *hull ) {
     unsigned cageKey = hull->sharedCageCagedMeshes[0]->loadedCageKey;
-    StaticCage *cage = std::addressof( m_loadedStaticCages[cageKey] );
-    KeyframedHull *head = ( KeyframedHull * ) cage->head;
-    wsw::unlink( hull, &head );
+	cgNotice() << "cage key is:" << cageKey;
+	StaticCage *cage = std::addressof( m_loadedStaticCages[cageKey] );
+	cgNotice() << "unlinking:" << cage->identifier;
+
+    wsw::unlink( hull, &cage->head );
     hull->~KeyframedHull();
-    m_smokeHullsAllocator.free( hull );
+    cage->allocator->free( hull );
 }
 
 void SimulatedHullsSystem::unlinkAndFreeSmokeHull( SmokeHull *hull ) {
@@ -779,15 +780,17 @@ BoolConfigVar v_showVectorsToLim( wsw::StringView("showVectorsToLim"), { .byDefa
 BoolConfigVar v_showTris( wsw::StringView("showTris"), { .byDefault = false, .flags = CVAR_ARCHIVE } );
 IntConfigVar v_numVecs( wsw::StringView("numVecs"), { .byDefault = 20, .flags = CVAR_ARCHIVE } );
 
+IntConfigVar v_index( wsw::StringView("index"), { .byDefault = 20, .flags = CVAR_ARCHIVE } );
+
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 											  const float scale, const float *dir, const float rotation,
                                               SimulatedHullsSystem::StaticCagedMesh *meshToRender,
                                               PolyEffectsSystem *effectsSystem,
                                               const AppearanceRules &appearanceRules ) {
 	const float originX = origin[0], originY = origin[1], originZ = origin[2];
-	const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
+	//const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
 
-	const vec4_t *__restrict vertices = verticesSpan.data();
+	//const vec4_t *__restrict vertices = verticesSpan.data();
 
 	cgNotice() << "set up hull vertices";
 	// Calculate move limits in each direction
@@ -807,21 +810,21 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
     mat3_t transformMatrix;
     Matrix3_Rotate( transformMatrixForDir, rotation, dir, transformMatrix );
 
+	StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
+	Geometry *cageGeometry = &cage->cageGeometry;
+	vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
+	unsigned numVerts = cageGeometry->vertexPositions.size();
+
+	hull->numVerts = numVerts;
+
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
 	if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
 		// Limits at each direction just match the given radius in this case
-		std::fill( hull->limitsAtDirections, hull->limitsAtDirections + verticesSpan.size(), radius );
+		std::fill( hull->limitsAtDirections, hull->limitsAtDirections + numVerts, radius );
 		cgNotice() << "no shapes";
 	} else {
 		trace_t trace;
-
-        StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
-        Geometry *cageGeometry = &cage->cageGeometry;
-        vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
-        unsigned numVerts = cageGeometry->vertexPositions.size();
-
-        hull->numVerts = numVerts;
 
         vec3_t *moveDirections = hull->vertexMoveDirections;
         float *limitsAtDirections = hull->limitsAtDirections;
@@ -829,7 +832,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         cgNotice() << "identifier size" << cage->identifier.size();
         cgNotice() << "vertices size" << cage->cageGeometry.vertexPositions.size();
 
-        for( size_t i = 0; i < wsw::min( v_numVecs.get(), (int)numVerts ); i++ ) {
+        for( size_t i = 0; i < numVerts; i++ ) {
             Matrix3_TransformVector( transformMatrix, vertexPositions[i], moveDirections[i] );
 
             vec3_t limitPoint;
@@ -856,6 +859,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
             }
 
         }
+
         vec3_t colorB { 0.1f, 0.4f, 0.99f };
 
         for( size_t i = 0; i < wsw::min( (int) ( v_numVecs.get() / 3 ), (int)numVerts ); i++ ){
@@ -892,6 +896,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
                 }
             }
         }
+
+
 	}
 /*
 	// Setup layers data
@@ -925,25 +931,46 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
     SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
     unsigned numVertices = cage->cageGeometry.vertexPositions.size();
     wsw::HeapBasedFreelistAllocator *allocator = cage->allocator;
-    KeyframedHull *head = (KeyframedHull *) cage->head;
     cgNotice() << "identifier" << cage->identifier;
 
-    if( auto *const hull = SimulatedHullsSystem::allocStaticCageHull( &head, allocator, m_lastTime, hullParams.timeout, numVertices ) ){
+    if( auto *const hull = SimulatedHullsSystem::allocStaticCageHull( &cage->head, allocator, m_lastTime, hullParams.timeout, numVertices ) ){
         const vec3_t hullOrigin {
                 hullParams.origin[0] + hullParams.offset[0],
                 hullParams.origin[1] + hullParams.offset[1],
                 hullParams.origin[2] + hullParams.offset[2]
         };
 
-        if( head ){
+		hull->sharedCageCagedMeshes[0] = hullParams.sharedCageCagedMeshes;
+
+        if( cage->head ){
             cgNotice() << "head is not null";
         }
+		if( cage->head->next ){
+			cgNotice() << "next is not null";
+		}
+		if( cage->head->next ){
+			cgNotice() << "next is not null 2";
+		}
+		if( cage->head->prev ){
+			cgNotice() << "prev is not null";
+		}
 
         cgNotice() << "after alloc";
 
+		Com_Printf( "address of the hull is %p\n", hull );
+		Com_Printf( "the size of the base hull is %i, while the offset is %p\n", sizeof( BaseKeyframedHull ), (uint8_t *) hull->vertexMoveDirections - (uint8_t *) hull );
+		Com_Printf( "address of hull move directions is %p\n", hull->vertexMoveDirections );
+		Com_Printf( "the address of the ptr to next is %p\n", hull->next );
         SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
                                                  hullParams.rotation, cagedMesh, &cg.polyEffectsSystem );
+
+		if( cage->head->next ){
+			cgNotice() << "next is not null 3";
+		}
     }
+	if( cage->head->next ){
+		cgNotice() << "next is not null 4";
+	}
 }
 
 void SimulatedHullsSystem::calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes ) {
@@ -1134,7 +1161,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		} else {
 			unlinkAndFreeWaveHull( hull );
 		}
-	}
+	}/*
 	for( ToonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
 		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
 			//hull->simulate( currTime, timeDeltaSeconds );
@@ -1144,25 +1171,37 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			//unlinkAndFreeToonSmokeHull( hull );
             ;
 		}
-	}
+	}*/
 
     for( auto & m_loadedStaticCage : m_loadedStaticCages ) {
         StaticCage *cage = std::addressof( m_loadedStaticCage );
         auto *head = (KeyframedHull *) cage->head;
-        if( head ){
-            cgNotice() << "head is not null during simulate&submit";
-        }
+		/*KeyframedHull *hull = head;
+
+        if( cage->head ){
+            //cgNotice() << "head is not null during simulate&submit" << head->scale;
+			//cage->head->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem );
+			if( cage->head->next ){
+				//cage->head->origin[2] += 0.08f;
+				//cage->head->next->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem );;
+				//cgNotice() << "next found";
+			} else {
+				//cgNotice() << "next is null";
+			}
+        }*/
+
         for( KeyframedHull *hull = head, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
-            cgNotice() << "found a hull";
-            if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
-                cgNotice() << "simulating";
+            //cgNotice() << "found a hull";
+            if(  hull->spawnTime + hull->lifetime > currTime  ) [[likely]] {
+                //cgNotice() << "simulating";
                 hull->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem );
-                activeKeyframedHulls.push_back( hull);
+                activeKeyframedHulls.push_back( hull );
             } else {
                 cgNotice() << "unlinking";
                 unlinkAndFreeStaticCageHull( hull );
             }
         }
+
     }
 
 

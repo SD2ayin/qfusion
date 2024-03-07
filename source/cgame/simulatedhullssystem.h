@@ -135,11 +135,14 @@ public:
 
 	using ShadingLayer = std::variant<MaskedShadingLayer, DotShadingLayer, CombinedShadingLayer>;
 
+private: struct KeyframedHull;
+
+public:
     struct StaticCage {
         Geometry cageGeometry;
         wsw::String identifier;
         wsw::HeapBasedFreelistAllocator *allocator;
-        void *head;
+        KeyframedHull *head;
     };
 
     wsw::Vector<StaticCage> m_loadedStaticCages;
@@ -575,14 +578,11 @@ private:
 
 		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
             if( addressOfMem ) {
-                unsigned offset = sizeof( BaseKeyframedHull );
-                auto storageOfCageVertexDirs = new((uint8_t *) addressOfMem + offset)vec3_t[numVerts];
-                this->vertexMoveDirections = storageOfCageVertexDirs;
+                unsigned offset = sizeof( KeyframedHull );
+                this->vertexMoveDirections = new((uint8_t *) addressOfMem + offset)vec3_t[numVerts];
                 offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
-                auto storageOfCageVertexLims = new((uint8_t *) addressOfMem + offset)float[numVerts];
-                this->limitsAtDirections = storageOfCageVertexLims;
+                this->limitsAtDirections = new((uint8_t *) addressOfMem + offset)float[numVerts];
             }
-            /// ... allocate stuff on heap with construct at
 		}
 
         ~KeyframedHull() {
