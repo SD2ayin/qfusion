@@ -149,7 +149,7 @@ public:
 
     struct StaticCageCoordinate {
         unsigned cageTriIdx;
-        float coordsOnCageTri[3]; // barycentric coordinates
+        float coordsOnCageTri[2]; // barycentric coordinates
         float offset; // offset along direction
         /// ? float moveDir ? precompute the moveDir? -> this should be impossible ig
         float offsetFromLimit; // offset from boundaries like walls

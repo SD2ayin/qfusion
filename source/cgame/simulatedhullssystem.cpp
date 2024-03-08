@@ -409,6 +409,17 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
             RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ) );
 			cagedMesh->loadedCageKey = m_loadedStaticCages.size();
         }
+
+        //transform the mesh to the cage space:
+        // naive implementation:
+        // 1: find the closest vertex
+        // 2: find triangles containing closest vertex,
+        // store the index if: sum of distance to all three vertices is less than the previous sum
+        // 3: assign result to cageTriIdx
+        // 4: transform coords to barycentric coords
+        // naive approach
+
+        // better approach might be to calculate barycentric coords and discard a+b>1.
     }
 
     //cgNotice() << "test" << cagedMesh->cage->cageGeometry.vertexPositions.size();
