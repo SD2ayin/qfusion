@@ -1237,6 +1237,8 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 			const float outwardComponent = effectiveStrength * (1 - higherOrderTerm * higherOrderTerm * oneSixth );
 			VectorMA( inducedVelocity, outwardComponent, outwardBaseVector, inducedVelocity );
 
+			/// in principle it could be added instantly to the particle's velocity instead of using separate vector
+			/// induced velocity, if that is critical to performance.
 			VectorAdd( particle->artificialVelocity, inducedVelocity, particle->artificialVelocity );
 		}
 
