@@ -945,6 +945,12 @@ struct FlockOrientation {
 		VectorCopy( this->offset, params->offset );
 		VectorCopy( this->dir, params->stretchDir );
 	}
+
+	void copyToFlockParams( MeshFlockParams *params ) const {
+		VectorCopy( this->origin, params->origin );
+		VectorCopy( this->offset, params->offset );
+		VectorCopy( this->dir, params->dir );
+	}
 };
 
 void addRandomRotationToDir( float *dir, wsw::RandomGenerator *rng, float minConeAngleCosine, float maxConeAngleCosine );
