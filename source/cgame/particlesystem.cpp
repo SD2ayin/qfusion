@@ -1197,6 +1197,7 @@ void ParticleSystem::runStepKinematics( ParticleFlock *__restrict flock, float d
 		// Negative values lead to rotation in the opposite direction
 		if( flock->vorticityAngularSpeedRadians != 0.0f ) {
 			// it is important the axis is a unit vector
+			assert( ( 1.f - 1e-1f ) < VectorLengthFast( flock->vorticityAxis ) < ( 1.f + 1e-1f ) );
 
 			/*
 			to create a rotating motion around the axis, we express the coordinate of the particle into 3 new orthogonal
