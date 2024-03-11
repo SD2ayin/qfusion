@@ -343,8 +343,12 @@ SimulatedHullsSystem::~SimulatedHullsSystem() {
 
 void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
 
+unsigned GetNumFramesInMD3( const char *fileName );
+
 void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
+    cgNotice() << S_COLOR_RED << "does it happen between here:";
     m_loadedStaticCages.emplace_back();
+    cgNotice() << S_COLOR_RED  << "and here?";
     StaticCage *cage = std::addressof( m_loadedStaticCages.back() );
 
     cage->identifier = identifier;
@@ -376,6 +380,28 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
 }
 
+void transformToCageSpace( Geometry *cage, Geometry *toCage ){
+    unsigned numFaces = cage->triIndices.size();
+
+    for( unsigned faceNum = 0; faceNum < numFaces; faceNum++ ) {
+        const unsigned *faceIndices = cage->triIndices[faceNum];
+        vec3_t triCoords[3];
+        getTriCoords(faceIndices, cage, triCoords);
+        // calculate offsets of other vertices from the first one in the array
+        vec3_t vecToSecondVert;
+        vec3_t vecToThirdVert;
+        VectorSubtract(triCoords[1], triCoords[0], vecToSecondVert);
+        VectorSubtract(triCoords[2], triCoords[0], vecToThirdVert);
+
+        // solve the system of linear equations to express the vertex coordinates in terms of the vertex offsets inside the triangle
+        // ignoring the face normal component
+        // CHECK DOT OF FACE NORMAL AND VERTEX POS > 0 !
+
+        const float determinant = DotProduct( vecToSecondVert, vecToSecondVert ) * DotProduct( vecToThirdVert, vecToThirdVert )
+                - DotProduct( vecToSecondVert, vecToThirdVert ) * DotProduct( vecToSecondVert, vecToThirdVert );
+    }
+}
+
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
     auto *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
     auto filepath = wsw::StringView( name );
@@ -385,42 +411,68 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     if( !foundSuffix ) {
         cgNotice() << "static caged mesh " << wsw::StringView( name ) << "is incorrectly formatted";
         return nullptr;
-    } else {
-        unsigned suffixLength = filepath.length() - suffixIdx;
-        auto identifier = filepath.dropRight( suffixLength );
-
-		bool foundCage = false;
-		unsigned loadedCageNum = 0;
-        for( ; ++loadedCageNum < m_loadedStaticCages.size(); loadedCageNum++ ) {
-			StaticCage *loadedCage = std::addressof( m_loadedStaticCages[loadedCageNum] );
-            if( wsw::StringView( loadedCage->identifier.data(), loadedCage->identifier.size() ).equals( identifier ) ){
-                foundCage = true;
-                break;
-            }
-        }
-
-        if( foundCage ) {
-            //cagedMesh->cage = foundCage;
-			cagedMesh->loadedCageKey = loadedCageNum;
-
-			StaticCage *cage = std::addressof( m_loadedStaticCages[loadedCageNum] );
-            cgNotice() << "cage" << cage->identifier << "was already loaded";
-        } else {
-            RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ) );
-			cagedMesh->loadedCageKey = m_loadedStaticCages.size();
-        }
-
-        //transform the mesh to the cage space:
-        // naive implementation:
-        // 1: find the closest vertex
-        // 2: find triangles containing closest vertex,
-        // store the index if: sum of distance to all three vertices is less than the previous sum
-        // 3: assign result to cageTriIdx
-        // 4: transform coords to barycentric coords
-        // naive approach
-
-        // better approach might be to calculate barycentric coords and discard a+b>1.
     }
+
+	unsigned suffixLength = filepath.length() - suffixIdx;
+	auto identifier = filepath.dropRight( suffixLength );
+
+	bool foundCage = false;
+	unsigned loadedCageNum = 0;
+
+	for( ; loadedCageNum < m_loadedStaticCages.size(); loadedCageNum++ ) {
+		StaticCage *loadedCage = std::addressof( m_loadedStaticCages[loadedCageNum] );
+        cgNotice() << S_COLOR_BLUE << "loaded cage num:" << loadedCageNum << "of" << m_loadedStaticCages.size() << S_COLOR_WHITE;
+		if( wsw::StringView( loadedCage->identifier.data(), loadedCage->identifier.size() ).equals( identifier ) ){
+			foundCage = true;
+			break;
+		}
+	}
+
+	if( foundCage ) {
+		//cagedMesh->cage = foundCage;
+		cagedMesh->loadedCageKey = loadedCageNum;
+		StaticCage *cage = std::addressof( m_loadedStaticCages[loadedCageNum] );
+		cgNotice() << S_COLOR_GREEN << "cage" << cage->identifier << "was already loaded" << "for filepath:" << filepath << S_COLOR_WHITE;
+	} else {
+		RegisterStaticCage( wsw::String( identifier.data(), identifier.length() ) );
+		cagedMesh->loadedCageKey = m_loadedStaticCages.size() - 1; // -1 to convert to idx of the elem
+	}
+
+	//transform the mesh to the cage space:
+	// naive implementation:
+	// 1: find the closest vertex
+	// 2: find triangles containing closest vertex,
+	// store the index if: sum of distance to all three vertices is less than the previous sum
+	// 3: assign result to cageTriIdx
+	// 4: transform coords to barycentric coords
+	// naive approach
+
+	// better approach might be to calculate barycentric coords and discard a+b>1.
+
+    StaticCage *cage = std::addressof( m_loadedStaticCages[cagedMesh->loadedCageKey] );
+
+	unsigned numFrames = GetNumFramesInMD3( filepath.data() );
+	cgNotice() << "number of frames in caged mesh:" << numFrames;
+	cagedMesh->numFrames = numFrames;
+
+    Geometry geometry;
+    GetGeometryFromFileAliasMD3( filepath.data(), &geometry, nullptr, 0 );
+    unsigned numVerts = geometry.vertexPositions.size();
+
+    cagedMesh->numVertices = numVerts;
+    cagedMesh->triIndices  = geometry.triIndices;
+
+    delete[] geometry.vertexPositions.data();
+
+	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
+		Geometry tmp;
+        GetGeometryFromFileAliasMD3( filepath.data(), &tmp, nullptr, frameNum );
+
+        transformToCageSpace( &cage->cageGeometry, &tmp );
+
+        delete[] tmp.vertexPositions.data();
+        delete[] tmp.triIndices.data();
+	}
 
     //cgNotice() << "test" << cagedMesh->cage->cageGeometry.vertexPositions.size();
 
@@ -791,8 +843,6 @@ BoolConfigVar v_showVectorsToLim( wsw::StringView("showVectorsToLim"), { .byDefa
 BoolConfigVar v_showTris( wsw::StringView("showTris"), { .byDefault = false, .flags = CVAR_ARCHIVE } );
 IntConfigVar v_numVecs( wsw::StringView("numVecs"), { .byDefault = 20, .flags = CVAR_ARCHIVE } );
 
-IntConfigVar v_index( wsw::StringView("index"), { .byDefault = 20, .flags = CVAR_ARCHIVE } );
-
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 											  const float scale, const float *dir, const float rotation,
                                               SimulatedHullsSystem::StaticCagedMesh *meshToRender,
@@ -873,40 +923,35 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
         vec3_t colorB { 0.1f, 0.4f, 0.99f };
 
-        for( size_t i = 0; i < wsw::min( (int) ( v_numVecs.get() / 3 ), (int)numVerts ); i++ ){
-            tri *tris = cageGeometry->triIndices.data();
-            unsigned numTris = cageGeometry->triIndices.size();
+		tri *tris = cageGeometry->triIndices.data();
+		unsigned numTris = cageGeometry->triIndices.size();
 
-            for( int triNum = 0; triNum < numTris; triNum++ ){
-                for( int idxNum = 0; idxNum < 3; idxNum++ ){
-                    unsigned firstIdx  = idxNum;
-                    unsigned secondIdx = ( idxNum + 1 ) % 3;
+		for( int triNum = 0; triNum < numTris; triNum++ ){
+			for( int idxNum = 0; idxNum < 3; idxNum++ ){
+				unsigned firstIdx  = idxNum;
+				unsigned secondIdx = ( idxNum + 1 ) % 3;
 
-                    unsigned firstVertex  = tris[triNum][firstIdx];
-                    unsigned secondVertex = tris[triNum][secondIdx];
+				unsigned firstVertex  = tris[triNum][firstIdx];
+				unsigned secondVertex = tris[triNum][secondIdx];
 
-                    vec3_t firstPosition;
-                    vec3_t secondPosition;
+				vec3_t firstPosition;
+				vec3_t secondPosition;
 
-                    VectorMA( origin, scale * limitsAtDirections[firstVertex], moveDirections[firstVertex], firstPosition );
-                    VectorMA( origin, scale * limitsAtDirections[secondVertex], moveDirections[secondVertex], secondPosition );
+				VectorMA( origin, scale * limitsAtDirections[firstVertex], moveDirections[firstVertex], firstPosition );
+				VectorMA( origin, scale * limitsAtDirections[secondVertex], moveDirections[secondVertex], secondPosition );
 
-                    //float *firstPosition  = positionsStorage[tris[triNum][firstIdx]];
-                    //float *secondPosition = positionsStorage[tris[triNum][secondIdx]];
-
-                    effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
-                            .material          = cgs.media.shaderLaser,
-                            .beamColorLifespan = {
-                                    .initial  = {colorB[0], colorB[1], colorB[2]},
-                                    .fadedIn  = {colorB[0], colorB[1], colorB[2]},
-                                    .fadedOut = {colorB[0], colorB[1], colorB[2]},
-                            },
-                            .width             = 8.0f,
-                            .timeout           = 500u,
-                    } );
-                }
-            }
-        }
+				effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
+						.material          = cgs.media.shaderLaser,
+						.beamColorLifespan = {
+								.initial  = {colorB[0], colorB[1], colorB[2]},
+								.fadedIn  = {colorB[0], colorB[1], colorB[2]},
+								.fadedOut = {colorB[0], colorB[1], colorB[2]},
+						},
+						.width             = 8.0f,
+						.timeout           = 500u,
+				} );
+			}
+		}
 
 
 	}
@@ -953,35 +998,11 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
 
 		hull->sharedCageCagedMeshes[0] = hullParams.sharedCageCagedMeshes;
 
-        if( cage->head ){
-            cgNotice() << "head is not null";
-        }
-		if( cage->head->next ){
-			cgNotice() << "next is not null";
-		}
-		if( cage->head->next ){
-			cgNotice() << "next is not null 2";
-		}
-		if( cage->head->prev ){
-			cgNotice() << "prev is not null";
-		}
-
-        cgNotice() << "after alloc";
-
-		Com_Printf( "address of the hull is %p\n", hull );
-		Com_Printf( "the size of the base hull is %i, while the offset is %p\n", sizeof( BaseKeyframedHull ), (uint8_t *) hull->vertexMoveDirections - (uint8_t *) hull );
-		Com_Printf( "address of hull move directions is %p\n", hull->vertexMoveDirections );
-		Com_Printf( "the address of the ptr to next is %p\n", hull->next );
         SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
                                                  hullParams.rotation, cagedMesh, &cg.polyEffectsSystem );
 
-		if( cage->head->next ){
-			cgNotice() << "next is not null 3";
-		}
     }
-	if( cage->head->next ){
-		cgNotice() << "next is not null 4";
-	}
+
 }
 
 void SimulatedHullsSystem::calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes ) {
@@ -2007,7 +2028,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
                     .fadedOut = {color[0], color[1], color[2]},
             },
             .width             = 8.0f,
-            .timeout           = 100u,
+            .timeout           = 10u,
     } );
 
 }

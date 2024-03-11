@@ -554,7 +554,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 
 		SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
 		SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
-		cgNotice() << "identifier" << cage->identifier;
+		cgNotice() << S_COLOR_ORANGE << "identifier" << cage->identifier;
 
 		SimulatedHullsSystem::SolidAppearanceRules solidAppearanceRules = {
 				.material = nullptr,

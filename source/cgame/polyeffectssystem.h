@@ -384,7 +384,8 @@ private:
 
 	wsw::HeapBasedFreelistAllocator m_straightLaserBeamsAllocator { sizeof( StraightBeamEffect ), MAX_CLIENTS * 4 };
 	wsw::HeapBasedFreelistAllocator m_curvedLaserBeamsAllocator { sizeof( CurvedBeamEffect ), MAX_CLIENTS * 4 };
-	wsw::HeapBasedFreelistAllocator m_transientBeamsAllocator { sizeof( TransientBeamEffect ), MAX_CLIENTS * 2 };
+	//wsw::HeapBasedFreelistAllocator m_transientBeamsAllocator { sizeof( TransientBeamEffect ), MAX_CLIENTS * 2 };
+	wsw::HeapBasedFreelistAllocator m_transientBeamsAllocator { sizeof( TransientBeamEffect ), 7000 };
     wsw::HeapBasedFreelistAllocator m_tracerEffectsAllocator { sizeof( TracerEffect ), MAX_CLIENTS * 4 };
     wsw::HeapBasedFreelistAllocator m_impactRosetteEffectsAllocator { sizeof( ImpactRosetteEffect ), 64 };
 	wsw::HeapBasedFreelistAllocator m_ribbonEffectsAllocator { sizeof( RibbonEffect ), 32 };

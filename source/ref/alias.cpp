@@ -423,6 +423,33 @@ void Mod_LoadAliasMD3Model( model_t *mod, model_t *parent, void *buffer, bspForm
 	}
 }
 
+unsigned GetNumFramesInMD3( const char *fileName ) {
+	unsigned *fileBuffer;
+	(void)R_LoadFile( fileName, (void **)&fileBuffer );
+	auto fileNameAsView = wsw::StringView( fileName );
+	if( !fileBuffer ) {
+		cgError() << "WARNING" << fileNameAsView << "not found";
+		return 0;
+	}
+
+	const dmd3header_t *pInModel = ( dmd3header_t * )fileBuffer;
+	const int version        = LittleLong( pInModel->version );
+	const unsigned numFrames = LittleLong( pInModel->num_frames );
+
+	if( version != MD3_ALIAS_VERSION ) {
+		cgError() << fileNameAsView << "has wrong version number" << version << "should be" << MD3_ALIAS_VERSION;
+		return 0;
+	}
+	if( numFrames <= 0 ) {
+		cgError() << fileNameAsView << "has no frames";
+		return 0;
+	}
+
+	R_FreeFile( fileBuffer );
+
+	return numFrames;
+}
+
 void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 ) {
     unsigned *fileBuffer;
     (void)R_LoadFile( fileName, (void **)&fileBuffer );
@@ -505,7 +532,7 @@ void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
 
         pInMesh = ( dmd3mesh_t * )( ( uint8_t * )pInMesh + LittleLong( inMesh.meshsize ) );
     }
-    R_FreeFile(fileBuffer );
+    R_FreeFile( fileBuffer );
 }
 
 Geometry GetGeometryFromLoadedAliasMD3( model_t *model, const char *meshName ){
