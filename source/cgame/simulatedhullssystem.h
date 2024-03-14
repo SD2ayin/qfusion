@@ -152,11 +152,10 @@ public:
         float coordsOnCageTri[2]; // barycentric coordinates
         float offset; // offset along direction
         /// ? float moveDir ? precompute the moveDir? -> this should be impossible ig
-        float offsetFromLimit; // offset from boundaries like walls
+        //float offsetFromLimit; // offset from boundaries like walls
     };
 
     struct StaticCagedMesh {
-        //StaticCage *cage;
 		unsigned loadedCageKey;
         StaticCageCoordinate *vertexCoordinates;
         unsigned numVertices;
@@ -569,7 +568,7 @@ private:
 		//bool applyVertexDynLight { false }; should be re-implemented, if useful
 
 		void simulate( int64_t currTime, float timeDeltaSeconds,
-                       PolyEffectsSystem *effectsSystem );
+                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry ); /// GEOMETRY IS TMP
 	};
 
 	struct KeyframedHull : public BaseKeyframedHull {
