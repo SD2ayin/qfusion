@@ -74,7 +74,8 @@ if (NOT GAME_MODULES_ONLY)
         set_source_files_properties("../common/cm_trace_avx.cpp" PROPERTIES COMPILE_FLAGS "-mavx")
     endif()
 
-    add_library(execommon ${EXECOMMON_SOURCES} ${EXECOMMON_HEADERS})
+    add_library(execommon ${EXECOMMON_SOURCES} ${EXECOMMON_HEADERS}
+            geometry.cpp)
     target_link_libraries(execommon PUBLIC wswcommon)
     target_link_libraries(execommon PRIVATE ${CURL_LIBRARY} ${ZLIB_LIBRARY})
     qf_set_output_dir(execommon "")
