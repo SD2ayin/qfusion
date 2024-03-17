@@ -361,7 +361,7 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
 
     Geometry *cageGeometry = &cage->cageGeometry;
     GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
-    unitizeGeometry( cageGeometry );
+    //unitizeGeometry( cageGeometry );
 
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
@@ -395,6 +395,8 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 		vec3_t vertPosition;
 		VectorCopy( vertexPositions[vertNum], vertPosition );
 		bool foundCoords = false;
+		float largestDotProduct = -1.0f;
+		unsigned triIdx;
 		for ( unsigned faceNum = 0; faceNum < cageFaces; faceNum++ ) {
 			const unsigned *faceIndices = cage->triIndices[faceNum];
 			vec3_t triCoords[3];
@@ -405,15 +407,41 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 			VectorSubtract( triCoords[1], triCoords[0], first );
 			VectorSubtract( triCoords[2], triCoords[0], second );
 
+            if( vertNum == ( meshVerts - 1 ) ){
+                //cgNotice() << "curr face:" << faceNum;
+            }
+
 			// only vertices that move in the direction of the face can be bound by that face
+
 			vec3_t faceNormal;
 			CrossProduct( first, second, faceNormal );
 			if( DotProduct( faceNormal, vertPosition ) <= 0.f ){
 				continue;
 			}
 
-			// solve the system of linear equations to express the vertex coordinates in terms of the vertex offsets inside the triangle
+            /*
+            if( VectorLengthFast(faceNormal) > 0.001f && VectorLengthFast(vertPosition) > 0.001f ){
+                VectorNormalizeFast( faceNormal );
+                const float dotProduct = DotProduct(faceNormal, vertPosition);
+                if (dotProduct > largestDotProduct) {
+                    largestDotProduct = dotProduct;
+                    SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
+                    triIdx = faceNum;
+                    cageCoord->cageTriIdx = triIdx;
+                    //cageCoord->coordsOnCageTri[0] = 0.25f;
+                    //cageCoord->coordsOnCageTri[1] = 0.25f;
+                    //cageCoord->offset = VectorLengthFast(vertPosition);
+                    /// tmp
+                    cageCoord->coordsOnCageTri[0] = vertPosition[0];
+                    cageCoord->coordsOnCageTri[1] = vertPosition[1];
+                    cageCoord->offset = vertPosition[2];
+                    /// end tmp
+                    numFoundVertices += 1;
+                }
+            }*/
 
+			// solve the system of linear equations to express the vertex coordinates in terms of the vertex offsets inside the triangle
+///
 			mat3_t coefficientsMatrix;
 			VectorCopy( vertPosition, &coefficientsMatrix[0] );
 			VectorCopy( first, &coefficientsMatrix[3] );
@@ -428,36 +456,30 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 				cageCoord->cageTriIdx = faceNum;
 				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
 				cageCoord->offset = VectorLengthFast( vertPosition );
-				cgNotice() << cageCoord->offset;
+				//cgNotice() << cageCoord->offset;
+				//cgNotice() << "tri index" << cageCoord->cageTriIdx;
+
+                if( DotProduct( vertPosition, faceNormal ) <= 0.0f ){
+                    cgNotice() << S_COLOR_RED << "amk";
+                }
+
 				numFoundVertices += 1;
 				foundCoords = true;
 			}
 			averageCoords[0] += std::fabs( coordinates[0] );
 			averageCoords[1] += std::fabs( coordinates[1] );
-
-			/*
-			const float firstDotSecond  = DotProduct( second, first );
-			const float firstDotFirst   = DotProduct( first, first );
-			const float secondDotSecond = DotProduct( second, second );
-			const float firstDotDir     = DotProduct( first, vertPosition );
-			const float secondDotDir    = DotProduct( second, vertPosition );
-
-			const float determinant = firstDotFirst * secondDotSecond - firstDotSecond * firstDotSecond;
-
-			const float firstCoefficient = secondDotSecond * firstDotDir - firstDotSecond * secondDotDir;
-			const float secondCoefficient = firstDotFirst * secondDotDir - firstDotSecond * firstDotDir;
-			 */
-
-			// check if the
+///
 
 			numLoops += 1;
 
-			if( foundCoords ){
-				break;
-			}
+			//if( foundCoords ){
+			//	break;
+			//}
 		}
+		//cgNotice() << "tri index" << triIdx;
+        //cgNotice() << "largest dot:" << largestDotProduct;
 		if( !foundCoords ){
-			cgNotice() << S_COLOR_RED << "no coords found for" << vertNum;
+			//cgNotice() << S_COLOR_RED << "no coords found for" << vertNum;
 		}
 
 		numVerts += 1;
@@ -541,7 +563,7 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 	const auto before = Sys_Milliseconds();
 	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
 		Geometry tmp;
-		unitizeGeometry( &tmp );
+		//unitizeGeometry( &tmp );
         GetGeometryFromFileAliasMD3( filepath.data(), &tmp, nullptr, frameNum );
 
         transformToCageSpace( &cage->cageGeometry, &tmp, &cagedMesh->vertexCoordinates[ frameNum * numVerts ] );
@@ -2077,17 +2099,19 @@ void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTi
 }
 
 BoolConfigVar v_showMeshToRender( wsw::StringView("showMeshToRender"), { .byDefault = 1, .flags = CVAR_ARCHIVE });
+IntConfigVar v_frameToShow( wsw::StringView("frameToShow"), { .byDefault = 1, .flags = CVAR_ARCHIVE });
 
 void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float timeDeltaSeconds,
                                                         PolyEffectsSystem *effectsSystem, Geometry *cageGeometry  ) { /// GEOMETRY IS TMP
 
-    vec3_t *vertexPositions = vertexMoveDirections;
+    // vertexPositions was vertexMoveDirs
 
-	const float lifetimeFrac = (float)( spawnTime + lifetime ) / (float)lifetime;
+	const float lifetimeFrac = (float)( currTime - spawnTime ) / (float)lifetime;
 	StaticCagedMesh *meshToRender = sharedCageCagedMeshes[0];
 	unsigned cageKey = meshToRender->loadedCageKey;
 	unsigned numVerts = meshToRender->numVertices;
 	unsigned numFrames = meshToRender->numFrames;
+    unsigned numTris = meshToRender->triIndices.size();
 	StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
 
     vec3_t color { 0.1f, 0.99f, 0.4f };
@@ -2111,51 +2135,92 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 	}
 
 	tri *triIndices = cageGeometry->triIndices.data();
+    //tri *triIndices = meshToRender->triIndices.data();
 	unsigned numCageTris = cageGeometry->triIndices.size();
 
-	unsigned currFrame = ( int ) ( (float)numFrames * lifetimeFrac );
+    unsigned currFrame;
+    if( v_frameToShow.get() < 0 ){
+        currFrame = wsw::min( (unsigned) ((float) numFrames * lifetimeFrac), numFrames - 1 );
+    } else {
+        currFrame = v_frameToShow.get();
+    }
 
 	if( v_showMeshToRender.get() ){
-		unsigned startVertIdx = numFrames*0.8f; // currFrame * numVerts;
-		for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
-			unsigned vertIdx = startVertIdx + vertNum;
-			unsigned triIdx  = vertCoords[vertIdx].cageTriIdx;
 
-			/*//
-			if( cg.time % 20 ==  1 ){
-				for ( int idxNum = 0; idxNum < 3; idxNum++ ) {
-					unsigned firstIdx = idxNum;
-					unsigned secondIdx = (idxNum + 1) % 3;
+		unsigned startVertIdx = currFrame * numVerts; // currFrame * numVerts;
 
-					unsigned firstVertex = triIndices[triIdx][firstIdx];
-					unsigned secondVertex = triIndices[triIdx][secondIdx];
+        for( unsigned triNum = 0; triNum < numTris; triNum++ ) {
+            for ( int idxNum = 0; idxNum < 3; idxNum++ ) {
+                unsigned firstIdx = idxNum;
+                unsigned secondIdx = (idxNum + 1) % 3;
 
-					vec3_t firstPosition;
-					vec3_t secondPosition;
+                unsigned firstVertex = triIndices[triNum][firstIdx] + startVertIdx;
+                unsigned secondVertex = triIndices[triNum][secondIdx] + startVertIdx;
 
-					VectorMA( origin, scale * limitsAtDirections[firstVertex], vertexMoveDirections[firstVertex],
-							  firstPosition );
-					VectorMA( origin, scale * limitsAtDirections[secondVertex], vertexMoveDirections[secondVertex],
-							  secondPosition );
+                vec3_t firstPosition = { vertCoords[firstVertex].coordsOnCageTri[0], vertCoords[firstVertex].coordsOnCageTri[1], vertCoords[firstVertex].offset };
+                vec3_t secondPosition = { vertCoords[secondVertex].coordsOnCageTri[0], vertCoords[secondVertex].coordsOnCageTri[1], vertCoords[secondVertex].offset };
 
-					vec3_t colorB{1.0f, 0.2f, 0.2f};
+                //VectorMA( origin, scale, vertexMoveDirections[firstVertex],
+                //          firstPosition );
+                //VectorMA( origin, scale, vertexMoveDirections[secondVertex],
+                //          secondPosition );
+                VectorMA( origin, scale, firstPosition, firstPosition );
+                VectorMA( origin, scale, secondPosition, secondPosition );
 
-					if ( v_triIdx.get() < 0 || triIdx == v_triIdx.get()) {
-						effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
-								.material          = cgs.media.shaderLaser,
-								.beamColorLifespan = {
-										.initial  = {colorB[0], colorB[1], colorB[2]},
-										.fadedIn  = {colorB[0], colorB[1], colorB[2]},
-										.fadedOut = {colorB[0], colorB[1], colorB[2]},
-								},
-								.width             = 8.0f,
-								.timeout           = 50u,
-						} );
-					}
-				}
-			}
-			//*/
+                vec3_t colorB{1.0f, 0.2f, 0.2f};
 
+                effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
+                        .material          = cgs.media.shaderLaser,
+                        .beamColorLifespan = {
+                                .initial  = {colorB[0], colorB[1], colorB[2]},
+                                .fadedIn  = {colorB[0], colorB[1], colorB[2]},
+                                .fadedOut = {colorB[0], colorB[1], colorB[2]},
+                        },
+                        .width             = 3.0f,
+                        .timeout           = 10u,
+                } );
+            }
+            cgNotice() << numTris << scale;
+        }
+
+		for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
+            unsigned vertIdx = startVertIdx + vertNum;
+            unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
+
+            /* //
+            if ( ( v_triIdx.get() < 0 && ( (vertNum + cg.time) % 20 == 1 ) ) || triIdx == v_triIdx.get()) {
+                for (int idxNum = 0; idxNum < 3; idxNum++) {
+                    unsigned firstIdx = idxNum;
+                    unsigned secondIdx = (idxNum + 1) % 3;
+
+                    unsigned firstVertex = triIndices[triIdx][firstIdx];
+                    unsigned secondVertex = triIndices[triIdx][secondIdx];
+
+                    vec3_t firstPosition;
+                    vec3_t secondPosition;
+
+                    VectorMA(origin, scale * limitsAtDirections[firstVertex], vertexMoveDirections[firstVertex],
+                             firstPosition);
+                    VectorMA(origin, scale * limitsAtDirections[secondVertex], vertexMoveDirections[secondVertex],
+                             secondPosition);
+
+                    vec3_t colorB{1.0f, 0.2f, 0.2f};
+
+
+                    effectsSystem->spawnTransientBeamEffect(firstPosition, secondPosition, {
+                            .material          = cgs.media.shaderLaser,
+                            .beamColorLifespan = {
+                                    .initial  = {colorB[0], colorB[1], colorB[2]},
+                                    .fadedIn  = {colorB[0], colorB[1], colorB[2]},
+                                    .fadedOut = {colorB[0], colorB[1], colorB[2]},
+                            },
+                            .width             = 8.0f,
+                            .timeout           = 50u,
+                    });
+                }
+            }
+            */ //
+///
 			vec2_t coords    = { vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1] };
 
 			vec3_t vertPos;
@@ -2181,7 +2246,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 			const float offset = wsw::min( vertCoords[vertIdx].offset, limit ) * scale;
 
 			VectorMA( origin, offset, moveDir, vertPos );
-			/*
+
 			effectsSystem->spawnTransientBeamEffect( origin, vertPos, {
 					.material          = cgs.media.shaderLaser,
 					.beamColorLifespan = {
@@ -2191,13 +2256,13 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 					},
 					.width             = 8.0f,
 					.timeout           = 10u,
-			} );*/
+			} );
 			//cgNotice() << "offset:" << offset << " limit:" << limit;
 			//cgNotice() << "tri idx" << triIdx;
 		}
-		//cgNotice() << "start index" << startVertIdx;
+        ///
+            //cgNotice() << "start index" << startVertIdx;
 	}
-
 }
 
 auto SimulatedHullsSystem::computePrevKeyframeIndex( unsigned startFromIndex, int64_t currTime,

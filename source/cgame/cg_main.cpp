@@ -1139,6 +1139,8 @@ static void CG_LaserGunImpact( const vec3_t pos, const vec3_t dir, float radius,
 	drawSceneRequest->addEntity( &ent );
 }
 
+FloatConfigVar testScale( wsw::StringView("testScale"), { .byDefault = 1.f, .flags = CVAR_ARCHIVE });
+
 static void _LaserImpact( trace_t *trace, vec3_t dir ) {
 	if( !trace || trace->ent < 0 ) {
 		return;
@@ -1229,7 +1231,7 @@ static void _LaserImpact( trace_t *trace, vec3_t dir ) {
                         .offset       = {40.0f * trace->plane.normal[0], 40.0f * trace->plane.normal[1],40.0f * trace->plane.normal[2]},
                         .dir          = {trace->plane.normal[0], trace->plane.normal[1], trace->plane.normal[2]},
                         .geometry = &cgs.cube,
-                        .geometryScale = 50.0f,
+                        .geometryScale = testScale.get(),
                         .geometryRotation = 0.0f,
                         .gravity      = -0.35f * GRAVITY,
                         .bounceCount  = {.minInclusive = 3, .maxInclusive = 4},
@@ -5666,7 +5668,7 @@ static void CG_RegisterModels( void ) {
 	CG_RegisterWeaponModels();
 
     //debug
-    GetGeometryFromFileAliasMD3( "models/cube/cube.md3", &cgs.cube );
+    GetGeometryFromFileAliasMD3( "gfx/hulls/anotherExample_second.md3", &cgs.cube, nullptr, 27 );
 
 	// precache forcemodels if defined
 	CG_RegisterForceModels();

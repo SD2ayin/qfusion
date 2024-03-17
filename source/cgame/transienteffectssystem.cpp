@@ -468,6 +468,8 @@ static SimulatedHullsSystem::CloudMeshProps g_fireOuterCloudMeshProps {
 static SimulatedHullsSystem::AppearanceRules g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 static SimulatedHullsSystem::AppearanceRules g_fireOuterCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 
+UnsignedConfigVar hullLifetime( wsw::StringView( "hullLifetime"), { .byDefault = 500u, .flags = CVAR_ARCHIVE });
+
 void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, const float *dir, float radius ) {
 	// 250 for radius of 64
 	// TODO: Make radius affect hulls
@@ -566,7 +568,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 				.origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
 				.dir      = { dir[0], dir[1], dir[2] },
 				.rotation = m_rng.nextFloat( 0.0f, M_PI * 2.0f ),
-				.timeout  = toonSmokeLifetime,
+				.timeout  = hullLifetime.get(),
 				.sharedCageCagedMeshes = cagedMesh,
 		};
 
