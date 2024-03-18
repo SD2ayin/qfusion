@@ -2135,7 +2135,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 	}
 
 	tri *triIndices = cageGeometry->triIndices.data();
-    //tri *triIndices = meshToRender->triIndices.data();
+    tri *meshTriIndices = meshToRender->triIndices.data();
 	unsigned numCageTris = cageGeometry->triIndices.size();
 
     unsigned currFrame;
@@ -2149,77 +2149,45 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
 		unsigned startVertIdx = currFrame * numVerts; // currFrame * numVerts;
 
-        for( unsigned triNum = 0; triNum < numTris; triNum++ ) {
-            for ( int idxNum = 0; idxNum < 3; idxNum++ ) {
-                unsigned firstIdx = idxNum;
-                unsigned secondIdx = (idxNum + 1) % 3;
-
-                unsigned firstVertex = triIndices[triNum][firstIdx] + startVertIdx;
-                unsigned secondVertex = triIndices[triNum][secondIdx] + startVertIdx;
-
-                vec3_t firstPosition = { vertCoords[firstVertex].coordsOnCageTri[0], vertCoords[firstVertex].coordsOnCageTri[1], vertCoords[firstVertex].offset };
-                vec3_t secondPosition = { vertCoords[secondVertex].coordsOnCageTri[0], vertCoords[secondVertex].coordsOnCageTri[1], vertCoords[secondVertex].offset };
-
-                //VectorMA( origin, scale, vertexMoveDirections[firstVertex],
-                //          firstPosition );
-                //VectorMA( origin, scale, vertexMoveDirections[secondVertex],
-                //          secondPosition );
-                VectorMA( origin, scale, firstPosition, firstPosition );
-                VectorMA( origin, scale, secondPosition, secondPosition );
-
-                vec3_t colorB{1.0f, 0.2f, 0.2f};
-
-                effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
-                        .material          = cgs.media.shaderLaser,
-                        .beamColorLifespan = {
-                                .initial  = {colorB[0], colorB[1], colorB[2]},
-                                .fadedIn  = {colorB[0], colorB[1], colorB[2]},
-                                .fadedOut = {colorB[0], colorB[1], colorB[2]},
-                        },
-                        .width             = 3.0f,
-                        .timeout           = 10u,
-                } );
-            }
-            cgNotice() << numTris << scale;
-        }
+		auto vertPosStorage = new vec3_t[numVerts];
 
 		for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
-            unsigned vertIdx = startVertIdx + vertNum;
-            unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
+			unsigned vertIdx = startVertIdx + vertNum;
+			unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
 
-            /* //
-            if ( ( v_triIdx.get() < 0 && ( (vertNum + cg.time) % 20 == 1 ) ) || triIdx == v_triIdx.get()) {
-                for (int idxNum = 0; idxNum < 3; idxNum++) {
-                    unsigned firstIdx = idxNum;
-                    unsigned secondIdx = (idxNum + 1) % 3;
+			/* //
+			if ( ( v_triIdx.get() < 0 && ( (vertNum + cg.time) % 20 == 1 ) ) || triIdx == v_triIdx.get()) {
+				for (int idxNum = 0; idxNum < 3; idxNum++) {
+					unsigned firstIdx = idxNum;
+					unsigned secondIdx = (idxNum + 1) % 3;
 
-                    unsigned firstVertex = triIndices[triIdx][firstIdx];
-                    unsigned secondVertex = triIndices[triIdx][secondIdx];
+					unsigned firstVertex = triIndices[triIdx][firstIdx];
+					unsigned secondVertex = triIndices[triIdx][secondIdx];
 
-                    vec3_t firstPosition;
-                    vec3_t secondPosition;
+					vec3_t firstPosition;
+					vec3_t secondPosition;
 
-                    VectorMA(origin, scale * limitsAtDirections[firstVertex], vertexMoveDirections[firstVertex],
-                             firstPosition);
-                    VectorMA(origin, scale * limitsAtDirections[secondVertex], vertexMoveDirections[secondVertex],
-                             secondPosition);
+					VectorMA(origin, scale * limitsAtDirections[firstVertex], vertexMoveDirections[firstVertex],
+							 firstPosition);
+					VectorMA(origin, scale * limitsAtDirections[secondVertex], vertexMoveDirections[secondVertex],
+							 secondPosition);
 
-                    vec3_t colorB{1.0f, 0.2f, 0.2f};
+					vec3_t colorB{1.0f, 0.2f, 0.2f};
 
 
-                    effectsSystem->spawnTransientBeamEffect(firstPosition, secondPosition, {
-                            .material          = cgs.media.shaderLaser,
-                            .beamColorLifespan = {
-                                    .initial  = {colorB[0], colorB[1], colorB[2]},
-                                    .fadedIn  = {colorB[0], colorB[1], colorB[2]},
-                                    .fadedOut = {colorB[0], colorB[1], colorB[2]},
-                            },
-                            .width             = 8.0f,
-                            .timeout           = 50u,
-                    });
-                }
-            }
-            */ //
+					effectsSystem->spawnTransientBeamEffect(firstPosition, secondPosition, {
+							.material          = cgs.media.shaderLaser,
+							.beamColorLifespan = {
+									.initial  = {colorB[0], colorB[1], colorB[2]},
+									.fadedIn  = {colorB[0], colorB[1], colorB[2]},
+									.fadedOut = {colorB[0], colorB[1], colorB[2]},
+							},
+							.width             = 8.0f,
+							.timeout           = 50u,
+					});
+				}
+			}
+			*/ //
 ///
 			vec2_t coords    = { vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1] };
 
@@ -2237,6 +2205,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 			VectorScale( vertexMoveDirections[cageVertIdx0], coeff0, moveDir );
 			VectorMA( moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir );
 			VectorMA( moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir );
+			VectorNormalizeFast( moveDir );
 
 			const float limit =
 					limitsAtDirections[cageVertIdx0] * coeff0 +
@@ -2246,6 +2215,8 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 			const float offset = wsw::min( vertCoords[vertIdx].offset, limit ) * scale;
 
 			VectorMA( origin, offset, moveDir, vertPos );
+
+			VectorCopy( vertPos, &vertPosStorage[vertNum][0] );
 
 			effectsSystem->spawnTransientBeamEffect( origin, vertPos, {
 					.material          = cgs.media.shaderLaser,
@@ -2260,7 +2231,38 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 			//cgNotice() << "offset:" << offset << " limit:" << limit;
 			//cgNotice() << "tri idx" << triIdx;
 		}
-        ///
+		///
+
+        for( unsigned triNum = 0; triNum < numTris; triNum++ ) {
+            for ( int idxNum = 0; idxNum < 3; idxNum++ ) {
+                unsigned firstIdx = idxNum;
+                unsigned secondIdx = (idxNum + 1) % 3;
+
+				unsigned firstVertex = meshTriIndices[triNum][firstIdx];
+				unsigned secondVertex = meshTriIndices[triNum][secondIdx];
+
+				vec3_t firstVertPos;
+				vec3_t secondVertPos;
+
+				vec3_t colorB{1.0f, 0.2f, 0.2f};
+
+				VectorCopy( &vertPosStorage[firstVertex][0], firstVertPos );
+				VectorCopy( &vertPosStorage[secondVertex][0], secondVertPos );
+
+                effectsSystem->spawnTransientBeamEffect( firstVertPos, secondVertPos, {
+                        .material          = cgs.media.shaderLaser,
+                        .beamColorLifespan = {
+                                .initial  = {colorB[0], colorB[1], colorB[2]},
+                                .fadedIn  = {colorB[0], colorB[1], colorB[2]},
+                                .fadedOut = {colorB[0], colorB[1], colorB[2]},
+                        },
+                        .width             = 3.0f,
+                        .timeout           = 10u,
+                } );
+            }
+
+        }
+		delete[] vertPosStorage;
             //cgNotice() << "start index" << startVertIdx;
 	}
 }
