@@ -456,6 +456,7 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 				cageCoord->cageTriIdx = faceNum;
 				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
 				cageCoord->offset = VectorLengthFast( vertPosition );
+				//cageCoord->offset *= cageCoord->offset * 1/4;
 				//cgNotice() << cageCoord->offset;
 				//cgNotice() << "tri index" << cageCoord->cageTriIdx;
 
@@ -485,15 +486,6 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 		numVerts += 1;
 	}
 
-
-	cgNotice() << "found " << numFoundVertices << " of " << numVerts;
-	cgNotice() << "there were " << numLoops << "loops";
-	cgNotice() << ( (float)numFoundVertices/(float)numVerts ) << " fits were found per vertex with " << cageFaces << " faces";
-	cgNotice() << ( (float)numFoundVertices/(float)numLoops ) * 100 << "% of the cases return a fit";
-
-	Vector2Scale( averageCoords, 1/(float)numLoops, averageCoords );
-
-	cgNotice() << "average coords: " << averageCoords[0] << " " << averageCoords[1];
 }
 
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
@@ -2207,17 +2199,18 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 			VectorMA( moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir );
 			VectorNormalizeFast( moveDir );
 
-			const float limit =
+			const float limit = VectorLengthFast( vertexMoveDirections[cageVertIdx0] ) * (
 					limitsAtDirections[cageVertIdx0] * coeff0 +
 					limitsAtDirections[cageVertIdx1] * coeff1 +
-					limitsAtDirections[cageVertIdx2] * coeff2;
+					limitsAtDirections[cageVertIdx2] * coeff2 );
 
+			cgNotice() << "mesh offset:" << vertCoords[vertIdx].offset;
 			const float offset = wsw::min( vertCoords[vertIdx].offset, limit ) * scale;
 
 			VectorMA( origin, offset, moveDir, vertPos );
 
 			VectorCopy( vertPos, &vertPosStorage[vertNum][0] );
-
+/*
 			effectsSystem->spawnTransientBeamEffect( origin, vertPos, {
 					.material          = cgs.media.shaderLaser,
 					.beamColorLifespan = {
@@ -2227,7 +2220,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 					},
 					.width             = 8.0f,
 					.timeout           = 10u,
-			} );
+			} );*/
 			//cgNotice() << "offset:" << offset << " limit:" << limit;
 			//cgNotice() << "tri idx" << triIdx;
 		}
@@ -2235,30 +2228,33 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
         for( unsigned triNum = 0; triNum < numTris; triNum++ ) {
             for ( int idxNum = 0; idxNum < 3; idxNum++ ) {
-                unsigned firstIdx = idxNum;
-                unsigned secondIdx = (idxNum + 1) % 3;
 
-				unsigned firstVertex = meshTriIndices[triNum][firstIdx];
-				unsigned secondVertex = meshTriIndices[triNum][secondIdx];
+				if( ( triNum + cg.time ) % 4 == 1 ){
+					unsigned firstIdx = idxNum;
+					unsigned secondIdx = (idxNum + 1) % 3;
 
-				vec3_t firstVertPos;
-				vec3_t secondVertPos;
+					unsigned firstVertex = meshTriIndices[triNum][firstIdx];
+					unsigned secondVertex = meshTriIndices[triNum][secondIdx];
 
-				vec3_t colorB{1.0f, 0.2f, 0.2f};
+					vec3_t firstVertPos;
+					vec3_t secondVertPos;
 
-				VectorCopy( &vertPosStorage[firstVertex][0], firstVertPos );
-				VectorCopy( &vertPosStorage[secondVertex][0], secondVertPos );
+					vec3_t colorB{1.0f, 0.2f, 0.2f};
 
-                effectsSystem->spawnTransientBeamEffect( firstVertPos, secondVertPos, {
-                        .material          = cgs.media.shaderLaser,
-                        .beamColorLifespan = {
-                                .initial  = {colorB[0], colorB[1], colorB[2]},
-                                .fadedIn  = {colorB[0], colorB[1], colorB[2]},
-                                .fadedOut = {colorB[0], colorB[1], colorB[2]},
-                        },
-                        .width             = 3.0f,
-                        .timeout           = 10u,
-                } );
+					VectorCopy( &vertPosStorage[firstVertex][0], firstVertPos );
+					VectorCopy( &vertPosStorage[secondVertex][0], secondVertPos );
+
+					effectsSystem->spawnTransientBeamEffect( firstVertPos, secondVertPos, {
+							.material          = cgs.media.shaderLaser,
+							.beamColorLifespan = {
+									.initial  = {colorB[0], colorB[1], colorB[2]},
+									.fadedIn  = {colorB[0], colorB[1], colorB[2]},
+									.fadedOut = {colorB[0], colorB[1], colorB[2]},
+							},
+							.width             = 3.0f,
+							.timeout           = 10u,
+					} );
+				}
             }
 
         }
