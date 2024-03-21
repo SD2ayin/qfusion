@@ -380,23 +380,18 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
 }
 
-void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates ){
-    unsigned cageFaces = cage->triIndices.size();
+void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSystem::StaticCagedMesh *cagedMesh, unsigned frameNum ){
+	unsigned cageFaces = cage->triIndices.size();
 	unsigned meshVerts = toCage->vertexPositions.size();
 	vec3_t *vertexPositions = toCage->vertexPositions.data();
 
-	unsigned numFoundVertices = 0;
-	unsigned numVerts = 0;
-	unsigned numLoops = 0;
+	SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &cagedMesh->vertexCoordinates[ frameNum * meshVerts ];
 
-	vec2_t averageCoords = { 0.0f, 0.0f };
-
+	float maxRadius = 0.0f;
 	for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
 		vec3_t vertPosition;
 		VectorCopy( vertexPositions[vertNum], vertPosition );
 		bool foundCoords = false;
-		float largestDotProduct = -1.0f;
-		unsigned triIdx;
 		for ( unsigned faceNum = 0; faceNum < cageFaces; faceNum++ ) {
 			const unsigned *faceIndices = cage->triIndices[faceNum];
 			vec3_t triCoords[3];
@@ -419,29 +414,8 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 				continue;
 			}
 
-            /*
-            if( VectorLengthFast(faceNormal) > 0.001f && VectorLengthFast(vertPosition) > 0.001f ){
-                VectorNormalizeFast( faceNormal );
-                const float dotProduct = DotProduct(faceNormal, vertPosition);
-                if (dotProduct > largestDotProduct) {
-                    largestDotProduct = dotProduct;
-                    SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
-                    triIdx = faceNum;
-                    cageCoord->cageTriIdx = triIdx;
-                    //cageCoord->coordsOnCageTri[0] = 0.25f;
-                    //cageCoord->coordsOnCageTri[1] = 0.25f;
-                    //cageCoord->offset = VectorLengthFast(vertPosition);
-                    /// tmp
-                    cageCoord->coordsOnCageTri[0] = vertPosition[0];
-                    cageCoord->coordsOnCageTri[1] = vertPosition[1];
-                    cageCoord->offset = vertPosition[2];
-                    /// end tmp
-                    numFoundVertices += 1;
-                }
-            }*/
-
 			// solve the system of linear equations to express the vertex coordinates in terms of the vertex offsets inside the triangle
-///
+
 			mat3_t coefficientsMatrix;
 			VectorCopy( vertPosition, &coefficientsMatrix[0] );
 			VectorCopy( first, &coefficientsMatrix[3] );
@@ -456,36 +430,23 @@ void transformToCageSpace( Geometry *cage, Geometry *toCage, SimulatedHullsSyste
 				cageCoord->cageTriIdx = faceNum;
 				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
 				cageCoord->offset = VectorLengthFast( vertPosition );
-				//cageCoord->offset *= cageCoord->offset * 1/4;
-				//cgNotice() << cageCoord->offset;
-				//cgNotice() << "tri index" << cageCoord->cageTriIdx;
+				maxRadius = wsw::max( maxRadius, cageCoord->offset );
 
                 if( DotProduct( vertPosition, faceNormal ) <= 0.0f ){
                     cgNotice() << S_COLOR_RED << "amk";
                 }
 
-				numFoundVertices += 1;
 				foundCoords = true;
 			}
-			averageCoords[0] += std::fabs( coordinates[0] );
-			averageCoords[1] += std::fabs( coordinates[1] );
-///
 
-			numLoops += 1;
-
-			//if( foundCoords ){
-			//	break;
-			//}
 		}
-		//cgNotice() << "tri index" << triIdx;
-        //cgNotice() << "largest dot:" << largestDotProduct;
+
 		if( !foundCoords ){
-			//cgNotice() << S_COLOR_RED << "no coords found for" << vertNum;
+			cgNotice() << S_COLOR_RED << "no coords found for" << vertNum;
 		}
-
-		numVerts += 1;
 	}
 
+	cagedMesh->boundingRadius[frameNum] = maxRadius;
 }
 
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
@@ -549,6 +510,7 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     cagedMesh->triIndices  = geometry.triIndices;
 
 	cagedMesh->vertexCoordinates = new StaticCageCoordinate[ numVerts * numFrames ];
+	cagedMesh->boundingRadius = new float[numFrames];
 
     delete[] geometry.vertexPositions.data();
 
@@ -558,7 +520,7 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 		//unitizeGeometry( &tmp );
         GetGeometryFromFileAliasMD3( filepath.data(), &tmp, nullptr, frameNum );
 
-        transformToCageSpace( &cage->cageGeometry, &tmp, &cagedMesh->vertexCoordinates[ frameNum * numVerts ] );
+        transformToCageSpace( &cage->cageGeometry, &tmp, cagedMesh, frameNum );
 
         delete[] tmp.vertexPositions.data();
         delete[] tmp.triIndices.data();
@@ -993,7 +955,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
             CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin,
                                 MASK_SOLID);
 
-            limitsAtDirections[i] = trace.fraction;
+			const float moveDirLength = VectorLengthFast( moveDirections[i] );
+            limitsAtDirections[i] = trace.fraction * moveDirLength;
 
 			VectorMA( origin, scale * trace.fraction, moveDirections[i], limitPoint );
 
@@ -1028,8 +991,11 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 				vec3_t firstPosition;
 				vec3_t secondPosition;
 
-				VectorMA( origin, scale * limitsAtDirections[firstVertex], moveDirections[firstVertex], firstPosition );
-				VectorMA( origin, scale * limitsAtDirections[secondVertex], moveDirections[secondVertex], secondPosition );
+				const float firstLengthRcp = Q_RSqrt( VectorLengthSquared( moveDirections[firstVertex] ) );
+				const float secondLengthRcp = Q_RSqrt( VectorLengthSquared( moveDirections[secondVertex] ) );
+
+				VectorMA( origin, scale * limitsAtDirections[firstVertex] * firstLengthRcp, moveDirections[firstVertex], firstPosition );
+				VectorMA( origin, scale * limitsAtDirections[secondVertex] * secondLengthRcp, moveDirections[secondVertex], secondPosition );
 
 				if( v_triIdx.get() < 0 || triNum == v_triIdx.get() ){
 					effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
@@ -1071,11 +1037,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 }
 
 void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyframedHullParams &hullParams ) {
-    //if( auto *const hull = hullsSystem->allocStaticCagedHull( m_lastTime, toonSmokeLifetime ) ) {
-    //    hullsSystem->setupHullVertices( hull, smokeOrigin, toonSmokeScale,
-    //                                    &toonSmokeKeyframeSet, toonSmokeKeyframes.maxOffset );
-    //    hull->compoundMeshKey = compoundMeshKey;
-    //}
+
     SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullParams.sharedCageCagedMeshes;
     SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
     unsigned numVertices = cage->cageGeometry.vertexPositions.size();
@@ -2199,12 +2161,11 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 			VectorMA( moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir );
 			VectorNormalizeFast( moveDir );
 
-			const float limit = VectorLengthFast( vertexMoveDirections[cageVertIdx0] ) * (
+			const float limit =
 					limitsAtDirections[cageVertIdx0] * coeff0 +
 					limitsAtDirections[cageVertIdx1] * coeff1 +
-					limitsAtDirections[cageVertIdx2] * coeff2 );
+					limitsAtDirections[cageVertIdx2] * coeff2;
 
-			cgNotice() << "mesh offset:" << vertCoords[vertIdx].offset;
 			const float offset = wsw::min( vertCoords[vertIdx].offset, limit ) * scale;
 
 			VectorMA( origin, offset, moveDir, vertPos );
@@ -2221,8 +2182,6 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 					.width             = 8.0f,
 					.timeout           = 10u,
 			} );*/
-			//cgNotice() << "offset:" << offset << " limit:" << limit;
-			//cgNotice() << "tri idx" << triIdx;
 		}
 		///
 
@@ -2256,10 +2215,8 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 					} );
 				}
             }
-
         }
 		delete[] vertPosStorage;
-            //cgNotice() << "start index" << startVertIdx;
 	}
 }
 
