@@ -163,7 +163,7 @@ public:
         std::span<tri> triIndices;
         std::span<const ShadingLayer> shadingLayers;
         float *boundingRadius; // maximum radius of the mesh for a given frame for culling
-        StaticCagedMesh *LODs; // pointer to lower detail models
+        StaticCagedMesh *nextLOD; // pointer to the next lower detail version
     };
 
     struct StaticKeyframedHullParams {

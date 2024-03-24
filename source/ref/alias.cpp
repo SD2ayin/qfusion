@@ -450,13 +450,13 @@ unsigned GetNumFramesInMD3( const char *fileName ) {
 	return numFrames;
 }
 
-void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 ) {
+bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 ) {
     unsigned *fileBuffer;
     (void)R_LoadFile( fileName, (void **)&fileBuffer );
     auto fileNameAsView = wsw::StringView( fileName );
     if( !fileBuffer ) {
         cgError() << "WARNING" << fileNameAsView << "not found";
-        return;
+        return false;
     }
 
     const dmd3header_t *pInModel = ( dmd3header_t * )fileBuffer;
@@ -466,15 +466,15 @@ void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
 
     if( version != MD3_ALIAS_VERSION ) {
         cgError() << fileNameAsView << "has wrong version number" << version << "should be" << MD3_ALIAS_VERSION;
-        return;
+        return false;
     }
     if( numFrames <= 0 ) {
         cgError() << fileNameAsView << "has no frames";
-        return;
+        return false;
     }
     if( numMeshes <= 0 ) {
         cgError() << fileNameAsView << "has no meshes";
-        return;
+        return false;
     }
 
     //
@@ -533,6 +533,7 @@ void GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
         pInMesh = ( dmd3mesh_t * )( ( uint8_t * )pInMesh + LittleLong( inMesh.meshsize ) );
     }
     R_FreeFile( fileBuffer );
+    return true;
 }
 
 Geometry GetGeometryFromLoadedAliasMD3( model_t *model, const char *meshName ){
