@@ -1265,38 +1265,22 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		} else {
 			unlinkAndFreeWaveHull( hull );
 		}
-	}/*
-	for( ToonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
-		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
-			//hull->simulate( currTime, timeDeltaSeconds );
-			//activeKeyframedHulls.push_back( hull);
-            ;
-		} else {
-			//unlinkAndFreeToonSmokeHull( hull );
-            ;
-		}
-	}*/
+	}
 
     for( auto & m_loadedStaticCage : m_loadedStaticCages ) {
         StaticCage *cage = std::addressof( m_loadedStaticCage );
-        auto *head = (KeyframedHull *) cage->head;
-
+        KeyframedHull *head = cage->head;
         for( KeyframedHull *hull = head, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
-            //cgNotice() << "found a hull";
-            if(  hull->spawnTime + hull->lifetime > currTime  ) [[likely]] {
-                //cgNotice() << "simulating";
+            if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
 				Geometry *cageGeometry = &cage->cageGeometry;
 
                 hull->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem, cageGeometry );
                 activeKeyframedHulls.push_back( hull );
             } else {
-                cgNotice() << "unlinking";
                 unlinkAndFreeStaticCageHull( hull );
             }
         }
-
     }
-
 
 	m_frameSharedOverrideColorsBuffer.clear();
 
@@ -1410,20 +1394,39 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 	// TODO: zipWithIndex?
 	unsigned keyframedHullIndex = 0;
-    /*
+    /// MODIFY
 	for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls ) {
 		assert( hull->numLayers );
 
 		const DynamicMesh **submittedMeshesBuffer = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
 		float *const submittedOrderDesignators    = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
 
+        /// REMOVE
 		const bool isCoupledWithConcentricHull = pairIndicesForKeyframedHulls[keyframedHullIndex] != std::nullopt;
 		if( isCoupledWithConcentricHull ) {
 			meshDataOffsetsForPairs.push_back( offsetOfMultilayerMeshData );
 			topAddedLayersForPairs.push_back( 0.0f );
 		}
+        /// REMOVE END
 
+        unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
 		unsigned numMeshesToSubmit = 0;
+        for( unsigned meshNum = 0; meshNum < numMeshesToRender; ++meshNum ) {
+            const AppearanceRules *appearanceRules = &hull->appearanceRules;
+
+            const SolidAppearanceRules *solidAppearanceRules = nullptr;
+            const CloudAppearanceRules *cloudAppearanceRules = nullptr;
+            if( const auto *solidAndCloudRules = std::get_if<SolidAndCloudAppearanceRules>( appearanceRules ) ) {
+                solidAppearanceRules = &solidAndCloudRules->solidRules;
+                cloudAppearanceRules = &solidAndCloudRules->cloudRules;
+            } else {
+                solidAppearanceRules = std::get_if<SolidAppearanceRules>( appearanceRules );
+                cloudAppearanceRules = std::get_if<CloudAppearanceRules>( appearanceRules );
+            }
+
+            assert( solidAppearanceRules || cloudAppearanceRules );
+        }
+        /*
 		for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
 			BaseKeyframedHull::Layer *__restrict layer = &hull->layers[layerNum];
 
@@ -1493,6 +1496,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				numMeshesToSubmit++;
 			}
 
+			/// DISABLE CLOUD TMP
+			/*
 			if( cloudAppearanceRules ) [[unlikely]] {
 				assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
 				assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
@@ -1541,8 +1546,9 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 						}
 					}
 				}
-			}
-		}
+			} ///
+			/// DISABLE CLOUD TMP END
+		}*/
 
 		if( numMeshesToSubmit ) [[likely]] {
 			assert( numMeshesToSubmit <= kMaxMeshesPerHull );
@@ -1554,10 +1560,12 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		}
 
 		// Push the number of layers (even if we did not submit anything) to keep the addressing by pair index valid
+		/// SHOULD BE REMOVED !!!!
 		if( isCoupledWithConcentricHull ) {
 			numAddedMeshesForPairs.push_back( numMeshesToSubmit );
-			boundsForPairs.push_back( std::make_pair( Vec3( hull->mins ), Vec3( hull->maxs ) ) );
+			boundsForPairs.push_back(std::make_pair( Vec3( hull->mins ), Vec3( hull->maxs ) ) );
 		}
+		/// SHOULD BE REMOVED !!!! END
 
 		keyframedHullIndex++;
 
@@ -1567,7 +1575,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		} else {
 			offsetOfMultilayerMeshData += numMeshesToSubmit;
 		}
-	} */
+	}
+	/// MODIFY END
 
 	assert( meshDataOffsetsForPairs.size() == numAddedMeshesForPairs.size() );
 	assert( meshDataOffsetsForPairs.size() == boundsForPairs.size() );

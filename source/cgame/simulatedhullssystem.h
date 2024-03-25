@@ -96,6 +96,7 @@ public:
 	};
 
 	static constexpr unsigned kMaxLayerColors = 8;
+    static constexpr unsigned kMaxSharedCageCagedMeshes = 16;
 
 	enum class BlendMode : unsigned {
 		AlphaBlend,
@@ -151,7 +152,7 @@ public:
         unsigned cageTriIdx;
         float coordsOnCageTri[2]; // barycentric coordinates
         float offset; // offset along direction
-        /// ? float moveDir ? precompute the moveDir? -> this should be impossible ig
+        /// ? float moveDir ? precompute the moveDir? -> this should be impossible i guess
         //float offsetFromLimit; // offset from boundaries like walls
     };
 
@@ -223,9 +224,20 @@ private:
 
 		// currently for keyframed hull shading
 		bool isAKeyframedHull { false };
+        /// DELETE
 		float lerpFrac { 0.0f };
 		std::span<const ShadingLayer> prevShadingLayers;
 		std::span<const ShadingLayer> nextShadingLayers;
+        /// DELETE END
+
+        /// for caged hulls
+        float lifetimeFrac { 0.0f };
+        StaticCagedMesh **meshesToRender { nullptr };
+        unsigned numMeshesToRender { 1u };
+        float scale { 35.0f };
+        Geometry *cage { nullptr };
+        float *limits { nullptr };
+        /// for caged hulls END
 	};
 
     //draft
@@ -555,7 +567,8 @@ private:
 
 		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
 
-		StaticCagedMesh *sharedCageCagedMeshes[16];
+		StaticCagedMesh *sharedCageCagedMeshes[kMaxSharedCageCagedMeshes];
+        //AppearanceRules appearanceRulesPerMesh[kMaxSharedCageCagedMeshes];
 
 		vec4_t mins, maxs; // of the cage
 		vec3_t origin;
