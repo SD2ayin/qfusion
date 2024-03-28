@@ -364,11 +364,15 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
 
+	float maxRadius;
 	for( unsigned i = 0; i < numCageVertices; i++ ){
 		if( VectorLengthFast( cageGeometry->vertexPositions[i] ) > 1.0f + 1e-1f ){
-			cgNotice() << "radius:" << VectorLengthFast( cageGeometry->vertexPositions[i] );
+			const float radius = VectorLengthFast( cageGeometry->vertexPositions[i] );
+			maxRadius = wsw::max( maxRadius, radius );
+			cgNotice() << "radius:" << radius;
 		}
 	}
+	cage->boundingRadius = maxRadius;
 
     size_t sizeOfBaseHull = sizeof( SimulatedHullsSystem::KeyframedHull );
     size_t sizeOfMoveDirs = sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numCageVertices;
@@ -925,10 +929,15 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	BoundsBuilder cageBoundsBuilder;
 	//const vec4_t *__restrict vertices = verticesSpan.data();
 
+	StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
+	Geometry *cageGeometry = &cage->cageGeometry;
+	vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
+	unsigned numVerts = cageGeometry->vertexPositions.size();
+
 	cgNotice() << "set up hull vertices";
 	// Calculate move limits in each direction
 
-	const float radius = scale;
+	const float radius = scale * cage->boundingRadius;
 	const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
 	const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
 
@@ -942,11 +951,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
     // MULTIPLY WITH ROTATION ANGLE
     mat3_t transformMatrix;
     Matrix3_Rotate( transformMatrixForDir, rotation, dir, transformMatrix );
-
-	StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
-	Geometry *cageGeometry = &cage->cageGeometry;
-	vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
-	unsigned numVerts = cageGeometry->vertexPositions.size();
 
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
@@ -1403,7 +1407,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	// TODO: zipWithIndex?
 	unsigned keyframedHullIndex = 0;
     /// MODIFY
-	for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls ) {
+	/*for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls )*/ if( 0 == 1 ) { const BaseKeyframedHull *__restrict hull = activeKeyframedHulls[0];
 		assert( hull->numLayers );
 
 		const DynamicMesh **submittedMeshesBuffer = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
@@ -1658,8 +1662,14 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		// Push the number of layers (even if we did not submit anything) to keep the addressing by pair index valid
 		/// SHOULD BE REMOVED !!!!
 		if( isCoupledWithConcentricHull ) {
+
+			vec4_t mins, maxs;
+
+			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMinsDir, mins );
+			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMaxsDir, maxs );
+
 			numAddedMeshesForPairs.push_back( numMeshesToSubmit );
-			boundsForPairs.push_back(std::make_pair( Vec3( hull->mins ), Vec3( hull->maxs ) ) );
+			boundsForPairs.push_back(std::make_pair( Vec3( mins ), Vec3( maxs ) ) );
 		}
 		/// SHOULD BE REMOVED !!!! END
 
@@ -2189,7 +2199,7 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
 	unsigned LODnum = 0;
 	unsigned LODtoRender = v_LODtoShow.get();
-	for( StaticCagedMesh *currLOD = meshToRender, *lastLOD, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+	for( StaticCagedMesh *currLOD = meshToRender, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 		meshToRender = currLOD;
 		nextLOD = currLOD->nextLOD;
 	}
@@ -3230,7 +3240,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
 		unsigned LODnum = 0;
 		unsigned LODtoRender = m_chosenSubdivLevel;
 		StaticCagedMesh *meshToRender = m_shared->meshToRender;
-		for( StaticCagedMesh *currLOD = meshToRender, *lastLOD, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 			meshToRender = currLOD;
 			nextLOD = currLOD->nextLOD;
 		}
@@ -3370,6 +3380,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 																  byte_vec4_t *__restrict destColors,
 																  uint16_t *__restrict destIndices ) const
 	-> std::pair<unsigned, unsigned> {
+	/*
 	assert( m_shared->simulatedSubdivLevel <= BasicHullsHolder::kMaxSubdivLevel );
 	assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
 	assert( m_shared->minZLastFrame <= m_shared->maxZLastFrame );
@@ -3525,7 +3536,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 		overrideColors = overrideColorsBuffer;
 	}
 
-	unsigned numResultVertices, numResultIndices;
+
 
 	// HACK Perform an additional tesselation of some hulls.
 	// CPU-side tesselation is the single option in the current codebase state.
@@ -3566,6 +3577,70 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 		std::memcpy( destPositions, simulatedPositions, sizeof( simulatedPositions[0] ) * numResultVertices );
 		std::memcpy( destColors, colorsToUse, sizeof( colorsToUse[0] ) * numResultVertices );
 		std::memcpy( destIndices, dataToUse.indices.data(), sizeof( uint16_t ) * numResultIndices );
+	}
+*/
+	unsigned numResultVertices, numResultIndices;
+
+	if( !m_shared->isAKeyframedHull ) {
+		assert( m_shared->simulatedSubdivLevel <= BasicHullsHolder::kMaxSubdivLevel );
+		assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
+		assert( m_shared->minZLastFrame <= m_shared->maxZLastFrame );
+
+		// Keep always allocating the default buffer even if it's unused, so we can rely on it
+		const auto colorsBufferLevel = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
+		const auto colorsBufferSize  = (unsigned)basicHullsHolder.getIcosphereForLevel( colorsBufferLevel ).vertices.size();
+		assert( colorsBufferSize && colorsBufferSize < ( 1 << 12 ) );
+		auto *const overrideColorsBuffer = (byte_vec4_t *)alloca( sizeof( byte_vec4_t ) * colorsBufferSize );
+
+		const byte_vec4_t *overrideColors;
+
+		overrideColors = getOverrideColorsCheckingSiblingCache( overrideColorsBuffer, viewOrigin,
+																viewAxis, lights,
+																affectingLightIndices);
+
+		// HACK Perform an additional tesselation of some hulls.
+		// CPU-side tesselation is the single option in the current codebase state.
+		if( m_shared->tesselateClosestLod && m_chosenSubdivLevel > m_shared->simulatedSubdivLevel ) {
+			assert( m_shared->simulatedSubdivLevel + 1 == m_chosenSubdivLevel );
+			const IcosphereData &nextLevelData = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
+			const IcosphereData &simLevelData  = ::basicHullsHolder.getIcosphereForLevel( m_shared->simulatedSubdivLevel );
+
+			const IcosphereVertexNeighbours nextLevelNeighbours = nextLevelData.vertexNeighbours.data();
+
+			const auto numSimulatedVertices = (unsigned)simLevelData.vertices.size();
+			const auto numNextLevelVertices = (unsigned)nextLevelData.vertices.size();
+
+			MeshTesselationHelper *const tesselationHelper = &::meshTesselationHelper;
+			if( m_shared->lerpNextLevelColors ) {
+				tesselationHelper->exec<true>( this, overrideColors,
+											   numSimulatedVertices, numNextLevelVertices, nextLevelNeighbours );
+			} else {
+				tesselationHelper->exec<false>( this, overrideColors,
+												numSimulatedVertices, numNextLevelVertices, nextLevelNeighbours );
+			}
+
+			numResultVertices = numNextLevelVertices;
+			numResultIndices  = (unsigned)nextLevelData.indices.size();
+
+			// TODO: Eliminate this excessive copying
+			std::memcpy( destPositions, tesselationHelper->m_tessPositions, sizeof( destPositions[0] ) * numResultVertices );
+			std::memcpy( destColors, tesselationHelper->m_tessByteColors, sizeof( destColors[0] ) * numResultVertices );
+			std::memcpy( destIndices, nextLevelData.indices.data(), sizeof( uint16_t ) * numResultIndices );
+		} else {
+			const IcosphereData &dataToUse = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
+			const byte_vec4_t *colorsToUse = overrideColors ? overrideColors : m_shared->simulatedColors;
+
+			numResultVertices = (unsigned)dataToUse.vertices.size();
+			numResultIndices  = (unsigned)dataToUse.indices.size();
+
+			const vec4_t *simulatedPositions = m_shared->simulatedPositions;
+			std::memcpy( destPositions, simulatedPositions, sizeof( simulatedPositions[0] ) * numResultVertices );
+			std::memcpy( destColors, colorsToUse, sizeof( colorsToUse[0] ) * numResultVertices );
+			std::memcpy( destIndices, dataToUse.indices.data(), sizeof( uint16_t ) * numResultIndices );
+		}
+
+	} else {
+		
 	}
 
 	return { numResultVertices, numResultIndices };

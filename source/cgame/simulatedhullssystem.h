@@ -142,6 +142,7 @@ public:
     struct StaticCage {
         Geometry cageGeometry;
         wsw::String identifier;
+		float boundingRadius; /// maybe this should combine with scale from params?
         wsw::HeapBasedFreelistAllocator *allocator;
         KeyframedHull *head;
     };
