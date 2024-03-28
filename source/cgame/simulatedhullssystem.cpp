@@ -395,7 +395,7 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
     cagedMesh->triIndices  = mesh.triIndices;
 
     cagedMesh->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[ numVerts * numFrames ];
-    cagedMesh->boundingRadius = new float[numFrames];
+    cagedMesh->boundingRadii = new float[numFrames];
 
     delete[] mesh.vertexPositions.data();
 
@@ -472,7 +472,7 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
             }
         }
 
-        cagedMesh->boundingRadius[frameNum] = maxRadius;
+        cagedMesh->boundingRadii[frameNum] = maxRadius;
 
         delete[] mesh.vertexPositions.data();
         delete[] mesh.triIndices.data();
@@ -922,7 +922,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
                                               const AppearanceRules &appearanceRules ) {
 	const float originX = origin[0], originY = origin[1], originZ = origin[2];
 	//const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
-
+	BoundsBuilder cageBoundsBuilder;
 	//const vec4_t *__restrict vertices = verticesSpan.data();
 
 	cgNotice() << "set up hull vertices";
@@ -975,7 +975,12 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 			const float moveDirLength = VectorLengthFast( moveDirections[i] );
             limitsAtDirections[i] = trace.fraction * moveDirLength;
 
-			VectorMA( origin, scale * trace.fraction, moveDirections[i], limitPoint );
+			vec3_t offsetFromOrigin;
+			VectorScale( moveDirections[i], scale * trace.fraction, offsetFromOrigin );
+
+			VectorAdd( origin, offsetFromOrigin, limitPoint );
+
+			cageBoundsBuilder.addPoint( offsetFromOrigin );
 
             if ( v_showVectorsToLim.get()) {
                 effectsSystem->spawnTransientBeamEffect( origin, limitPoint, {
@@ -1029,6 +1034,9 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 			}
 		}
 
+		cageBoundsBuilder.storeTo( hull->cageOffsetMinsDir, hull->cageOffsetMaxsDir );
+		VectorNormalize( hull->cageOffsetMinsDir );
+		VectorNormalize( hull->cageOffsetMaxsDir );
 
 	}
 /*
@@ -1409,9 +1417,21 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		}
         /// REMOVE END
 
-        unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
+        const unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
 		unsigned numMeshesToSubmit = 0;
+
+		const float rcpLifetime  = Q_Rcp( (float)hull->lifetime );
+		const float lifetimeFrac = (float)( currTime - hull->spawnTime ) * rcpLifetime;
+
+		const StaticCagedMesh *firstCagedMesh = hull->sharedCageCagedMeshes[0];
+		const unsigned cageKey = firstCagedMesh->loadedCageKey;
+		const Geometry *cage = &m_loadedStaticCages[cageKey].cageGeometry;
+
+		float maxBoundingRadius = 0.0f;
+
         for( unsigned meshNum = 0; meshNum < numMeshesToRender; ++meshNum ) {
+			assert( cageKey == hull->sharedCageCagedMeshes[meshNum]->loadedCageKey );
+
             const AppearanceRules *appearanceRules = &hull->appearanceRules;
 
             const SolidAppearanceRules *solidAppearanceRules = nullptr;
@@ -1425,7 +1445,77 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             }
 
             assert( solidAppearanceRules || cloudAppearanceRules );
-        }
+
+			assert( solidAppearanceRules || cloudAppearanceRules );
+			SharedMeshData *__restrict sharedMeshData;
+
+			sharedMeshData->lifetimeFrac = lifetimeFrac;
+
+			StaticCagedMesh *meshToRender = hull->sharedCageCagedMeshes[meshNum];
+			sharedMeshData->meshToRender  = meshToRender;
+
+			sharedMeshData->simulatedPositions  = nullptr;
+			sharedMeshData->cageVertexPositions = hull->vertexMoveDirections;
+
+			sharedMeshData->cageTriIndices = cage->triIndices.data();
+			sharedMeshData->limitsAtDirections = hull->limitsAtDirections;
+
+			sharedMeshData->scale = hull->scale;
+
+			sharedMeshData->simulatedNormals     = nullptr;
+
+			sharedMeshData->minZLastFrame        = 0.0f;
+			sharedMeshData->maxZLastFrame        = 0.0f;
+			sharedMeshData->zFade                = ZFade::NoFade;
+			sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
+			sharedMeshData->tesselateClosestLod  = false;
+			sharedMeshData->lerpNextLevelColors  = true;
+			sharedMeshData->nextLodTangentRatio  = 0.30f;
+
+			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
+			sharedMeshData->cachedOverrideColorsSpanInBuffer = std::nullopt;
+			sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
+			sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
+
+			sharedMeshData->isAKeyframedHull = true;
+
+			if( solidAppearanceRules ) [[likely]] {
+				HullSolidDynamicMesh *mesh = hull->submittedSolidMesh;
+
+				const unsigned numFrames = meshToRender->numFrames;
+				const unsigned currFrame = wsw::min( numFrames - 1, (unsigned)( lifetimeFrac * numFrames ) );
+
+				vec4_t mins, maxs;
+
+				const float currBoundingRadius = meshToRender->boundingRadii[currFrame];
+				VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMinsDir, mins );
+				VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMaxsDir, maxs );
+				maxBoundingRadius = wsw::max( maxBoundingRadius, currBoundingRadius );
+				mins[3] = 0.0f, maxs[3] = 1.0f;
+
+				Vector4Copy( mins, mesh->cullMins );
+				Vector4Copy( maxs, mesh->cullMaxs );
+
+				mesh->material = solidAppearanceRules->material;
+				mesh->m_shared = sharedMeshData;
+				// TODO: Restore this functionality if it could be useful
+				//mesh->applyVertexDynLight = hull->applyVertexDynLight;
+
+				const float drawOrderDesignator = 2.0f * (float)( numMeshesToRender - meshNum ) + solidLayerOrderBoost;
+
+				submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+
+				/// should be removed too
+				if( isCoupledWithConcentricHull ) {
+					topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
+				}
+				/// should be removed too  END
+
+				numMeshesToSubmit++;
+			}
+
+		}
         /*
 		for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
 			BaseKeyframedHull::Layer *__restrict layer = &hull->layers[layerNum];
@@ -1553,8 +1643,14 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		if( numMeshesToSubmit ) [[likely]] {
 			assert( numMeshesToSubmit <= kMaxMeshesPerHull );
 			// Submit it right now, otherwise postpone submission to processing of concentric hulls
+
+			vec4_t mins, maxs;
+
+			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMinsDir, mins );
+			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMaxsDir, maxs );
+
 			if( !isCoupledWithConcentricHull ) {
-				drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs, submittedMeshesBuffer,
+				drawSceneRequest->addCompoundDynamicMesh( mins, maxs, submittedMeshesBuffer,
 														  numMeshesToSubmit, submittedOrderDesignators );
 			}
 		}
@@ -3127,9 +3223,28 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
 		m_shared->cachedChosenSolidSubdivLevel = std::monostate();
 		return std::nullopt;
 	}
+	unsigned numVertices;
+	unsigned numIndices;
 
-	const IcosphereData &chosenLevelData = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
-	return std::make_pair<unsigned, unsigned>( chosenLevelData.vertices.size(), chosenLevelData.indices.size() );
+	if( m_shared->isAKeyframedHull ){
+		unsigned LODnum = 0;
+		unsigned LODtoRender = m_chosenSubdivLevel;
+		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+		for( StaticCagedMesh *currLOD = meshToRender, *lastLOD, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+			meshToRender = currLOD;
+			nextLOD = currLOD->nextLOD;
+		}
+		numVertices = meshToRender->numVertices;
+		numIndices  = meshToRender->triIndices.size() * 3;
+	} else {
+		const IcosphereData &chosenLevelData = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
+		numVertices = chosenLevelData.vertices.size();
+		numIndices  = chosenLevelData.indices.size();
+	}
+
+	std::pair storageRequirements( numVertices, numIndices );
+
+	return storageRequirements;
 }
 
 auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const float *viewOrigin,

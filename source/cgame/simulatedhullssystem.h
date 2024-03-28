@@ -163,7 +163,7 @@ public:
         unsigned numFrames;
         std::span<tri> triIndices;
         std::span<const ShadingLayer> shadingLayers;
-        float *boundingRadius; // maximum radius of the mesh for a given frame for culling
+        float *boundingRadii; // maximum radius of the mesh for a given frame for culling
         StaticCagedMesh *nextLOD; // pointer to the next lower detail version
     };
 
@@ -232,11 +232,13 @@ private:
 
         /// for caged hulls
         float lifetimeFrac { 0.0f };
-        StaticCagedMesh **meshesToRender { nullptr };
-        unsigned numMeshesToRender { 1u };
+        StaticCagedMesh *meshToRender { nullptr };
+        //unsigned numMeshesToRender { 1u };
         float scale { 35.0f };
-        Geometry *cage { nullptr };
-        float *limits { nullptr };
+        //Geometry *cage { nullptr };
+		vec3_t *cageVertexPositions { nullptr };
+		tri *cageTriIndices { nullptr };
+        float *limitsAtDirections { nullptr };
         /// for caged hulls END
 	};
 
@@ -565,12 +567,13 @@ private:
 
 		///SharedCageData *sharedCageData;
 
-		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
+		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr }; // should probably be an array
 
 		StaticCagedMesh *sharedCageCagedMeshes[kMaxSharedCageCagedMeshes];
         //AppearanceRules appearanceRulesPerMesh[kMaxSharedCageCagedMeshes];
+		HullSolidDynamicMesh *submittedSolidMesh;
 
-		vec4_t mins, maxs; // of the cage
+		vec3_t cageOffsetMinsDir, cageOffsetMaxsDir;
 		vec3_t origin;
 
 		unsigned numLayers { 0 };
@@ -581,15 +584,18 @@ private:
 		//bool applyVertexDynLight { false }; should be re-implemented, if useful
 
 		void simulate( int64_t currTime, float timeDeltaSeconds,
-                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry ); /// GEOMETRY IS TMP
+                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry ); /// SIMULATE IS TMP
 	};
 
 	struct KeyframedHull : public BaseKeyframedHull {
 
 		KeyframedHull *prev { nullptr }, *next { nullptr };
 
+		HullSolidDynamicMesh storageOfSolidMeshes[1];
+
 		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
             if( addressOfMem ) {
+				submittedSolidMesh = &storageOfSolidMeshes[0];
                 unsigned offset = sizeof( KeyframedHull );
                 this->vertexMoveDirections = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );
                 offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
