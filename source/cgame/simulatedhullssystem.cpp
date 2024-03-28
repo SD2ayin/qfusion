@@ -3640,7 +3640,14 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 		}
 
 	} else {
-		
+		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+
+		// write positions to destPositions
+		// memcpy indices from mesh to render
+		const unsigned numTris = meshToRender->triIndices.size();
+		const unsigned numIndices = numTris * 3;
+		std::memcpy( destIndices, meshToRender->triIndices.data(), sizeof( uint16_t ) * numIndices );
+		// write colors to dest colors
 	}
 
 	return { numResultVertices, numResultIndices };
