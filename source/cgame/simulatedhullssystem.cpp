@@ -3379,7 +3379,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 																  vec2_t *__restrict destTexCoords,
 																  byte_vec4_t *__restrict destColors,
 																  uint16_t *__restrict destIndices ) const
-	-> std::pair<unsigned, unsigned> {
+	-> std::pair<unsigned, unsigned> {//
 	/*
 	assert( m_shared->simulatedSubdivLevel <= BasicHullsHolder::kMaxSubdivLevel );
 	assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
