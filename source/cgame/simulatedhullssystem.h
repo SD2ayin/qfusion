@@ -165,7 +165,7 @@ public:
         std::span<tri> triIndices;
         std::span<const ShadingLayer> shadingLayers;
         float *boundingRadii; // maximum radius of the mesh for a given frame for culling
-        StaticCagedMesh *nextLOD; // pointer to the next lower detail version
+        StaticCagedMesh *nextLOD { nullptr }; // pointer to the next lower detail version
     };
 
     struct StaticKeyframedHullParams {
@@ -234,8 +234,10 @@ private:
         /// for caged hulls
         float lifetimeFrac { 0.0f };
         StaticCagedMesh *meshToRender { nullptr };
+        StaticCage *cage { nullptr };
         //unsigned numMeshesToRender { 1u };
         float scale { 35.0f };
+        vec3_t origin { 0.0f, 0.0f, 0.0f };
         //Geometry *cage { nullptr };
 		vec3_t *cageVertexPositions { nullptr };
 		tri *cageTriIndices { nullptr };
@@ -566,6 +568,8 @@ private:
 		float *limitsAtDirections;
 		int64_t spawnTime { 0 };
 
+        SharedMeshData *sharedMeshData;
+
 		///SharedCageData *sharedCageData;
 
 		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr }; // should probably be an array
@@ -601,6 +605,8 @@ private:
                 this->vertexMoveDirections = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );
                 offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
                 this->limitsAtDirections = ( float* )( ( uint8_t* )addressOfMem + offset );
+
+                this->sharedMeshData = new SharedMeshData;
             }
 		}
 	};

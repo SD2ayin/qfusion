@@ -486,6 +486,8 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 	return true;
 }
 
+#define maxLODs 3
+
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
     auto *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
     auto filepath = wsw::StringView( name );
@@ -527,7 +529,6 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 
     transformToCageSpace( &cage->cageGeometry, filepath, cagedMesh );
 
-    const unsigned maxLODs = 3;
 	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
     for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
         wsw::String filepathToLOD = wsw::String( filepath.data(), filepath.length() );
@@ -540,6 +541,7 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 		lastLOD->nextLOD = new SimulatedHullsSystem::StaticCagedMesh;
         if( transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ), lastLOD->nextLOD ) ){
 			lastLOD = lastLOD->nextLOD;
+            lastLOD->nextLOD = nullptr;
 		} else{
 			delete[] lastLOD->nextLOD;
 			lastLOD->nextLOD = nullptr;
@@ -1081,6 +1083,7 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
         };
 
 		hull->sharedCageCagedMeshes[0] = hullParams.sharedCageCagedMeshes;
+        hull->numSharedCageCagedMeshes = hullParams.numCagedMeshes;
 
         SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
                                                  hullParams.rotation, cagedMesh, &cg.polyEffectsSystem );
@@ -1286,7 +1289,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
 				Geometry *cageGeometry = &cage->cageGeometry;
 
-                hull->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem, cageGeometry );
+                //hull->simulate( currTime, timeDeltaSeconds, &cg.polyEffectsSystem, cageGeometry );
                 activeKeyframedHulls.push_back( hull );
             } else {
                 unlinkAndFreeStaticCageHull( hull );
@@ -1391,7 +1394,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	wsw::StaticVector<std::optional<uint8_t>, kMaxConcentricHulls> pairIndicesForConcentricHulls;
 	buildMatchingHullPairs( (const BaseKeyframedHull **)activeKeyframedHulls.data(), activeKeyframedHulls.size(),
 							(const BaseConcentricSimulatedHull **)activeConcentricHulls.data(), activeConcentricHulls.size(),
-							&pairIndicesForKeyframedHulls, &pairIndicesForConcentricHulls );
+							&pairIndicesForKeyframedHulls, &pairIndicesForConcentricHulls ); /// should be REMOVED
 
 	wsw::StaticVector<unsigned, kMaxKeyframedHulls> meshDataOffsetsForPairs;
 	wsw::StaticVector<uint8_t, kMaxKeyframedHulls> numAddedMeshesForPairs;
@@ -1407,21 +1410,25 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	// TODO: zipWithIndex?
 	unsigned keyframedHullIndex = 0;
     /// MODIFY
-	/*for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls )*/ if( 0 == 1 ) { const BaseKeyframedHull *__restrict hull = activeKeyframedHulls[0];
+	for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls ) {
+        cgNotice() << "simulate and submit for cagedhulls";
+
 		assert( hull->numLayers );
 
 		const DynamicMesh **submittedMeshesBuffer = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
 		float *const submittedOrderDesignators    = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
 
         /// REMOVE
+        /*
 		const bool isCoupledWithConcentricHull = pairIndicesForKeyframedHulls[keyframedHullIndex] != std::nullopt;
 		if( isCoupledWithConcentricHull ) {
 			meshDataOffsetsForPairs.push_back( offsetOfMultilayerMeshData );
 			topAddedLayersForPairs.push_back( 0.0f );
-		}
+		}*/
         /// REMOVE END
 
         const unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
+        cgNotice() << "num meshes to render" << numMeshesToRender;
 		unsigned numMeshesToSubmit = 0;
 
 		const float rcpLifetime  = Q_Rcp( (float)hull->lifetime );
@@ -1434,6 +1441,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		float maxBoundingRadius = 0.0f;
 
         for( unsigned meshNum = 0; meshNum < numMeshesToRender; ++meshNum ) {
+            cgNotice() << "looping over" << numMeshesToRender << "meshes to render";
+
 			assert( cageKey == hull->sharedCageCagedMeshes[meshNum]->loadedCageKey );
 
             const AppearanceRules *appearanceRules = &hull->appearanceRules;
@@ -1451,7 +1460,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             assert( solidAppearanceRules || cloudAppearanceRules );
 
 			assert( solidAppearanceRules || cloudAppearanceRules );
-			SharedMeshData *__restrict sharedMeshData;
+			//SharedMeshData *__restrict sharedMeshData = &hull->sharedMeshData;
+            SharedMeshData *sharedMeshData = hull->sharedMeshData;
 
 			sharedMeshData->lifetimeFrac = lifetimeFrac;
 
@@ -1464,7 +1474,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			sharedMeshData->cageTriIndices = cage->triIndices.data();
 			sharedMeshData->limitsAtDirections = hull->limitsAtDirections;
 
-			sharedMeshData->scale = hull->scale;
+			sharedMeshData->scale  = hull->scale;
+            VectorCopy( hull->origin, sharedMeshData->origin );
 
 			sharedMeshData->simulatedNormals     = nullptr;
 
@@ -1511,13 +1522,16 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
 
 				/// should be removed too
+				/*
 				if( isCoupledWithConcentricHull ) {
 					topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
-				}
+				}*/
 				/// should be removed too  END
 
 				numMeshesToSubmit++;
-			}
+			} else {
+                cgNotice() << "no solid appearance rules";
+            }
 
 		}
         /*
@@ -1653,14 +1667,17 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMinsDir, mins );
 			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMaxsDir, maxs );
 
-			if( !isCoupledWithConcentricHull ) {
-				drawSceneRequest->addCompoundDynamicMesh( mins, maxs, submittedMeshesBuffer,
-														  numMeshesToSubmit, submittedOrderDesignators );
-			}
+			//if( !isCoupledWithConcentricHull ) {
+            cgNotice() << "has meshes to submit";
+
+            drawSceneRequest->addCompoundDynamicMesh( mins, maxs, submittedMeshesBuffer,
+                                                      numMeshesToSubmit, submittedOrderDesignators );
+			//}
 		}
 
 		// Push the number of layers (even if we did not submit anything) to keep the addressing by pair index valid
 		/// SHOULD BE REMOVED !!!!
+		/*
 		if( isCoupledWithConcentricHull ) {
 
 			vec4_t mins, maxs;
@@ -1670,17 +1687,17 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 			numAddedMeshesForPairs.push_back( numMeshesToSubmit );
 			boundsForPairs.push_back(std::make_pair( Vec3( mins ), Vec3( maxs ) ) );
-		}
+		}*/
 		/// SHOULD BE REMOVED !!!! END
 
 		keyframedHullIndex++;
-
+        /*
 		if( isCoupledWithConcentricHull ) {
 			// This leaves a sufficient space for fire hull layers
 			offsetOfMultilayerMeshData += kMaxMeshesPerHull;
-		} else {
-			offsetOfMultilayerMeshData += numMeshesToSubmit;
-		}
+		} else {*/
+        offsetOfMultilayerMeshData += numMeshesToSubmit;
+		//}
 	}
 	/// MODIFY END
 
@@ -2199,9 +2216,17 @@ void SimulatedHullsSystem::BaseKeyframedHull::simulate( int64_t currTime, float 
 
 	unsigned LODnum = 0;
 	unsigned LODtoRender = v_LODtoShow.get();
-	for( StaticCagedMesh *currLOD = meshToRender, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
-		meshToRender = currLOD;
-		nextLOD = currLOD->nextLOD;
+	for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; nextLOD/*currLOD && ( LODnum < wsw::min( LODtoRender, 2u ) )*/; currLOD = nextLOD, LODnum++ ) {
+        if( currLOD ) {
+            meshToRender = currLOD;
+            nextLOD = currLOD->nextLOD;
+        } else if( LODnum > 20 || LODnum < -1 ){
+            cgNotice() << S_COLOR_RED << "WTF?? LODnum";
+            break;
+        } else {
+            cgNotice() << S_COLOR_RED << "WTF??";
+            break;
+        }
 	}
 
 	unsigned cageKey = meshToRender->loadedCageKey;
@@ -3007,43 +3032,78 @@ auto SimulatedHullsSystem::HullDynamicMesh::calcSolidSubdivLodLevel( const float
 
 	vec3_t center, extentVector;
 	VectorAvg( this->cullMins, this->cullMaxs, center );
+    cgNotice() << "center" << center[0] << center[1] << center[2];
 	VectorSubtract( this->cullMaxs, this->cullMins, extentVector );
+    cgNotice() << "extent" << VectorLengthFast( extentVector );
 	const float squareExtentValue = VectorLengthSquared( extentVector );
 	if( squareExtentValue < wsw::square( 1.0f ) ) [[unlikely]] {
 		// Skip drawing
 		return std::nullopt;
 	}
 
-	// Get a suitable subdiv level and store it for further use during this frame
-	unsigned chosenSubdivLevel = m_shared->simulatedSubdivLevel;
-	if( m_shared->tesselateClosestLod ) {
-		chosenSubdivLevel += 1;
-	}
 
-	const float extentValue    = Q_Sqrt( squareExtentValue );
-	const float squareDistance = DistanceSquared( center, viewOrigin );
-	// Don't even try using lesser lods if the mesh is sufficiently close to the viewer
-	if( squareDistance > wsw::square( 0.5f * extentValue + 64.0f ) ) {
-		const float meshViewTangent  = extentValue * Q_RSqrt( squareDistance );
-		const float meshTangentRatio = meshViewTangent * Q_Rcp( cameraViewTangent );
+    unsigned chosenSubdivLevel;
+    if( !m_shared->isAKeyframedHull ) {
+        // Get a suitable subdiv level and store it for further use during this frame
+        chosenSubdivLevel = m_shared->simulatedSubdivLevel;
+        if (m_shared->tesselateClosestLod) {
+            chosenSubdivLevel += 1;
+        }
 
-		// Diminish lod tangent ratio in the loop, drop subdiv level every step.
-		float lodTangentRatio = m_shared->nextLodTangentRatio;
-		for(;; ) {
-			if( meshTangentRatio > lodTangentRatio ) {
-				break;
-			}
-			if( chosenSubdivLevel == 0 ) {
-				break;
-			}
-			chosenSubdivLevel--;
-			lodTangentRatio *= m_shared->nextLodTangentRatio;
-			// Sanity check
-			if( lodTangentRatio < 1e-6 ) [[unlikely]] {
-				break;
-			}
-		};
-	}
+        const float extentValue = Q_Sqrt(squareExtentValue);
+        const float squareDistance = DistanceSquared(center, viewOrigin);
+        // Don't even try using lesser lods if the mesh is sufficiently close to the viewer
+        if (squareDistance > wsw::square(0.5f * extentValue + 64.0f)) {
+            const float meshViewTangent = extentValue * Q_RSqrt(squareDistance);
+            const float meshTangentRatio = meshViewTangent * Q_Rcp(cameraViewTangent);
+
+            // Diminish lod tangent ratio in the loop, drop subdiv level every step.
+            float lodTangentRatio = m_shared->nextLodTangentRatio;
+            for (;;) {
+                if (meshTangentRatio > lodTangentRatio) {
+                    break;
+                }
+                if (chosenSubdivLevel == 0) {
+                    break;
+                }
+                chosenSubdivLevel--;
+                lodTangentRatio *= m_shared->nextLodTangentRatio;
+                // Sanity check
+                if (lodTangentRatio < 1e-6) [[unlikely]] {
+                    break;
+                }
+            };
+        }
+    } else {
+        // TODO: it should not be subdiv level, it is LOD level !! these are more or less OPPOSITE
+        // Get a suitable subdiv level and store it for further use during this frame
+        chosenSubdivLevel = 0;
+
+        const float extentValue = Q_Sqrt(squareExtentValue);
+        const float squareDistance = DistanceSquared(center, viewOrigin);
+        // Don't even try using lesser lods if the mesh is sufficiently close to the viewer
+        if (squareDistance > wsw::square(0.5f * extentValue + 64.0f)) {
+            const float meshViewTangent = extentValue * Q_RSqrt(squareDistance);
+            const float meshTangentRatio = meshViewTangent * Q_Rcp(cameraViewTangent);
+
+            // Diminish lod tangent ratio in the loop, drop subdiv level every step.
+            float lodTangentRatio = m_shared->nextLodTangentRatio;
+            for (;;) {
+                if (meshTangentRatio > lodTangentRatio) {
+                    break;
+                }
+                if (chosenSubdivLevel == maxLODs) {
+                    break;
+                }
+                chosenSubdivLevel++;
+                lodTangentRatio *= m_shared->nextLodTangentRatio;
+                // Sanity check
+                if (lodTangentRatio < 1e-6) [[unlikely]] {
+                    break;
+                }
+            };
+        }
+    }
 
 	return chosenSubdivLevel;
 }
@@ -3238,12 +3298,40 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
 
 	if( m_shared->isAKeyframedHull ){
 		unsigned LODnum = 0;
-		unsigned LODtoRender = m_chosenSubdivLevel;
+        unsigned LODtoRender;
+        if( v_LODtoShow.get() >= 0 ){
+            LODtoRender = v_LODtoShow.get();
+        } else {
+            LODtoRender = m_chosenSubdivLevel;
+        }
 		StaticCagedMesh *meshToRender = m_shared->meshToRender;
-		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+        cgNotice() << "chosen subdiv level" << m_chosenSubdivLevel;
+
+		/*for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 			meshToRender = currLOD;
 			nextLOD = currLOD->nextLOD;
-		}
+		}*/
+
+        for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD/*currLOD && ( LODnum < wsw::min( LODtoRender, 2u ) )*/; currLOD = nextLOD, LODnum++ ) {
+            if( currLOD ) {
+                //meshToRender = currLOD;
+                if( currLOD->nextLOD ) {
+                    nextLOD = currLOD->nextLOD;
+                } else {
+                    cgNotice() << S_COLOR_GREEN << "ok";
+                }
+
+            } else if( LODnum > 20 || LODnum < -1 ){
+                cgNotice() << S_COLOR_RED << "WTF?? LODnum:" << LODnum;
+                break;
+            } else {
+                cgNotice() << S_COLOR_RED << "WTF?? LODnum:" << LODnum;
+                break;
+            }
+        }
+        // TODO: won't reassigning m_shared->meshToRender like this in this stage confuse others?
+        m_shared->meshToRender = meshToRender; // assign the appropriate LOD
+
 		numVertices = meshToRender->numVertices;
 		numIndices  = meshToRender->triIndices.size() * 3;
 	} else {
@@ -3369,6 +3457,8 @@ static void addLayerContributionToResultColor( float rampValue, unsigned numColo
 	}
 }
 
+IntConfigVar v_testMode( wsw::StringView("testMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
+
 auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *__restrict viewOrigin,
 																  const float *__restrict viewAxis,
 																  float cameraFovTangent,
@@ -3380,6 +3470,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 																  byte_vec4_t *__restrict destColors,
 																  uint16_t *__restrict destIndices ) const
 	-> std::pair<unsigned, unsigned> {//
+
+    cgNotice() << "filling mesh buffers";
 	/*
 	assert( m_shared->simulatedSubdivLevel <= BasicHullsHolder::kMaxSubdivLevel );
 	assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
@@ -3640,14 +3732,94 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 		}
 
 	} else {
+        const auto before = Sys_Microseconds();
+
+        // the correct LOD has already been assigned in getSotrageRequirements()
 		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+        const float lifetimeFrac = m_shared->lifetimeFrac;
 
 		// write positions to destPositions
 		// memcpy indices from mesh to render
+        const unsigned numFrames = meshToRender->numFrames;
 		const unsigned numTris = meshToRender->triIndices.size();
 		const unsigned numIndices = numTris * 3;
-		std::memcpy( destIndices, meshToRender->triIndices.data(), sizeof( uint16_t ) * numIndices );
+        const unsigned numVerts = meshToRender->numVertices;
+
+        numResultVertices = numVerts;
+        numResultIndices  = numIndices;
+
+        const tri *meshTriIndices = meshToRender->triIndices.data();
+        const unsigned *meshIndices   = &meshTriIndices[0][0];
+
+        // we could make the indices uint16_t, which would allow memcpy, which would be a few micros faster
+		//std::memcpy( destIndices, std::addressof( meshTriIndices[0][0] ), sizeof( uint16_t ) * numIndices );
+        for( int i = 0; i < numIndices; i++ ){
+            destIndices[i] = meshIndices[i];
+        }
+
+        const unsigned cageKey    = meshToRender->loadedCageKey;
+        const tri *cageTriIndices = m_shared->cageTriIndices;
+        const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
+
+        const float *limitsAtDirections    = m_shared->limitsAtDirections;
+        const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
+        const float scale                  = m_shared->scale;
+        const float *origin                = m_shared->origin;
+
 		// write colors to dest colors
+        // for now, use simple dark colors
+        byte_vec4_t genericColor = { 125, 125, 125, 255 };
+        for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
+            Vector4Copy( genericColor, destColors[vertNum] );
+        }
+
+        // write positions to dest positions
+        unsigned currFrame;
+        if( v_frameToShow.get() < 0 ){
+            currFrame = wsw::min( (unsigned) ((float) numFrames * lifetimeFrac), numFrames - 1 );
+        } else {
+            currFrame = v_frameToShow.get();
+        }
+
+        unsigned startVertIdx = currFrame * numVerts; // currFrame * numVerts;
+
+        for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
+            unsigned vertIdx = startVertIdx + vertNum;
+            unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
+
+            vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]};
+
+            vec3_t vertPos;
+            vec3_t moveDir;
+
+            const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
+            const unsigned cageVertIdx1 = cageTriIndices[triIdx][1];
+            const unsigned cageVertIdx2 = cageTriIndices[triIdx][2];
+
+            const float coeff0 = 1 - (coords[0] + coords[1]);
+            const float coeff1 = coords[0];
+            const float coeff2 = coords[1];
+
+            VectorScale(vertexMoveDirections[cageVertIdx0], coeff0, moveDir);
+            VectorMA(moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir);
+            VectorMA(moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir);
+            VectorNormalizeFast(moveDir);
+
+            const float limit =
+                    limitsAtDirections[cageVertIdx0] * coeff0 +
+                    limitsAtDirections[cageVertIdx1] * coeff1 +
+                    limitsAtDirections[cageVertIdx2] * coeff2;
+
+            const float offset = wsw::min(vertCoords[vertIdx].offset, limit) * scale;
+
+            VectorMA( origin, offset, moveDir, vertPos );
+
+            VectorCopy( vertPos, &destPositions[vertNum][0] );
+            destPositions[vertNum][3] = 1.0f;
+        }
+
+        cgNotice() << "building the caged mesh";
+        Com_Printf("It took %d millis for %d vertices and %d indices\n", (int)(Sys_Microseconds() - before), (int)numResultVertices, (int)numResultIndices);
 	}
 
 	return { numResultVertices, numResultIndices };
