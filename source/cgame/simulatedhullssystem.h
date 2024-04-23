@@ -568,28 +568,27 @@ private:
 		float *limitsAtDirections;
 		int64_t spawnTime { 0 };
 
-        SharedMeshData *sharedMeshData;
-
-		///SharedCageData *sharedCageData;
-
-		AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr }; // should probably be an array
-
+        /// should these arrays be statically allocated at amount kMaxSharedCageCagedMeshes, or dynamically created with new?
 		StaticCagedMesh *sharedCageCagedMeshes[kMaxSharedCageCagedMeshes];
-        //AppearanceRules appearanceRulesPerMesh[kMaxSharedCageCagedMeshes];
+        /// the following should all be arrays, as the above "sharedCageCagedMeshes"
+        SharedMeshData *sharedMeshData;
+        AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
 		HullSolidDynamicMesh *submittedSolidMesh;
+        /// END
 
 		vec3_t cageOffsetMinsDir, cageOffsetMaxsDir;
 		vec3_t origin;
 
-		unsigned numLayers { 0 };
 		unsigned numSharedCageCagedMeshes { 0 };
 		unsigned lifetime { 0 };
 
-		uint8_t subdivLevel { 0 };
-		//bool applyVertexDynLight { false }; should be re-implemented, if useful
+		//bool applyVertexDynLight { false }; should be re-implemented, if useful ->
+        /// physically lights do not really effect see through surfaces, even less waves or emitting objects (like explosions)
+        /// the renderer is currently capable of lighting opaque meshes and this is what should be done
+
 
 		void simulate( int64_t currTime, float timeDeltaSeconds,
-                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry ); /// SIMULATE IS TMP
+                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry ); /// SIMULATE IS TMP, FOR DEBUGGING
 	};
 
 	struct KeyframedHull : public BaseKeyframedHull {

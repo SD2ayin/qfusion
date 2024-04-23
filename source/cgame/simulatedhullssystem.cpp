@@ -1418,15 +1418,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		const DynamicMesh **submittedMeshesBuffer = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
 		float *const submittedOrderDesignators    = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
 
-        /// REMOVE
-        /*
-		const bool isCoupledWithConcentricHull = pairIndicesForKeyframedHulls[keyframedHullIndex] != std::nullopt;
-		if( isCoupledWithConcentricHull ) {
-			meshDataOffsetsForPairs.push_back( offsetOfMultilayerMeshData );
-			topAddedLayersForPairs.push_back( 0.0f );
-		}*/
-        /// REMOVE END
-
         const unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
         cgNotice() << "num meshes to render" << numMeshesToRender;
 		unsigned numMeshesToSubmit = 0;
@@ -1482,9 +1473,10 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			sharedMeshData->minZLastFrame        = 0.0f;
 			sharedMeshData->maxZLastFrame        = 0.0f;
 			sharedMeshData->zFade                = ZFade::NoFade;
-			sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
+			sharedMeshData->simulatedSubdivLevel = 0;
 			sharedMeshData->tesselateClosestLod  = false;
 			sharedMeshData->lerpNextLevelColors  = true;
+            /// should probably be lower UNLESS culling is incorrect, LOD _3 gets used when standing at the cage border almost
 			sharedMeshData->nextLodTangentRatio  = 0.30f;
 
 			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
@@ -3307,28 +3299,10 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
 		StaticCagedMesh *meshToRender = m_shared->meshToRender;
         cgNotice() << "chosen subdiv level" << m_chosenSubdivLevel;
 
-		/*for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum < LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 			meshToRender = currLOD;
 			nextLOD = currLOD->nextLOD;
-		}*/
-
-        for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD/*currLOD && ( LODnum < wsw::min( LODtoRender, 2u ) )*/; currLOD = nextLOD, LODnum++ ) {
-            if( currLOD ) {
-                //meshToRender = currLOD;
-                if( currLOD->nextLOD ) {
-                    nextLOD = currLOD->nextLOD;
-                } else {
-                    cgNotice() << S_COLOR_GREEN << "ok";
-                }
-
-            } else if( LODnum > 20 || LODnum < -1 ){
-                cgNotice() << S_COLOR_RED << "WTF?? LODnum:" << LODnum;
-                break;
-            } else {
-                cgNotice() << S_COLOR_RED << "WTF?? LODnum:" << LODnum;
-                break;
-            }
-        }
+		}
         // TODO: won't reassigning m_shared->meshToRender like this in this stage confuse others?
         m_shared->meshToRender = meshToRender; // assign the appropriate LOD
 
