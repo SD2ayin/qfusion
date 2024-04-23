@@ -1082,8 +1082,13 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
                 hullParams.origin[2] + hullParams.offset[2]
         };
 
-		hull->sharedCageCagedMeshes[0] = hullParams.sharedCageCagedMeshes;
-        hull->numSharedCageCagedMeshes = hullParams.numCagedMeshes;
+        const unsigned numMeshes = hullParams.numCagedMeshes;
+        hull->numSharedCageCagedMeshes = numMeshes;
+
+        for( unsigned meshNum = 0; meshNum < numMeshes; meshNum++ ) {
+            hull->sharedCageCagedMeshes[meshNum] = &hullParams.sharedCageCagedMeshes[meshNum];
+        }
+
 
         SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
                                                  hullParams.rotation, cagedMesh, &cg.polyEffectsSystem );
@@ -1476,7 +1481,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			sharedMeshData->simulatedSubdivLevel = 0;
 			sharedMeshData->tesselateClosestLod  = false;
 			sharedMeshData->lerpNextLevelColors  = true;
-            /// should probably be lower UNLESS culling is incorrect, LOD _3 gets used when standing at the cage border almost
 			sharedMeshData->nextLodTangentRatio  = 0.30f;
 
 			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
@@ -1494,7 +1498,10 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 				vec4_t mins, maxs;
 
-				const float currBoundingRadius = meshToRender->boundingRadii[currFrame];
+                // we can assume the LODs have about the same bounding radius as the most detailed version, also:
+                // as other LODs are used at longer distances, even if the LOD was slightly larger, it will not be noticeable
+                // if the culling is premature.
+				const float currBoundingRadius = meshToRender->boundingRadii[currFrame] * hull->scale;
 				VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMinsDir, mins );
 				VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMaxsDir, maxs );
 				maxBoundingRadius = wsw::max( maxBoundingRadius, currBoundingRadius );
