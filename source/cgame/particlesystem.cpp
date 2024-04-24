@@ -929,7 +929,7 @@ auto fillParticleFlock( const MeshFlockParams *__restrict params,
 
         // choose a face
         const unsigned faceIdx = rng->nextBounded(numFaces);
-        const unsigned *faceIndices = params->geometry->triIndices[faceIdx];
+        const uint16_t *faceIndices = params->geometry->triIndices[faceIdx];
         vec3_t triCoords[3];
         getTriCoords( faceIndices, params->geometry, triCoords );
         // choose a position on the face

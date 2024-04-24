@@ -4,7 +4,7 @@
 #ifndef QFUSION_GEOMETRY_H
 #define QFUSION_GEOMETRY_H
 
-typedef unsigned tri[3];
+typedef uint16_t tri[3];
 
 struct Geometry {
     std::span<vec3_t> vertexPositions;
@@ -16,7 +16,7 @@ struct TexturedGeometry {
     std::span<vec2_t[3]> triUVcoords;
 };
 
-void inline getTriCoords( const unsigned *triIndices, const Geometry *geometry, vec3_t *outCoords ){
+void inline getTriCoords( const uint16_t *triIndices, const Geometry *geometry, vec3_t *outCoords ){
     VectorCopy( geometry->vertexPositions[triIndices[0]], outCoords[0] );
     VectorCopy( geometry->vertexPositions[triIndices[1]], outCoords[1] );
     VectorCopy( geometry->vertexPositions[triIndices[2]], outCoords[2] );

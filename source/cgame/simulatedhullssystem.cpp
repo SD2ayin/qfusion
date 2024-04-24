@@ -429,7 +429,7 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 				foundCoords = true;
 			}
             for( unsigned faceNum = 0; ( faceNum < cageFaces ) && !foundCoords; faceNum++ ) {
-                const unsigned *faceIndices = cage->triIndices[faceNum];
+                const uint16_t *faceIndices = cage->triIndices[faceNum];
                 vec3_t triCoords[3];
                 getTriCoords( faceIndices, cage, triCoords );
                 // calculate offsets of other vertices from the first one in the array
@@ -3730,13 +3730,13 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         numResultIndices  = numIndices;
 
         const tri *meshTriIndices = meshToRender->triIndices.data();
-        const unsigned *meshIndices   = &meshTriIndices[0][0];
+        //const uint16_t *meshIndices   = &meshTriIndices[0][0];
 
         // we could make the indices uint16_t, which would allow memcpy, which would be a few micros faster
-		//std::memcpy( destIndices, std::addressof( meshTriIndices[0][0] ), sizeof( uint16_t ) * numIndices );
-        for( int i = 0; i < numIndices; i++ ){
-            destIndices[i] = meshIndices[i];
-        }
+		std::memcpy( destIndices, meshTriIndices, sizeof( uint16_t ) * numIndices );
+//        for( int i = 0; i < numIndices; i++ ){
+//            destIndices[i] = meshIndices[i];
+//        }
 
         const unsigned cageKey    = meshToRender->loadedCageKey;
         const tri *cageTriIndices = m_shared->cageTriIndices;
