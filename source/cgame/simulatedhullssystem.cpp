@@ -619,18 +619,6 @@ void SimulatedHullsSystem::unlinkAndFreeBlastHull( BlastHull *hull ) {
 	m_blastHullsAllocator.free( hull );
 }
 
-void SimulatedHullsSystem::unlinkAndFreeToonSmokeHull( ToonSmokeHull *hull ) {
-	wsw::unlink( hull, &m_toonSmokeHullsHead );
-	hull->~ToonSmokeHull();
-	m_toonSmokeHullsAllocator.free( hull );
-
-    /*
-    cage = hull->cage;
-    wsw::unlink( hull, &cage->head );
-    allocator = cage->allocator;
-    allocator.free( hull );
-     */
-}
 
 auto SimulatedHullsSystem::allocStaticCageHull( KeyframedHull **head, wsw::FreelistAllocator *allocator,
                                                 int64_t currTime, unsigned lifetime,
@@ -681,10 +669,6 @@ auto SimulatedHullsSystem::allocSmokeHull( int64_t currTime, unsigned lifetime )
 
 auto SimulatedHullsSystem::allocWaveHull( int64_t currTime, unsigned lifetime ) -> WaveHull * {
 	return allocHull<WaveHull, true>( &m_waveHullsHead, &m_waveHullsAllocator, currTime, lifetime );
-}
-
-auto SimulatedHullsSystem::allocToonSmokeHull(int64_t currTime, unsigned int lifetime) -> ToonSmokeHull * {
-	return allocHull<ToonSmokeHull, false>( &m_toonSmokeHullsHead, &m_toonSmokeHullsAllocator, currTime, lifetime );
 }
 
 // TODO: Turn on "Favor small code" for this template
@@ -1064,10 +1048,9 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	//hull->vertexMoveDirections = vertices;
 	hull->scale                = scale;
 
-	hull->appearanceRules = appearanceRules;
 }
 
-void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyframedHullParams &hullParams ) {
+void SimulatedHullsSystem::addHull( AppearanceRules *appearanceRules, StaticKeyframedHullParams &hullParams ) {
 
     SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullParams.sharedCageCagedMeshes;
     SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
@@ -1087,6 +1070,7 @@ void SimulatedHullsSystem::addHull( AppearanceRules &appearanceRules, StaticKeyf
 
         for( unsigned meshNum = 0; meshNum < numMeshes; meshNum++ ) {
             hull->sharedCageCagedMeshes[meshNum] = &hullParams.sharedCageCagedMeshes[meshNum];
+			hull->appearanceRules[meshNum]       = appearanceRules[meshNum];
         }
 
 
@@ -1441,7 +1425,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 			assert( cageKey == hull->sharedCageCagedMeshes[meshNum]->loadedCageKey );
 
-            const AppearanceRules *appearanceRules = &hull->appearanceRules;
+            const AppearanceRules *appearanceRules = &hull->appearanceRules[meshNum];
 
             const SolidAppearanceRules *solidAppearanceRules = nullptr;
             const CloudAppearanceRules *cloudAppearanceRules = nullptr;
@@ -1457,7 +1441,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 			assert( solidAppearanceRules || cloudAppearanceRules );
 			//SharedMeshData *__restrict sharedMeshData = &hull->sharedMeshData;
-            SharedMeshData *sharedMeshData = hull->sharedMeshData;
+            SharedMeshData *sharedMeshData = &hull->sharedMeshData[meshNum];
 
 			sharedMeshData->lifetimeFrac = lifetimeFrac;
 
@@ -3730,13 +3714,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         numResultIndices  = numIndices;
 
         const tri *meshTriIndices = meshToRender->triIndices.data();
-        //const uint16_t *meshIndices   = &meshTriIndices[0][0];
 
-        // we could make the indices uint16_t, which would allow memcpy, which would be a few micros faster
 		std::memcpy( destIndices, meshTriIndices, sizeof( uint16_t ) * numIndices );
-//        for( int i = 0; i < numIndices; i++ ){
-//            destIndices[i] = meshIndices[i];
-//        }
 
         const unsigned cageKey    = meshToRender->loadedCageKey;
         const tri *cageTriIndices = m_shared->cageTriIndices;

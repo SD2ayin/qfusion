@@ -572,7 +572,7 @@ private:
 		StaticCagedMesh *sharedCageCagedMeshes[kMaxSharedCageCagedMeshes];
         /// the following should all be arrays, as the above "sharedCageCagedMeshes"
         SharedMeshData *sharedMeshData;
-        AppearanceRules appearanceRules = SolidAppearanceRules { .material = nullptr };
+        AppearanceRules *appearanceRules;// = SolidAppearanceRules { .material = nullptr };
 		HullSolidDynamicMesh *submittedSolidMesh;
         /// END
 
@@ -595,11 +595,17 @@ private:
 
 		KeyframedHull *prev { nullptr }, *next { nullptr };
 
-		HullSolidDynamicMesh storageOfSolidMeshes[1];
+		SharedMeshData storageOfSharedMeshData[kMaxSharedCageCagedMeshes];
+		AppearanceRules storageOfAppearanceRules[kMaxSharedCageCagedMeshes];
+		HullSolidDynamicMesh storageOfSolidMeshes[kMaxSharedCageCagedMeshes];
 
 		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
             if( addressOfMem ) {
+
+				sharedMeshData     = &storageOfSharedMeshData[0];
+				appearanceRules    = &storageOfAppearanceRules[0];
 				submittedSolidMesh = &storageOfSolidMeshes[0];
+
                 unsigned offset = sizeof( KeyframedHull );
                 this->vertexMoveDirections = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );
                 offset += sizeof( *BaseKeyframedHull::vertexMoveDirections ) * numVerts;
@@ -618,7 +624,6 @@ private:
 	using BlastHull       = ConcentricSimulatedHull<3, 3>;
 	using SmokeHull       = RegularSimulatedHull<3, true>;
 	using WaveHull        = RegularSimulatedHull<2>;
-	using ToonSmokeHull   = KeyframedHull;
 
     void unlinkAndFreeStaticCageHull( KeyframedHull *hull );
 
@@ -626,7 +631,6 @@ private:
 	void unlinkAndFreeFireClusterHull( FireClusterHull *hull );
 	void unlinkAndFreeBlastHull( BlastHull *hull );
 	void unlinkAndFreeSmokeHull( SmokeHull *hull );
-	void unlinkAndFreeToonSmokeHull( ToonSmokeHull *hull);
 	void unlinkAndFreeWaveHull( WaveHull *hull );
 
 	template <typename Hull, bool HasShapeLists>
@@ -644,8 +648,6 @@ private:
 	auto allocFireClusterHull( int64_t currTime, unsigned lifetime ) -> FireClusterHull *;
 	[[nodiscard]]
 	auto allocBlastHull( int64_t currTime, unsigned lifetime ) -> BlastHull *;
-    [[nodiscard]]
-    auto allocToonSmokeHull( int64_t currTime, unsigned lifetime ) -> ToonSmokeHull *;
 	[[nodiscard]]
 	auto allocSmokeHull( int64_t currTime, unsigned lifetime ) -> SmokeHull *;
 	[[nodiscard]]
@@ -665,7 +667,7 @@ private:
                             SimulatedHullsSystem::StaticCagedMesh *meshToRender, PolyEffectsSystem *effectSystem,
                             const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
-    void addHull( AppearanceRules &appearanceRules, StaticKeyframedHullParams &hullParams );
+    void addHull( AppearanceRules *appearanceRules, StaticKeyframedHullParams &hullParams );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
@@ -711,7 +713,6 @@ private:
 	FireClusterHull *m_fireClusterHullsHead { nullptr };
 	BlastHull *m_blastHullsHead { nullptr };
 	SmokeHull *m_smokeHullsHead { nullptr };
-	ToonSmokeHull *m_toonSmokeHullsHead { nullptr };
 	WaveHull *m_waveHullsHead { nullptr };
 
 	wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists;
@@ -721,7 +722,6 @@ private:
 	wsw::HeapBasedFreelistAllocator m_fireClusterHullsAllocator { sizeof( FireClusterHull ), kMaxFireHulls };
 	wsw::HeapBasedFreelistAllocator m_blastHullsAllocator { sizeof( BlastHull ), kMaxBlastHulls };
 	wsw::HeapBasedFreelistAllocator m_smokeHullsAllocator { sizeof( SmokeHull ), kMaxSmokeHulls };
-	wsw::HeapBasedFreelistAllocator m_toonSmokeHullsAllocator { sizeof( ToonSmokeHull ), kMaxToonSmokeHulls };
 	wsw::HeapBasedFreelistAllocator m_waveHullsAllocator { sizeof( WaveHull ), kMaxWaveHulls };
 
 	// Can't specify byte_vec4_t as the template parameter

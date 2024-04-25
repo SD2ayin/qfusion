@@ -574,7 +574,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 				.sharedCageCagedMeshes = cagedMesh,
 		};
 
-		hullsSystem->addHull( appearanceRules, hullParams );
+		hullsSystem->addHull( &appearanceRules, hullParams );
 
 
 #if 0
