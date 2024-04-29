@@ -185,6 +185,8 @@ public:
 
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
+	void applyShading( StaticCagedMesh *mesh );
+
 	struct OffsetKeyframe {
 		float lifetimeFraction { 0.0f };
 		const float *offsets { nullptr };
@@ -574,6 +576,7 @@ private:
         SharedMeshData *sharedMeshData;
         AppearanceRules *appearanceRules;// = SolidAppearanceRules { .material = nullptr };
 		HullSolidDynamicMesh *submittedSolidMesh;
+        HullCloudDynamicMesh *submittedCloudMesh;
         /// END
 
 		vec3_t cageOffsetMinsDir, cageOffsetMaxsDir;
@@ -598,6 +601,7 @@ private:
 		SharedMeshData storageOfSharedMeshData[kMaxSharedCageCagedMeshes];
 		AppearanceRules storageOfAppearanceRules[kMaxSharedCageCagedMeshes];
 		HullSolidDynamicMesh storageOfSolidMeshes[kMaxSharedCageCagedMeshes];
+        HullCloudDynamicMesh storageOfCloudMeshes[kMaxSharedCageCagedMeshes];
 
 		explicit KeyframedHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
             if( addressOfMem ) {
@@ -605,6 +609,7 @@ private:
 				sharedMeshData     = &storageOfSharedMeshData[0];
 				appearanceRules    = &storageOfAppearanceRules[0];
 				submittedSolidMesh = &storageOfSolidMeshes[0];
+                submittedCloudMesh = &storageOfCloudMeshes[0];
 
                 unsigned offset = sizeof( KeyframedHull );
                 this->vertexMoveDirections = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );

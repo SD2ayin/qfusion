@@ -549,10 +549,102 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 			break;
 		}
     }
-
     //cgNotice() << "test" << cagedMesh->cage->cageGeometry.vertexPositions.size();
 
     return cagedMesh;
+}
+
+void SimulatedHullsSystem::applyShading( StaticCagedMesh *mesh ){
+	const unsigned numFrames = mesh->numFrames;
+	const unsigned numVertices = mesh->numVertices;
+
+	constexpr unsigned kMinLifetime = 2000;
+
+	constexpr float scrollSpeed     = 1.43f;
+	constexpr float scrollDistance  = scrollSpeed * ( (float)kMinLifetime * 1e-3f );
+
+	constexpr float initialSize     = 0.1f;
+	constexpr float fadeRange       = 0.12f;
+	constexpr float fadeStartAtFrac = 0.1f;
+	constexpr float zFadeInfluence  = 0.3f;
+
+	const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere( 4 );
+	assert( verticesSpan.size() == kNumVertices );
+
+	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ) {
+		const float keyframeFrac     = (float)(frameNum) / (float)( numFrames - 1 ); // -1 so the final value is 1.0f
+		const float fireLifetime     = 0.54f; // 0.47
+		const float fireStartFrac    = 0.9f;
+		const float fireLifetimeFrac = wsw::min( 1.0f, keyframeFrac * ( 1.0f / fireLifetime ) );
+		const float fireFrac         = fireLifetimeFrac * fireStartFrac + ( 1.0f - fireStartFrac );
+
+		const float scrolledDistance = scrollDistance * keyframeFrac;
+
+		float *const frameVertexOffsets     = vertexOffsetStorage[frameNum];
+		float *const frameFireVertexMask    = fireVertexMaskStorage[frameNum];
+		float *const frameFadeVertexMask    = fadeVertexMaskStorage[frameNum];
+		float *const frameOffsetsFromLimits = vertexOffsetsFromLimitsStorage[frameNum];
+
+		//const float expansion = (1-initialSize) * ( 1.f - (x-1.f)*(x-1.f) ) + initialSize;
+		const float initialVelocity = 5.0f;
+		const float expansion       = ( 1.0f - initialSize ) * ( 1.0f - std::exp( -initialVelocity * keyframeFrac ) ) + initialSize;
+
+		const vec4_t *const vertices = verticesSpan.data();
+		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
+			const float *const vertex = vertices[vertexNum];
+			const float voronoiNoise  = calcVoronoiNoiseSquared( vertex[0], vertex[1], vertex[2] + scrolledDistance );
+			const float offset        = expansion * ( 1.0f - 0.7f * voronoiNoise );
+
+			frameVertexOffsets[vertexNum]  = offset;
+			frameFireVertexMask[vertexNum] = voronoiNoise; // Values between 1 and 0 where 1 has the highest offset
+
+			const float simplexNoise       = calcSimplexNoise3D( vertex[0], vertex[1], vertex[2] - scrolledDistance);
+			const float fadeFrac           = ( keyframeFrac - fadeStartAtFrac ) / ( 1.0f - fadeStartAtFrac );
+			const float zFade              = 0.5f * ( vertex[2] + 1.0f ) * zFadeInfluence;
+			frameFadeVertexMask[vertexNum] = fadeFrac - simplexNoise * ( 1.0f - zFadeInfluence ) - zFade + fadeRange;
+		}
+
+		SimulatedHullsSystem::MaskedShadingLayer fireMaskedShadingLayer;
+		fireMaskedShadingLayer.vertexMaskValues = frameFireVertexMask;
+		fireMaskedShadingLayer.colors           = kFireColors;
+
+		fireMaskedShadingLayer.colorRanges[0] = fireFrac * fireFrac;
+		fireMaskedShadingLayer.colorRanges[1] = fireFrac;
+		fireMaskedShadingLayer.colorRanges[2] = std::sqrt( fireFrac );
+		fireMaskedShadingLayer.blendMode      = SimulatedHullsSystem::BlendMode::AlphaBlend;
+		fireMaskedShadingLayer.alphaMode      = SimulatedHullsSystem::AlphaMode::Override;
+
+		// 0.1f to 0.2f produced a neat outline along the hull
+		SimulatedHullsSystem::DotShadingLayer highlightDotShadingLayer;
+		highlightDotShadingLayer.colors         = kHighlightColors;
+		highlightDotShadingLayer.colorRanges[0] = 0.4f;
+		highlightDotShadingLayer.colorRanges[1] = 0.48f;
+		highlightDotShadingLayer.blendMode      = SimulatedHullsSystem::BlendMode::Add;
+		highlightDotShadingLayer.alphaMode      = SimulatedHullsSystem::AlphaMode::Add;
+
+		SimulatedHullsSystem::MaskedShadingLayer fadeMaskedShadingLayer;
+		fadeMaskedShadingLayer.vertexMaskValues = frameFadeVertexMask;
+		fadeMaskedShadingLayer.colors           = kFadeColors;
+		fadeMaskedShadingLayer.colorRanges[0]   = 0.0f;
+		fadeMaskedShadingLayer.colorRanges[1]   = fadeRange;
+		fadeMaskedShadingLayer.blendMode        = SimulatedHullsSystem::BlendMode::Add;
+		fadeMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::AlphaMode::Override;
+
+		const auto *const frameLayersData = shadingLayersStorage.data() + shadingLayersStorage.size();
+		static_assert( kNumShadingLayers == 3 );
+		shadingLayersStorage.emplace_back( fireMaskedShadingLayer );
+		shadingLayersStorage.emplace_back( highlightDotShadingLayer );
+		shadingLayersStorage.emplace_back( fadeMaskedShadingLayer );
+
+		std::fill( frameOffsetsFromLimits, frameOffsetsFromLimits + kNumVertices, 0.0f );
+
+		setOfKeyframes.emplace_back( SimulatedHullsSystem::OffsetKeyframe {
+				.lifetimeFraction = keyframeFrac,
+				.offsets          = frameVertexOffsets,
+				.offsetsFromLimit = frameOffsetsFromLimits,
+				.shadingLayers    = { frameLayersData, kNumShadingLayers },
+		});
+	}
 }
 
 void SimulatedHullsSystem::clear() {
@@ -1346,8 +1438,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
 				if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
 					mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
-					// We don't know the final alpha as we have to multiply it by the actual color value.
-					// Still, we can conclude that the multiplication result will be zero as a byte for this value.
 					if( mesh->m_alphaScale >= ( 1.0f / 255.0f ) ) {
 						Vector4Copy( hull->mins, mesh->cullMins );
 						Vector4Copy( hull->maxs, mesh->cullMaxs );
@@ -1400,7 +1490,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	unsigned keyframedHullIndex = 0;
     /// MODIFY
 	for( const BaseKeyframedHull *__restrict hull: activeKeyframedHulls ) {
-        cgNotice() << "simulate and submit for cagedhulls";
 
 		assert( hull->numLayers );
 
@@ -1408,7 +1497,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		float *const submittedOrderDesignators    = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
 
         const unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
-        cgNotice() << "num meshes to render" << numMeshesToRender;
 		unsigned numMeshesToSubmit = 0;
 
 		const float rcpLifetime  = Q_Rcp( (float)hull->lifetime );
@@ -1421,7 +1509,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 		float maxBoundingRadius = 0.0f;
 
         for( unsigned meshNum = 0; meshNum < numMeshesToRender; ++meshNum ) {
-            cgNotice() << "looping over" << numMeshesToRender << "meshes to render";
 
 			assert( cageKey == hull->sharedCageCagedMeshes[meshNum]->loadedCageKey );
 
@@ -1440,7 +1527,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             assert( solidAppearanceRules || cloudAppearanceRules );
 
 			assert( solidAppearanceRules || cloudAppearanceRules );
-			//SharedMeshData *__restrict sharedMeshData = &hull->sharedMeshData;
             SharedMeshData *sharedMeshData = &hull->sharedMeshData[meshNum];
 
 			sharedMeshData->lifetimeFrac = lifetimeFrac;
@@ -1474,25 +1560,25 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 			sharedMeshData->isAKeyframedHull = true;
 
+            const unsigned numFrames = meshToRender->numFrames;
+            const unsigned currFrame = wsw::min( numFrames - 1, (unsigned)( lifetimeFrac * numFrames ) );
+
+            vec4_t mins, maxs;
+
+            // we can assume the LODs have about the same bounding radius as the most detailed version, also:
+            // as other LODs are used at longer distances, even if the LOD was slightly larger, it will not be noticeable
+            // if the culling is premature.
+            const float currBoundingRadius = meshToRender->boundingRadii[currFrame] * hull->scale;
+            VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMinsDir, mins );
+            VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMaxsDir, maxs );
+            maxBoundingRadius = wsw::max( maxBoundingRadius, currBoundingRadius );
+            mins[3] = 0.0f, maxs[3] = 1.0f;
+
 			if( solidAppearanceRules ) [[likely]] {
-				HullSolidDynamicMesh *mesh = hull->submittedSolidMesh;
+				HullSolidDynamicMesh *mesh = &hull->submittedSolidMesh[meshNum];
 
-				const unsigned numFrames = meshToRender->numFrames;
-				const unsigned currFrame = wsw::min( numFrames - 1, (unsigned)( lifetimeFrac * numFrames ) );
-
-				vec4_t mins, maxs;
-
-                // we can assume the LODs have about the same bounding radius as the most detailed version, also:
-                // as other LODs are used at longer distances, even if the LOD was slightly larger, it will not be noticeable
-                // if the culling is premature.
-				const float currBoundingRadius = meshToRender->boundingRadii[currFrame] * hull->scale;
-				VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMinsDir, mins );
-				VectorMA( hull->origin, currBoundingRadius, hull->cageOffsetMaxsDir, maxs );
-				maxBoundingRadius = wsw::max( maxBoundingRadius, currBoundingRadius );
-				mins[3] = 0.0f, maxs[3] = 1.0f;
-
-				Vector4Copy( mins, mesh->cullMins );
-				Vector4Copy( maxs, mesh->cullMaxs );
+                Vector4Copy( mins, mesh->cullMins );
+                Vector4Copy( maxs, mesh->cullMaxs );
 
 				mesh->material = solidAppearanceRules->material;
 				mesh->m_shared = sharedMeshData;
@@ -1504,146 +1590,66 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 				submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
 				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
 
-				/// should be removed too
-				/*
-				if( isCoupledWithConcentricHull ) {
-					topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
-				}*/
-				/// should be removed too  END
 
 				numMeshesToSubmit++;
-			} else {
-                cgNotice() << "no solid appearance rules";
+			}
+
+            if( cloudAppearanceRules ) [[unlikely]] {
+				cgNotice() << "cloud appearance rules found";
+
+                assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
+                assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
+
+                const float hullLifetimeFrac = (float)( currTime - hull->spawnTime ) * Q_Rcp( (float)hull->lifetime );
+
+                for( size_t meshPropNum = 0; meshPropNum < cloudAppearanceRules->spanOfMeshProps.size(); ++meshPropNum ) { // seems wrong, the hull struct only has one single slot per layer (before) for submitted cloud meshes..
+                    const CloudMeshProps &__restrict meshProps  = cloudAppearanceRules->spanOfMeshProps[meshPropNum];
+                    HullCloudDynamicMesh *const __restrict mesh = &hull->submittedCloudMesh[meshNum];
+
+                    mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+                    if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
+                        mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+                        Vector4Copy( mins, mesh->cullMins );
+                        Vector4Copy( maxs, mesh->cullMaxs );
+
+                        Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
+
+                        mesh->material            = meshProps.material;
+                        //mesh->applyVertexDynLight = hull->applyVertexDynLight; // TODO: restore this functionality if useful
+                        mesh->m_shared            = sharedMeshData;
+                        mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
+                        mesh->m_applyRotation     = meshProps.applyRotation;
+
+                        mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
+                        mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
+                        mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
+
+                        if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
+                            const auto randomWord          = (uint16_t)m_rng.next();
+                            mesh->m_speedIndexShiftInTable = ( randomWord >> 0 ) & 0xFF;
+                            mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
+                        }
+
+                        const float drawOrderDesignator = 2.0f * (float)( numMeshesToRender - meshNum ) + cloudLayerOrderBoost;
+
+                        submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+                        submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+
+//                            if( isCoupledWithConcentricHull ) {
+//                                topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
+//                            }
+
+                        numMeshesToSubmit++;
+                    }
+                }
             }
+        }
 
-		}
-        /*
-		for( unsigned layerNum = 0; layerNum < hull->numLayers; ++layerNum ) {
-			BaseKeyframedHull::Layer *__restrict layer = &hull->layers[layerNum];
-
-			const AppearanceRules *appearanceRules = &hull->appearanceRules;
-			if( layer->overrideAppearanceRules ) {
-				appearanceRules = layer->overrideAppearanceRules;
-			}
-
-			const SolidAppearanceRules *solidAppearanceRules = nullptr;
-			const CloudAppearanceRules *cloudAppearanceRules = nullptr;
-			if( const auto *solidAndCloudRules = std::get_if<SolidAndCloudAppearanceRules>( appearanceRules ) ) {
-				solidAppearanceRules = &solidAndCloudRules->solidRules;
-				cloudAppearanceRules = &solidAndCloudRules->cloudRules;
-			} else {
-				solidAppearanceRules = std::get_if<SolidAppearanceRules>( appearanceRules );
-				cloudAppearanceRules = std::get_if<CloudAppearanceRules>( appearanceRules );
-			}
-
-			assert( solidAppearanceRules || cloudAppearanceRules );
-			SharedMeshData *const __restrict sharedMeshData = layer->sharedMeshData;
-
-			sharedMeshData->simulatedPositions   = layer->vertexPositions;
-
-			const unsigned currentKeyframe = layer->lastKeyframeNum;
-			sharedMeshData->prevShadingLayers    = layer->offsetKeyframeSet[currentKeyframe].shadingLayers;
-			sharedMeshData->nextShadingLayers    = layer->offsetKeyframeSet[currentKeyframe + 1].shadingLayers;
-			sharedMeshData->lerpFrac             = layer->lerpFrac;
-
-			sharedMeshData->simulatedNormals     = nullptr;
-
-			sharedMeshData->minZLastFrame        = 0.0f;
-			sharedMeshData->maxZLastFrame        = 0.0f;
-			sharedMeshData->zFade                = ZFade::NoFade;
-			sharedMeshData->simulatedSubdivLevel = hull->subdivLevel;
-			sharedMeshData->tesselateClosestLod  = false;
-			sharedMeshData->lerpNextLevelColors  = true;
-			sharedMeshData->nextLodTangentRatio  = 0.30f;
-
-			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
-			sharedMeshData->cachedOverrideColorsSpanInBuffer = std::nullopt;
-			sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
-			sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
-
-			sharedMeshData->isAKeyframedHull = true;
-
-			if( solidAppearanceRules ) [[likely]] {
-				HullSolidDynamicMesh *__restrict mesh = layer->submittedSolidMesh;
-
-				Vector4Copy( layer->mins, mesh->cullMins );
-				Vector4Copy( layer->maxs, mesh->cullMaxs );
-
-				// TODO: Make the material configurable
-				mesh->material = cgs.shaderWhite;
-				mesh->m_shared = sharedMeshData;
-				// TODO: Restore this functionality if it could be useful for toon hull
-				//mesh->applyVertexDynLight = hull->applyVertexDynLight;
-
-				const float drawOrderDesignator = 2.0f * layer->drawOrderDesignator + solidLayerOrderBoost;
-
-				submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
-				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
-
-				if( isCoupledWithConcentricHull ) {
-					topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
-				}
-
-				numMeshesToSubmit++;
-			}
-
-			/// DISABLE CLOUD TMP
-			/*
-			if( cloudAppearanceRules ) [[unlikely]] {
-				assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
-				assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
-
-				const float hullLifetimeFrac = (float)( currTime - hull->spawnTime ) * Q_Rcp( (float)hull->lifetime );
-
-				for( size_t meshNum = 0; meshNum < cloudAppearanceRules->spanOfMeshProps.size(); ++meshNum ) {
-					const CloudMeshProps &__restrict meshProps  = cloudAppearanceRules->spanOfMeshProps[meshNum];
-					HullCloudDynamicMesh *const __restrict mesh = layer->submittedCloudMeshes[meshNum];
-
-					mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
-					if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
-						mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
-						if( mesh->m_alphaScale >= ( 1.0f / 255.0f ) ) {
-							Vector4Copy( layer->mins, mesh->cullMins );
-							Vector4Copy( layer->maxs, mesh->cullMaxs );
-
-							Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
-
-							mesh->material            = meshProps.material;
-							//mesh->applyVertexDynLight = hull->applyVertexDynLight; // TODO: restore this functionality if useful
-							mesh->m_shared            = sharedMeshData;
-							mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
-							mesh->m_applyRotation     = meshProps.applyRotation;
-
-							mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
-							mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
-							mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
-
-							if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
-								const auto randomWord          = (uint16_t)m_rng.next();
-								mesh->m_speedIndexShiftInTable = ( randomWord >> 0 ) & 0xFF;
-								mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
-							}
-
-							const float drawOrderDesignator = 2.0f * layer->drawOrderDesignator + cloudLayerOrderBoost;
-
-							submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
-							submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
-
-							if( isCoupledWithConcentricHull ) {
-								topAddedLayersForPairs.back() = wsw::max( topAddedLayersForPairs.back(), drawOrderDesignator );
-							}
-
-							numMeshesToSubmit++;
-						}
-					}
-				}
-			} ///
-			/// DISABLE CLOUD TMP END
-		}*/
 
 		if( numMeshesToSubmit ) [[likely]] {
 			assert( numMeshesToSubmit <= kMaxMeshesPerHull );
-			// Submit it right now, otherwise postpone submission to processing of concentric hulls
+
+			cgNotice() << "submitting something";
 
 			vec4_t mins, maxs;
 
@@ -1651,7 +1657,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			VectorMA( hull->origin, maxBoundingRadius, hull->cageOffsetMaxsDir, maxs );
 
 			//if( !isCoupledWithConcentricHull ) {
-            cgNotice() << "has meshes to submit";
 
             drawSceneRequest->addCompoundDynamicMesh( mins, maxs, submittedMeshesBuffer,
                                                       numMeshesToSubmit, submittedOrderDesignators );
@@ -3015,9 +3020,7 @@ auto SimulatedHullsSystem::HullDynamicMesh::calcSolidSubdivLodLevel( const float
 
 	vec3_t center, extentVector;
 	VectorAvg( this->cullMins, this->cullMaxs, center );
-    cgNotice() << "center" << center[0] << center[1] << center[2];
 	VectorSubtract( this->cullMaxs, this->cullMins, extentVector );
-    cgNotice() << "extent" << VectorLengthFast( extentVector );
 	const float squareExtentValue = VectorLengthSquared( extentVector );
 	if( squareExtentValue < wsw::square( 1.0f ) ) [[unlikely]] {
 		// Skip drawing
@@ -3276,6 +3279,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
 		m_shared->cachedChosenSolidSubdivLevel = std::monostate();
 		return std::nullopt;
 	}
+
 	unsigned numVertices;
 	unsigned numIndices;
 
@@ -3288,7 +3292,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
             LODtoRender = m_chosenSubdivLevel;
         }
 		StaticCagedMesh *meshToRender = m_shared->meshToRender;
-        cgNotice() << "chosen subdiv level" << m_chosenSubdivLevel;
 
 		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 			meshToRender = currLOD;
@@ -3329,6 +3332,8 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 		return std::nullopt;
 	}
 
+	unsigned numGridVertices;
+
 	assert( m_shiftFromDefaultLevelToHide <= 0 );
 	if( m_chosenSubdivLevel > m_shared->simulatedSubdivLevel ) {
 		m_chosenSubdivLevel = m_shared->simulatedSubdivLevel;
@@ -3343,21 +3348,46 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 	assert( m_tessLevelShiftForMaxVertexIndex <= 0 );
 	assert( m_tessLevelShiftForMinVertexIndex <= m_tessLevelShiftForMaxVertexIndex );
 
-	if( const int level = (int)m_chosenSubdivLevel + this->m_tessLevelShiftForMinVertexIndex; level > 0 ) {
-		m_minVertexNumThisFrame = (unsigned)::basicHullsHolder.getIcosphereForLevel( level - 1 ).vertices.size();
+	if( !m_shared->isAKeyframedHull ){
+		if( const int level = (int) m_chosenSubdivLevel + this->m_tessLevelShiftForMinVertexIndex; level > 0 ) {
+			m_minVertexNumThisFrame = (unsigned) ::basicHullsHolder.getIcosphereForLevel( level - 1 ).vertices.size();
+		} else {
+			m_minVertexNumThisFrame = 0;
+		}
+
+		if( const int level = (int) m_chosenSubdivLevel + this->m_tessLevelShiftForMaxVertexIndex; level >= 0 ) {
+			m_vertexNumLimitThisFrame = ::basicHullsHolder.getIcosphereForLevel( level ).vertices.size();
+		} else {
+			m_vertexNumLimitThisFrame = ::basicHullsHolder.getIcosphereForLevel( 0 ).vertices.size();
+		}
+
+		assert( m_minVertexNumThisFrame < m_vertexNumLimitThisFrame );
+		numGridVertices = m_vertexNumLimitThisFrame - m_minVertexNumThisFrame;
 	} else {
-		m_minVertexNumThisFrame = 0;
+		unsigned LODnum = 0;
+		unsigned LODtoRender;
+		if( v_LODtoShow.get() >= 0 ){
+			LODtoRender = v_LODtoShow.get();
+		} else {
+			LODtoRender = m_chosenSubdivLevel;
+		}
+		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+
+		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+			meshToRender = currLOD;
+			nextLOD = currLOD->nextLOD;
+		}
+		// TODO: won't reassigning m_shared->meshToRender like this in this stage confuse others?
+		m_shared->meshToRender = meshToRender; // assign the appropriate LOD
+
+		numGridVertices = meshToRender->numVertices;
+		cgNotice() << "grid vertices:" << numGridVertices;
 	}
 
-	if( const int level = (int)m_chosenSubdivLevel + this->m_tessLevelShiftForMaxVertexIndex; level >= 0 ) {
-		m_vertexNumLimitThisFrame = ::basicHullsHolder.getIcosphereForLevel( level ).vertices.size();
-	} else {
-		m_vertexNumLimitThisFrame = ::basicHullsHolder.getIcosphereForLevel( 0 ).vertices.size();
-	}
+	const unsigned numVertices = numGridVertices * 4;
+	const unsigned numIndices  = numGridVertices * 6;
 
-	assert( m_minVertexNumThisFrame < m_vertexNumLimitThisFrame );
-	const unsigned numGridVertices = m_vertexNumLimitThisFrame - m_minVertexNumThisFrame;
-	return std::make_pair( 4 * numGridVertices, 6 * numGridVertices );
+	return std::make_pair( numVertices, numIndices );
 }
 
 static void lerpLayerColorsAndRangesBetweenFrames( byte_vec4_t *__restrict destColors, float *__restrict destColorRanges,
@@ -3436,206 +3466,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 																  uint16_t *__restrict destIndices ) const
 	-> std::pair<unsigned, unsigned> {//
 
-    cgNotice() << "filling mesh buffers";
-	/*
-	assert( m_shared->simulatedSubdivLevel <= BasicHullsHolder::kMaxSubdivLevel );
-	assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
-	assert( m_shared->minZLastFrame <= m_shared->maxZLastFrame );
-
-	// Keep always allocating the default buffer even if it's unused, so we can rely on it
-	const auto colorsBufferLevel = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
-	const auto colorsBufferSize  = (unsigned)basicHullsHolder.getIcosphereForLevel( colorsBufferLevel ).vertices.size();
-	assert( colorsBufferSize && colorsBufferSize < ( 1 << 12 ) );
-	auto *const overrideColorsBuffer = (byte_vec4_t *)alloca( sizeof( byte_vec4_t ) * colorsBufferSize );
-
-	const byte_vec4_t *overrideColors;
-	if( !m_shared->isAKeyframedHull ) {
-		overrideColors = getOverrideColorsCheckingSiblingCache( overrideColorsBuffer, viewOrigin,
-																viewAxis, lights,
-																affectingLightIndices);
-	} else {
-		const unsigned dataLevelToUse     = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
-		const IcosphereData &lodDataToUse = ::basicHullsHolder.getIcosphereForLevel( dataLevelToUse );
-		// If tesselation is going to be performed, apply light to the base non-tesselated lod colors
-		const auto numVertices = (unsigned)lodDataToUse.vertices.size();
-
-		bool needsViewDotResults = false;
-		float *viewDotResults    = nullptr;
-
-		for( const ShadingLayer &layer: m_shared->prevShadingLayers ) {
-			if( !std::holds_alternative<MaskedShadingLayer>( layer ) ) {
-				assert( std::holds_alternative<DotShadingLayer>( layer ) || std::holds_alternative<CombinedShadingLayer>( layer ) );
-				needsViewDotResults = true;
-				break;
-			}
-		}
-
-		if( needsViewDotResults ) {
-			const vec4_t *const __restrict positions    = m_shared->simulatedPositions;
-			const uint16_t ( *neighboursOfVertices )[5] = lodDataToUse.vertexNeighbours.data();
-
-			// Sanity check
-			assert( numVertices > 0 && numVertices < 4096 );
-			viewDotResults = (float *)alloca( sizeof( float ) * numVertices );
-
-			unsigned vertexNum = 0;
-			do {
-				const uint16_t *const __restrict neighboursOfVertex = neighboursOfVertices[vertexNum];
-				const float *const __restrict currVertex            = positions[vertexNum];
-				vec3_t normal { 0.0f, 0.0f, 0.0f };
-				unsigned neighbourIndex = 0;
-				do {
-					const float *__restrict v2 = positions[neighboursOfVertex[neighbourIndex]];
-					const float *__restrict v3 = positions[neighboursOfVertex[( neighbourIndex + 1 ) % 5]];
-					vec3_t currTo2, currTo3, cross;
-					VectorSubtract( v2, currVertex, currTo2 );
-					VectorSubtract( v3, currVertex, currTo3 );
-					CrossProduct( currTo2, currTo3, cross );
-					if( const float squaredLength = VectorLengthSquared( cross ); squaredLength > 1.0f ) [[likely]] {
-						const float rcpLength = Q_RSqrt( squaredLength );
-						VectorMA( normal, rcpLength, cross, normal );
-					}
-				} while( ++neighbourIndex < 5 );
-
-				const float squaredNormalLength = VectorLengthSquared( normal );
-				vec3_t viewDir;
-				VectorSubtract( currVertex, viewOrigin, viewDir );
-				const float squareDistanceToVertex = VectorLengthSquared( viewDir );
-
-				const float squareRcpNormalizingFactor = squaredNormalLength * squareDistanceToVertex;
-				// check that both the length of the normal and distance to vertex are not 0 in one branch
-				if( squareRcpNormalizingFactor > 1.0f ) [[likely]] {
-					const float normalizingFactor = Q_RSqrt( squareRcpNormalizingFactor );
-					viewDotResults[vertexNum] = std::fabs( DotProduct( viewDir, normal ) ) * normalizingFactor;
-				} else {
-					viewDotResults[vertexNum] = 0.0f;
-				}
-			} while( ++vertexNum < numVertices );
-		}
-
-		const unsigned numShadingLayers = m_shared->prevShadingLayers.size();
-		for( unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
-			const ShadingLayer &prevShadingLayer = m_shared->prevShadingLayers[layerNum];
-			const ShadingLayer &nextShadingLayer = m_shared->nextShadingLayers[layerNum];
-			if( const auto *const prevMaskedLayer = std::get_if<MaskedShadingLayer>( &prevShadingLayer ) ) {
-				const auto *const nextMaskedLayer = std::get_if<MaskedShadingLayer>( &nextShadingLayer );
-
-				const unsigned numColors = prevMaskedLayer->colors.size();
-				assert( numColors > 0 && numColors <= kMaxLayerColors );
-
-				byte_vec4_t lerpedColors[kMaxLayerColors];
-				float lerpedColorRanges[kMaxLayerColors];
-				lerpLayerColorsAndRangesBetweenFrames( lerpedColors, lerpedColorRanges, numColors, m_shared->lerpFrac,
-													   prevMaskedLayer->colors.data(), nextMaskedLayer->colors.data(),
-													   prevMaskedLayer->colorRanges, nextMaskedLayer->colorRanges );
-
-				unsigned vertexNum = 0;
-				do {
-					const float vertexMaskValue = std::lerp( prevMaskedLayer->vertexMaskValues[vertexNum],
-															 nextMaskedLayer->vertexMaskValues[vertexNum],
-															 m_shared->lerpFrac );
-
-					addLayerContributionToResultColor( vertexMaskValue, numColors, lerpedColors, lerpedColorRanges,
-													   prevMaskedLayer->blendMode, prevMaskedLayer->alphaMode,
-													   overrideColorsBuffer[vertexNum], layerNum );
-
-				} while ( ++vertexNum < numVertices );
-			} else if( const auto *const prevDotLayer = std::get_if<DotShadingLayer>( &prevShadingLayer ) ) {
-				const auto *const nextDotLayer = std::get_if<DotShadingLayer>( &nextShadingLayer );
-
-				const unsigned numColors = prevDotLayer->colors.size();
-				assert( numColors > 0 && numColors <= kMaxLayerColors );
-
-				byte_vec4_t lerpedColors[kMaxLayerColors];
-				float lerpedColorRanges[kMaxLayerColors];
-				lerpLayerColorsAndRangesBetweenFrames( lerpedColors, lerpedColorRanges, numColors, m_shared->lerpFrac,
-													   prevDotLayer->colors.data(), nextDotLayer->colors.data(),
-													   prevDotLayer->colorRanges, nextDotLayer->colorRanges );
-
-				unsigned vertexNum = 0;
-				do {
-					addLayerContributionToResultColor( viewDotResults[vertexNum], numColors, lerpedColors, lerpedColorRanges,
-													   prevDotLayer->blendMode, prevDotLayer->alphaMode,
-													   overrideColorsBuffer[vertexNum], layerNum );
-				} while ( ++vertexNum < numVertices );
-			} else if( const auto *const prevCombinedLayer = std::get_if<CombinedShadingLayer>( &prevShadingLayer ) ) {
-				const auto *const nextCombinedLayer = std::get_if<CombinedShadingLayer>( &nextShadingLayer );
-
-				const unsigned numColors = prevCombinedLayer->colors.size();
-				assert( numColors > 0 && numColors <= kMaxLayerColors );
-
-				byte_vec4_t lerpedColors[kMaxLayerColors];
-				float lerpedColorRanges[kMaxLayerColors];
-				lerpLayerColorsAndRangesBetweenFrames( lerpedColors, lerpedColorRanges, numColors, m_shared->lerpFrac,
-													   prevCombinedLayer->colors.data(), nextCombinedLayer->colors.data(),
-													   prevCombinedLayer->colorRanges, nextCombinedLayer->colorRanges );
-
-				unsigned vertexNum = 0;
-				do {
-					const float vertexDotValue  = viewDotResults[vertexNum];
-					const float vertexMaskValue = std::lerp( prevCombinedLayer->vertexMaskValues[vertexNum],
-															 nextCombinedLayer->vertexMaskValues[vertexNum],
-															 m_shared->lerpFrac );
-
-					const float dotInfluence        = prevCombinedLayer->dotInfluence;
-					const float maskInfluence       = 1.0f - dotInfluence;
-					const float vertexCombinedValue = vertexDotValue * dotInfluence + vertexMaskValue * maskInfluence;
-
-					addLayerContributionToResultColor( vertexCombinedValue, numColors, lerpedColors, lerpedColorRanges,
-													   prevCombinedLayer->blendMode, prevCombinedLayer->alphaMode,
-													   overrideColorsBuffer[vertexNum], layerNum );
-				} while ( ++vertexNum < numVertices );
-			} else {
-				wsw::failWithLogicError( "Unreachable" );
-			}
-		}
-
-		overrideColors = overrideColorsBuffer;
-	}
-
-
-
-	// HACK Perform an additional tesselation of some hulls.
-	// CPU-side tesselation is the single option in the current codebase state.
-	if( m_shared->tesselateClosestLod && m_chosenSubdivLevel > m_shared->simulatedSubdivLevel ) {
-		assert( m_shared->simulatedSubdivLevel + 1 == m_chosenSubdivLevel );
-		const IcosphereData &nextLevelData = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
-		const IcosphereData &simLevelData  = ::basicHullsHolder.getIcosphereForLevel( m_shared->simulatedSubdivLevel );
-
-		const IcosphereVertexNeighbours nextLevelNeighbours = nextLevelData.vertexNeighbours.data();
-
-		const auto numSimulatedVertices = (unsigned)simLevelData.vertices.size();
-		const auto numNextLevelVertices = (unsigned)nextLevelData.vertices.size();
-
-		MeshTesselationHelper *const tesselationHelper = &::meshTesselationHelper;
-		if( m_shared->lerpNextLevelColors ) {
-			tesselationHelper->exec<true>( this, overrideColors,
-										   numSimulatedVertices, numNextLevelVertices, nextLevelNeighbours );
-		} else {
-			tesselationHelper->exec<false>( this, overrideColors,
-											numSimulatedVertices, numNextLevelVertices, nextLevelNeighbours );
-		}
-
-		numResultVertices = numNextLevelVertices;
-		numResultIndices  = (unsigned)nextLevelData.indices.size();
-
-		// TODO: Eliminate this excessive copying
-		std::memcpy( destPositions, tesselationHelper->m_tessPositions, sizeof( destPositions[0] ) * numResultVertices );
-		std::memcpy( destColors, tesselationHelper->m_tessByteColors, sizeof( destColors[0] ) * numResultVertices );
-		std::memcpy( destIndices, nextLevelData.indices.data(), sizeof( uint16_t ) * numResultIndices );
-	} else {
-		const IcosphereData &dataToUse = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
-		const byte_vec4_t *colorsToUse = overrideColors ? overrideColors : m_shared->simulatedColors;
-
-		numResultVertices = (unsigned)dataToUse.vertices.size();
-		numResultIndices  = (unsigned)dataToUse.indices.size();
-
-		const vec4_t *simulatedPositions = m_shared->simulatedPositions;
-		std::memcpy( destPositions, simulatedPositions, sizeof( simulatedPositions[0] ) * numResultVertices );
-		std::memcpy( destColors, colorsToUse, sizeof( colorsToUse[0] ) * numResultVertices );
-		std::memcpy( destIndices, dataToUse.indices.data(), sizeof( uint16_t ) * numResultIndices );
-	}
-*/
 	unsigned numResultVertices, numResultIndices;
 
 	if( !m_shared->isAKeyframedHull ) {
@@ -3717,7 +3547,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
 		std::memcpy( destIndices, meshTriIndices, sizeof( uint16_t ) * numIndices );
 
-        const unsigned cageKey    = meshToRender->loadedCageKey;
         const tri *cageTriIndices = m_shared->cageTriIndices;
         const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
 
@@ -3741,15 +3570,16 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
             currFrame = v_frameToShow.get();
         }
 
-        unsigned startVertIdx = currFrame * numVerts; // currFrame * numVerts;
+        unsigned startVertIdx = currFrame * numVerts;
 
+		const auto beforeConstruct = Sys_Microseconds();
         for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
             unsigned vertIdx = startVertIdx + vertNum;
             unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
 
             vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]};
 
-            vec3_t vertPos;
+            //vec3_t vertPos;
             vec3_t moveDir;
 
             const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
@@ -3772,14 +3602,15 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
             const float offset = wsw::min(vertCoords[vertIdx].offset, limit) * scale;
 
-            VectorMA( origin, offset, moveDir, vertPos );
+            //VectorMA( origin, offset, moveDir, vertPos );
+			VectorMA( origin, offset, moveDir, destPositions[vertNum] );
 
-            VectorCopy( vertPos, &destPositions[vertNum][0] );
+            //VectorCopy( vertPos, &destPositions[vertNum][0] );
             destPositions[vertNum][3] = 1.0f;
         }
+		Com_Printf("Construction took %d millis for %d vertices and %d indices\n", (int)(Sys_Microseconds() - beforeConstruct), (int)numResultVertices, (int)numResultIndices);
 
-        cgNotice() << "building the caged mesh";
-        Com_Printf("It took %d millis for %d vertices and %d indices\n", (int)(Sys_Microseconds() - before), (int)numResultVertices, (int)numResultIndices);
+        Com_Printf("Total took %d millis for %d vertices and %d indices\n", (int)(Sys_Microseconds() - before), (int)numResultVertices, (int)numResultIndices);
 	}
 
 	return { numResultVertices, numResultIndices };
@@ -3857,117 +3688,285 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 																  byte_vec4_t *__restrict destColors,
 																  uint16_t *__restrict destIndices ) const
 -> std::pair<unsigned, unsigned> {
-	assert( m_shared->simulatedSubdivLevel < BasicHullsHolder::kMaxSubdivLevel );
-	assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
-	assert( m_shared->minZLastFrame <= m_shared->maxZLastFrame );
+    unsigned numResultVertices = 0;
+	unsigned numResultIndices = 0;
 
-	// Keep always allocating the default buffer even if it's unused, so we can rely on its availability
-	const auto colorsBufferLevel = wsw::min( m_chosenSubdivLevel, m_shared->simulatedSubdivLevel );
-	const auto colorsBufferSize  = (unsigned)basicHullsHolder.getIcosphereForLevel( colorsBufferLevel ).vertices.size();
-	assert( colorsBufferSize && colorsBufferSize < ( 1 << 12 ) );
-	auto *const overrideColorsBuffer = (byte_vec4_t *)alloca( sizeof( byte_vec4_t ) * colorsBufferSize );
+	cgNotice() << "filling cloud mesh buffers";
 
-	const byte_vec4_t *overrideColors = getOverrideColorsCheckingSiblingCache( overrideColorsBuffer, viewOrigin,
-																			   viewAxis, lights, affectingLightIndices );
+    if( !m_shared->isAKeyframedHull ){
+        assert(m_shared->simulatedSubdivLevel < BasicHullsHolder::kMaxSubdivLevel);
+        assert(m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1);
+        assert(m_shared->minZLastFrame <= m_shared->maxZLastFrame);
 
-	const byte_vec4_t *colorsToUse = overrideColors ? overrideColors : m_shared->simulatedColors;
+        // Keep always allocating the default buffer even if it's unused, so we can rely on its availability
+        const auto colorsBufferLevel = wsw::min(m_chosenSubdivLevel, m_shared->simulatedSubdivLevel);
+        const auto colorsBufferSize = (unsigned) basicHullsHolder.getIcosphereForLevel(
+                colorsBufferLevel).vertices.size();
+        assert(colorsBufferSize && colorsBufferSize < (1 << 12));
+        auto *const overrideColorsBuffer = (byte_vec4_t *) alloca(sizeof(byte_vec4_t) * colorsBufferSize);
 
-	alignas( 16 ) vec4_t viewLeft, viewUp;
-	// TODO: Flip if needed
-	VectorCopy( &viewAxis[AXIS_RIGHT], viewLeft );
-	VectorCopy( &viewAxis[AXIS_UP], viewUp );
+        const byte_vec4_t *overrideColors = getOverrideColorsCheckingSiblingCache(overrideColorsBuffer, viewOrigin,
+                                                                                  viewAxis, lights,
+                                                                                  affectingLightIndices);
 
-	alignas( 16 ) vec4_t normal;
-	VectorNegate( &viewAxis[AXIS_FORWARD], normal );
-	normal[3] = 0.0f;
+        const byte_vec4_t *colorsToUse = overrideColors ? overrideColors : m_shared->simulatedColors;
 
-	const float radius         = m_spriteRadius;
-	constexpr float normalizer = 1.0f / 255.0f;
+        alignas(16) vec4_t viewLeft, viewUp;
+        // TODO: Flip if needed
+        VectorCopy(&viewAxis[AXIS_RIGHT], viewLeft);
+        VectorCopy(&viewAxis[AXIS_UP], viewUp);
 
-	unsigned numOutVertices = 0;
-	unsigned numOutIndices  = 0;
+        alignas(16) vec4_t normal;
+        VectorNegate(&viewAxis[AXIS_FORWARD], normal);
+        normal[3] = 0.0f;
 
-	// We sample the random data by vertex numbers using random shifts that remain stable during the hull lifetime
-	assert( m_vertexNumLimitThisFrame + m_phaseIndexShiftInTable <= std::size( kRandomBytes ) );
-	assert( m_vertexNumLimitThisFrame + m_speedIndexShiftInTable <= std::size( kRandomBytes ) );
+        const float radius = m_spriteRadius;
+        constexpr float normalizer = 1.0f / 255.0f;
 
-	unsigned vertexNum = m_minVertexNumThisFrame;
-	assert( vertexNum < m_vertexNumLimitThisFrame );
+        // We sample the random data by vertex numbers using random shifts that remain stable during the hull lifetime
+        assert(m_vertexNumLimitThisFrame + m_phaseIndexShiftInTable <= std::size(kRandomBytes));
+        assert(m_vertexNumLimitThisFrame + m_speedIndexShiftInTable <= std::size(kRandomBytes));
 
-	[[maybe_unused]] vec3_t tmpLeftStorage, tmpUpStorage;
+        unsigned vertexNum = m_minVertexNumThisFrame;
+        assert(vertexNum < m_vertexNumLimitThisFrame);
 
-	do {
-		const float *__restrict vertexPosition      = m_shared->simulatedPositions[vertexNum];
-		const uint8_t *const __restrict vertexColor = colorsToUse[vertexNum];
+        [[maybe_unused]] vec3_t tmpLeftStorage, tmpUpStorage;
 
-		vec4_t *const __restrict positions   = destPositions + numOutVertices;
-		vec4_t *const __restrict normals     = destNormals   + numOutVertices;
-		byte_vec4_t *const __restrict colors = destColors    + numOutVertices;
-		vec2_t *const __restrict texCoords   = destTexCoords + numOutVertices;
-		uint16_t *const __restrict indices   = destIndices   + numOutIndices;
+        do {
+            const float *__restrict vertexPosition = m_shared->simulatedPositions[vertexNum];
+            const uint8_t *const __restrict vertexColor = colorsToUse[vertexNum];
 
-		// Test the color alpha first for an early cutoff
+            vec4_t *const __restrict positions = destPositions + numResultVertices; /// D:\qfusion\source\cgame\simulatedhullssystem.cpp(3651): warning C4700: uninitialized local variable 'numResultVertices' used [D:\qfusion\source\cmake-build-release\client\warsow.vcxproj]
+            vec4_t *const __restrict normals = destNormals + numResultVertices;
+            byte_vec4_t *const __restrict colors = destColors + numResultVertices;
+            vec2_t *const __restrict texCoords = destTexCoords + numResultVertices;
+            uint16_t *const __restrict indices = destIndices + numResultIndices;
 
-		byte_vec4_t resultingColor;
-		resultingColor[3] = (uint8_t)wsw::clamp( (float)vertexColor[3] * m_spriteColor[3] * m_alphaScale, 0.0f, 255.0f );
-		if( resultingColor[3] < 1 ) {
-			continue;
-		}
+            // Test the color alpha first for an early cutoff
 
-		resultingColor[0] = (uint8_t)wsw::clamp( (float)vertexColor[0] * m_spriteColor[0], 0.0f, 255.0f );
-		resultingColor[1] = (uint8_t)wsw::clamp( (float)vertexColor[1] * m_spriteColor[1], 0.0f, 255.0f );
-		resultingColor[2] = (uint8_t)wsw::clamp( (float)vertexColor[2] * m_spriteColor[2], 0.0f, 255.0f );
+            byte_vec4_t resultingColor;
+            resultingColor[3] = (uint8_t) wsw::clamp((float) vertexColor[3] * m_spriteColor[3] * m_alphaScale, 0.0f,
+                                                     255.0f);
+            if (resultingColor[3] < 1) {
+                continue;
+            }
 
-		Vector4Copy( resultingColor, colors[0] );
-		Vector4Copy( resultingColor, colors[1] );
-		Vector4Copy( resultingColor, colors[2] );
-		Vector4Copy( resultingColor, colors[3] );
+            resultingColor[0] = (uint8_t) wsw::clamp((float) vertexColor[0] * m_spriteColor[0], 0.0f, 255.0f);
+            resultingColor[1] = (uint8_t) wsw::clamp((float) vertexColor[1] * m_spriteColor[1], 0.0f, 255.0f);
+            resultingColor[2] = (uint8_t) wsw::clamp((float) vertexColor[2] * m_spriteColor[2], 0.0f, 255.0f);
 
-		// 1 unit is equal to a rotation of 360 degrees
-		const float initialPhase    = ( (float)kRandomBytes[vertexNum + m_phaseIndexShiftInTable] - 127.0f ) * normalizer;
-		const float angularSpeed    = ( (float)kRandomBytes[vertexNum + m_speedIndexShiftInTable] - 127.0f ) * normalizer;
-		const float rotationDegrees = 360.0f * ( initialPhase + angularSpeed * m_lifetimeSeconds );
+            Vector4Copy(resultingColor, colors[0]);
+            Vector4Copy(resultingColor, colors[1]);
+            Vector4Copy(resultingColor, colors[2]);
+            Vector4Copy(resultingColor, colors[3]);
 
-		const float *left, *up;
-		// TODO: Avoid dynamic branching, add templated specializations?
-		if( m_applyRotation ) {
-			// TODO: This could be probably reduced to a single sincos() calculation + few vector transforms
-			RotatePointAroundVector( tmpLeftStorage, normal, viewLeft, rotationDegrees );
-			RotatePointAroundVector( tmpUpStorage, normal, viewUp, rotationDegrees );
-			left = tmpLeftStorage;
-			up   = tmpUpStorage;
+            // 1 unit is equal to a rotation of 360 degrees
+            const float initialPhase =
+                    ((float) kRandomBytes[vertexNum + m_phaseIndexShiftInTable] - 127.0f) * normalizer;
+            const float angularSpeed =
+                    ((float) kRandomBytes[vertexNum + m_speedIndexShiftInTable] - 127.0f) * normalizer;
+            const float rotationDegrees = 360.0f * (initialPhase + angularSpeed * m_lifetimeSeconds);
+
+            const float *left, *up;
+            // TODO: Avoid dynamic branching, add templated specializations?
+            if (m_applyRotation) {
+                // TODO: This could be probably reduced to a single sincos() calculation + few vector transforms
+                RotatePointAroundVector(tmpLeftStorage, normal, viewLeft, rotationDegrees);
+                RotatePointAroundVector(tmpUpStorage, normal, viewUp, rotationDegrees);
+
+                left = tmpLeftStorage;
+                up = tmpUpStorage;
+            } else {
+                left = viewLeft;
+                up = viewUp;
+            }
+
+            vec3_t point;
+            VectorMA(vertexPosition, -radius, up, point);
+            VectorMA(point, +radius, left, positions[0]);
+            VectorMA(point, -radius, left, positions[3]);
+
+            VectorMA(vertexPosition, radius, up, point);
+            VectorMA(point, +radius, left, positions[1]);
+            VectorMA(point, -radius, left, positions[2]);
+
+            positions[0][3] = positions[1][3] = positions[2][3] = positions[3][3] = 1.0f;
+
+            Vector4Copy(normal, normals[0]);
+            Vector4Copy(normal, normals[1]);
+            Vector4Copy(normal, normals[2]);
+            Vector4Copy(normal, normals[3]);
+
+            VectorSet(indices + 0, numResultVertices + 0, numResultVertices + 1, numResultVertices + 2);
+            VectorSet(indices + 3, numResultVertices + 0, numResultVertices + 2, numResultVertices + 3);
+
+            Vector2Set(texCoords[0], 0.0f, 1.0f);
+            Vector2Set(texCoords[1], 0.0f, 0.0f);
+            Vector2Set(texCoords[2], 1.0f, 0.0f);
+            Vector2Set(texCoords[3], 1.0f, 1.0f);
+
+            numResultVertices += 4;
+            numResultIndices += 6;
+        } while (++vertexNum < m_vertexNumLimitThisFrame);
+    } else {
+		// the correct LOD has already been assigned in getSotrageRequirements()
+		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+		const float lifetimeFrac = m_shared->lifetimeFrac;
+
+		const tri *cageTriIndices = m_shared->cageTriIndices;
+		const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
+
+		const float *limitsAtDirections    = m_shared->limitsAtDirections;
+		const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
+		const float scale                  = m_shared->scale;
+		const float *origin                = m_shared->origin;
+
+		// write positions to destPositions
+		// memcpy indices from mesh to render
+		const unsigned numFrames = meshToRender->numFrames;
+		const unsigned numGridVerts = meshToRender->numVertices;
+
+		// write positions to dest positions
+		unsigned currFrame;
+		if( v_frameToShow.get() < 0 ){
+			currFrame = wsw::min( (unsigned) ((float) numFrames * lifetimeFrac), numFrames - 1 );
 		} else {
-			left = viewLeft;
-			up   = viewUp;
+			currFrame = v_frameToShow.get();
 		}
 
-		vec3_t point;
-		VectorMA( vertexPosition, -radius, up, point );
-		VectorMA( point, +radius, left, positions[0] );
-		VectorMA( point, -radius, left, positions[3] );
+		unsigned startVertIdx = currFrame * numGridVerts; // currFrame * numVerts;
 
-		VectorMA( vertexPosition, radius, up, point );
-		VectorMA( point, +radius, left, positions[1] );
-		VectorMA( point, -radius, left, positions[2] );
+        alignas(16) vec4_t viewLeft, viewUp;
+        // TODO: Flip if needed
+        VectorCopy(&viewAxis[AXIS_RIGHT], viewLeft);
+        VectorCopy(&viewAxis[AXIS_UP], viewUp);
 
-		positions[0][3] = positions[1][3] = positions[2][3] = positions[3][3] = 1.0f;
+        alignas(16) vec4_t normal;
+        VectorNegate(&viewAxis[AXIS_FORWARD], normal);
+        normal[3] = 0.0f;
 
-		Vector4Copy( normal, normals[0] );
-		Vector4Copy( normal, normals[1] );
-		Vector4Copy( normal, normals[2] );
-		Vector4Copy( normal, normals[3] );
+        const float radius = m_spriteRadius;
+        constexpr float normalizer = 1.0f / 255.0f;
 
-		VectorSet( indices + 0, numOutVertices + 0, numOutVertices + 1, numOutVertices + 2 );
-		VectorSet( indices + 3, numOutVertices + 0, numOutVertices + 2, numOutVertices + 3 );
+        // We sample the random data by vertex numbers using random shifts that remain stable during the hull lifetime
+        assert(m_vertexNumLimitThisFrame + m_phaseIndexShiftInTable <= std::size(kRandomBytes));
+        assert(m_vertexNumLimitThisFrame + m_speedIndexShiftInTable <= std::size(kRandomBytes));
 
-		Vector2Set( texCoords[0], 0.0f, 1.0f );
-		Vector2Set( texCoords[1], 0.0f, 0.0f );
-		Vector2Set( texCoords[2], 1.0f, 0.0f );
-		Vector2Set( texCoords[3], 1.0f, 1.0f );
+        unsigned gridVertNum = 0;
+        assert(vertexNum < m_vertexNumLimitThisFrame);
 
-		numOutVertices += 4;
-		numOutIndices  += 6;
-	} while( ++vertexNum < m_vertexNumLimitThisFrame );
+        [[maybe_unused]] vec3_t tmpLeftStorage, tmpUpStorage;
 
-	return { numOutVertices, numOutIndices };
+		vec3_t gridVertexPosition;
+
+        do {
+			unsigned vertIdx = startVertIdx + gridVertNum;
+			unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
+
+			vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]};
+
+			vec3_t moveDir;
+
+			const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
+			const unsigned cageVertIdx1 = cageTriIndices[triIdx][1];
+			const unsigned cageVertIdx2 = cageTriIndices[triIdx][2];
+
+			const float coeff0 = 1 - (coords[0] + coords[1]);
+			const float coeff1 = coords[0];
+			const float coeff2 = coords[1];
+
+			VectorScale(vertexMoveDirections[cageVertIdx0], coeff0, moveDir);
+			VectorMA(moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir);
+			VectorMA(moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir);
+			VectorNormalizeFast(moveDir);
+
+			const float limit =
+					limitsAtDirections[cageVertIdx0] * coeff0 +
+					limitsAtDirections[cageVertIdx1] * coeff1 +
+					limitsAtDirections[cageVertIdx2] * coeff2;
+
+			const float offset = wsw::min(vertCoords[vertIdx].offset, limit) * scale;
+
+			//VectorMA( origin, offset, moveDir, vertPos );
+			VectorMA( origin, offset, moveDir, gridVertexPosition );
+
+//            const uint8_t *const __restrict vertexColor = colorsToUse[vertexNum];
+
+            vec4_t *const __restrict positions = destPositions + numResultVertices;
+            vec4_t *const __restrict normals = destNormals + numResultVertices;
+            byte_vec4_t *const __restrict colors = destColors + numResultVertices;
+            vec2_t *const __restrict texCoords = destTexCoords + numResultVertices;
+            uint16_t *const __restrict indices = destIndices + numResultIndices;
+
+            // Test the color alpha first for an early cutoff
+
+//            byte_vec4_t resultingColor;
+//            resultingColor[3] = (uint8_t) wsw::clamp((float) vertexColor[3] * m_spriteColor[3] * m_alphaScale, 0.0f,
+//                                                     255.0f);
+//            if (resultingColor[3] < 1) {
+//                continue;
+//            }
+//
+//            resultingColor[0] = (uint8_t) wsw::clamp((float) vertexColor[0] * m_spriteColor[0], 0.0f, 255.0f);
+//            resultingColor[1] = (uint8_t) wsw::clamp((float) vertexColor[1] * m_spriteColor[1], 0.0f, 255.0f);
+//            resultingColor[2] = (uint8_t) wsw::clamp((float) vertexColor[2] * m_spriteColor[2], 0.0f, 255.0f);
+			byte_vec4_t genericColor = { 255, 125, 60, 255 };
+
+            Vector4Copy(genericColor, colors[0]);
+            Vector4Copy(genericColor, colors[1]);
+            Vector4Copy(genericColor, colors[2]);
+            Vector4Copy(genericColor, colors[3]);
+
+            // 1 unit is equal to a rotation of 360 degrees
+            const float initialPhase =
+                    ((float) kRandomBytes[gridVertNum + m_phaseIndexShiftInTable] - 127.0f) * normalizer;
+            const float angularSpeed =
+                    ((float) kRandomBytes[gridVertNum + m_speedIndexShiftInTable] - 127.0f) * normalizer;
+			/// IMPORTANT: won't kRandomBytes[vertexNum + shift] go out of index? the array has 1024 entries and vertexNum can be >1024, while shift<=255.
+            const float rotationDegrees = 360.0f * (initialPhase + angularSpeed * m_lifetimeSeconds);
+
+            const float *left, *up;
+            // TODO: Avoid dynamic branching, add templated specializations?
+            if (m_applyRotation) {
+                // TODO: This could be probably reduced to a single sincos() calculation + few vector transforms
+                RotatePointAroundVector(tmpLeftStorage, normal, viewLeft, rotationDegrees);
+                RotatePointAroundVector(tmpUpStorage, normal, viewUp, rotationDegrees);
+
+                left = tmpLeftStorage;
+                up = tmpUpStorage;
+            } else {
+                left = viewLeft;
+                up = viewUp;
+            }
+
+            vec3_t point;
+            VectorMA(gridVertexPosition, -radius, up, point);
+            VectorMA(point, +radius, left, positions[0]);
+            VectorMA(point, -radius, left, positions[3]);
+
+            VectorMA(gridVertexPosition, radius, up, point);
+            VectorMA(point, +radius, left, positions[1]);
+            VectorMA(point, -radius, left, positions[2]);
+
+            positions[0][3] = positions[1][3] = positions[2][3] = positions[3][3] = 1.0f;
+
+            Vector4Copy(normal, normals[0]);
+            Vector4Copy(normal, normals[1]);
+            Vector4Copy(normal, normals[2]);
+            Vector4Copy(normal, normals[3]);
+
+            VectorSet(indices + 0, numResultVertices + 0, numResultVertices + 1, numResultVertices + 2);
+            VectorSet(indices + 3, numResultVertices + 0, numResultVertices + 2, numResultVertices + 3);
+
+            Vector2Set(texCoords[0], 0.0f, 1.0f);
+            Vector2Set(texCoords[1], 0.0f, 0.0f);
+            Vector2Set(texCoords[2], 1.0f, 0.0f);
+            Vector2Set(texCoords[3], 1.0f, 1.0f);
+
+            numResultVertices += 4;
+            numResultIndices += 6;
+        } while ( ++gridVertNum < numGridVerts );
+    }
+
+	return { numResultVertices, numResultIndices };
 };

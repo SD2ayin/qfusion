@@ -471,6 +471,8 @@ static SimulatedHullsSystem::AppearanceRules g_fireOuterCloudAppearanceRules = S
 UnsignedConfigVar hullLifetime( wsw::StringView( "hullLifetime"), { .byDefault = 500u, .flags = CVAR_ARCHIVE });
 FloatConfigVar hullScale( wsw::StringView( "hullScale"), { .byDefault = 35.0f, .flags = CVAR_ARCHIVE });
 
+IntConfigVar appearanceMode( wsw::StringView("appearanceMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
+
 void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, const float *dir, float radius ) {
 	// 250 for radius of 64
 	// TODO: Make radius affect hulls
@@ -559,11 +561,23 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
 		cgNotice() << S_COLOR_ORANGE << "identifier" << cage->identifier;
 
+		g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
+
+		SimulatedHullsSystem::CloudAppearanceRules cloudAppearanceRules = {
+				.spanOfMeshProps = { &g_fireInnerCloudMeshProps, 1 },
+		};
+
 		SimulatedHullsSystem::SolidAppearanceRules solidAppearanceRules = {
 				.material = nullptr,
 		};
 
-		SimulatedHullsSystem::AppearanceRules appearanceRules = solidAppearanceRules;
+		SimulatedHullsSystem::AppearanceRules appearanceRules;
+
+		if( appearanceMode.get() == 1 ){
+			appearanceRules = cloudAppearanceRules;
+		} else {
+			appearanceRules = solidAppearanceRules;
+		}
 
 		SimulatedHullsSystem::StaticKeyframedHullParams hullParams = {
 				.origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
