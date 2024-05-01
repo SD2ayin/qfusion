@@ -6,6 +6,7 @@
 #include "../common/mmcommon.h"
 #include "../cgame/cg_local.h"
 #include "../common/configvars.h"
+#include "../common/noise.h"
 
 #include <memory>
 #include <unordered_map>
@@ -528,6 +529,8 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     StaticCage *cage = std::addressof( m_loadedStaticCages[cagedMesh->loadedCageKey] );
 
     transformToCageSpace( &cage->cageGeometry, filepath, cagedMesh );
+	applyShading( filepath, cagedMesh );
+
 
 	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
     for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
@@ -540,6 +543,7 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 
 		lastLOD->nextLOD = new SimulatedHullsSystem::StaticCagedMesh;
         if( transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ), lastLOD->nextLOD ) ){
+			applyShading( wsw::StringView( filepathToLOD.data() ), lastLOD->nextLOD );
 			lastLOD = lastLOD->nextLOD;
             lastLOD->nextLOD = nullptr;
 		} else{
@@ -549,14 +553,32 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 			break;
 		}
     }
-    //cgNotice() << "test" << cagedMesh->cage->cageGeometry.vertexPositions.size();
 
     return cagedMesh;
 }
 
-void SimulatedHullsSystem::applyShading( StaticCagedMesh *mesh ){
-	const unsigned numFrames = mesh->numFrames;
-	const unsigned numVertices = mesh->numVertices;
+void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, SimulatedHullsSystem::StaticCagedMesh *cagedMesh ){
+	static constexpr byte_vec4_t kFireColors[3] {
+			{ 25, 25, 25, 255 },   // Gray
+			{ 255, 70, 30, 255 },  // Orange
+			{ 255, 160, 45, 255 }, // Yellow
+	};
+
+	static constexpr byte_vec4_t kFadeColors[2] {
+			{ 0, 0, 0, 255 },
+			{ 100, 100, 100, 0 },
+	};
+
+	static constexpr byte_vec4_t kHighlightColors[2] {
+			{ 55, 55, 55, 0 },
+			{ 0, 0, 0, 0 },
+	};
+
+	const unsigned numShadingLayers = 3;
+	cagedMesh->numShadingLayers = numShadingLayers;
+
+	const unsigned numFrames = cagedMesh->numFrames;
+	const unsigned numVertices = cagedMesh->numVertices;
 
 	constexpr unsigned kMinLifetime = 2000;
 
@@ -571,35 +593,50 @@ void SimulatedHullsSystem::applyShading( StaticCagedMesh *mesh ){
 	const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere( 4 );
 	assert( verticesSpan.size() == kNumVertices );
 
+	auto *fireVertexMaskStorage = new float[numFrames * numVertices];
+	auto *fadeVertexMaskStorage = new float[numFrames * numVertices];
+
+	cagedMesh->shadingLayers = new ShadingLayer[numFrames * numShadingLayers];
+
+	Geometry mesh;
+
 	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ) {
-		const float keyframeFrac     = (float)(frameNum) / (float)( numFrames - 1 ); // -1 so the final value is 1.0f
+		GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
+
+		const float frameFrac     = (float)(frameNum) / (float)( numFrames - 1 ); // -1 so the final value is 1.0f
 		const float fireLifetime     = 0.54f; // 0.47
 		const float fireStartFrac    = 0.9f;
-		const float fireLifetimeFrac = wsw::min( 1.0f, keyframeFrac * ( 1.0f / fireLifetime ) );
+		const float fireLifetimeFrac = wsw::min( 1.0f, frameFrac * ( 1.0f / fireLifetime ) );
 		const float fireFrac         = fireLifetimeFrac * fireStartFrac + ( 1.0f - fireStartFrac );
 
-		const float scrolledDistance = scrollDistance * keyframeFrac;
+		const float scrolledDistance = scrollDistance * frameFrac;
 
-		float *const frameVertexOffsets     = vertexOffsetStorage[frameNum];
-		float *const frameFireVertexMask    = fireVertexMaskStorage[frameNum];
-		float *const frameFadeVertexMask    = fadeVertexMaskStorage[frameNum];
-		float *const frameOffsetsFromLimits = vertexOffsetsFromLimitsStorage[frameNum];
+		float *const frameFireVertexMask    = &fireVertexMaskStorage[frameNum * numVertices];
+		float *const frameFadeVertexMask    = &fadeVertexMaskStorage[frameNum * numVertices];
 
-		//const float expansion = (1-initialSize) * ( 1.f - (x-1.f)*(x-1.f) ) + initialSize;
 		const float initialVelocity = 5.0f;
-		const float expansion       = ( 1.0f - initialSize ) * ( 1.0f - std::exp( -initialVelocity * keyframeFrac ) ) + initialSize;
+		const float expansion       = ( 1.0f - initialSize ) * ( 1.0f - std::exp( -initialVelocity * frameFrac ) ) + initialSize;
 
-		const vec4_t *const vertices = verticesSpan.data();
+		vec3_t *vertexPositions = mesh.vertexPositions.data();
+
+		float minOffsetForFrame = std::numeric_limits<float>::infinity();
+		float maxOffsetForFrame = 0.f;
 		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
-			const float *const vertex = vertices[vertexNum];
-			const float voronoiNoise  = calcVoronoiNoiseSquared( vertex[0], vertex[1], vertex[2] + scrolledDistance );
-			const float offset        = expansion * ( 1.0f - 0.7f * voronoiNoise );
+			const float vertexOffset  = VectorLengthFast( vertexPositions[vertexNum] );
+			minOffsetForFrame = wsw::min( vertexOffset, minOffsetForFrame );
+			maxOffsetForFrame = wsw::max( vertexOffset, maxOffsetForFrame );
+		}
+		const float offsetInterval = wsw::max( 1e-3f, maxOffsetForFrame - minOffsetForFrame );
+		const float rcpOffsetInterval = Q_Rcp( offsetInterval );
 
-			frameVertexOffsets[vertexNum]  = offset;
-			frameFireVertexMask[vertexNum] = voronoiNoise; // Values between 1 and 0 where 1 has the highest offset
+		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
+			const float *const vertex = vertexPositions[vertexNum];
+			const float vertexOffset  = VectorLengthFast( vertex );
 
-			const float simplexNoise       = calcSimplexNoise3D( vertex[0], vertex[1], vertex[2] - scrolledDistance);
-			const float fadeFrac           = ( keyframeFrac - fadeStartAtFrac ) / ( 1.0f - fadeStartAtFrac );
+			frameFireVertexMask[vertexNum] = ( vertexOffset - minOffsetForFrame ) * rcpOffsetInterval; // Values between 1 and 0 where 1 has the highest offset
+
+			const float simplexNoise       = calcSimplexNoise3D( vertex[0], vertex[1], vertex[2] - scrolledDistance );
+			const float fadeFrac           = ( frameFrac - fadeStartAtFrac ) / ( 1.0f - fadeStartAtFrac );
 			const float zFade              = 0.5f * ( vertex[2] + 1.0f ) * zFadeInfluence;
 			frameFadeVertexMask[vertexNum] = fadeFrac - simplexNoise * ( 1.0f - zFadeInfluence ) - zFade + fadeRange;
 		}
@@ -630,20 +667,13 @@ void SimulatedHullsSystem::applyShading( StaticCagedMesh *mesh ){
 		fadeMaskedShadingLayer.blendMode        = SimulatedHullsSystem::BlendMode::Add;
 		fadeMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::AlphaMode::Override;
 
-		const auto *const frameLayersData = shadingLayersStorage.data() + shadingLayersStorage.size();
-		static_assert( kNumShadingLayers == 3 );
-		shadingLayersStorage.emplace_back( fireMaskedShadingLayer );
-		shadingLayersStorage.emplace_back( highlightDotShadingLayer );
-		shadingLayersStorage.emplace_back( fadeMaskedShadingLayer );
+		static_assert( numShadingLayers == 3 );
+		cagedMesh->shadingLayers[frameNum * numShadingLayers + 0] = fireMaskedShadingLayer;
+		cagedMesh->shadingLayers[frameNum * numShadingLayers + 1] = highlightDotShadingLayer;
+		cagedMesh->shadingLayers[frameNum * numShadingLayers + 2] = fadeMaskedShadingLayer;
 
-		std::fill( frameOffsetsFromLimits, frameOffsetsFromLimits + kNumVertices, 0.0f );
-
-		setOfKeyframes.emplace_back( SimulatedHullsSystem::OffsetKeyframe {
-				.lifetimeFraction = keyframeFrac,
-				.offsets          = frameVertexOffsets,
-				.offsetsFromLimit = frameOffsetsFromLimits,
-				.shadingLayers    = { frameLayersData, kNumShadingLayers },
-		});
+		delete[] mesh.vertexPositions.data();
+		delete[] mesh.triIndices.data();
 	}
 }
 
@@ -3452,6 +3482,38 @@ static void addLayerContributionToResultColor( float rampValue, unsigned numColo
 	}
 }
 
+void SimulatedHullsSystem::vertexPosFromStaticCage( unsigned vertIdx, const StaticCageCoordinate *vertCoords, float scale,
+													const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
+													const float *limitsAtDirections, const vec3_t origin, vec3_t outPos ) {
+	unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
+
+	vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]}; // 2: vertCoords
+
+	vec3_t moveDir;
+
+	const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
+	const unsigned cageVertIdx1 = cageTriIndices[triIdx][1];
+	const unsigned cageVertIdx2 = cageTriIndices[triIdx][2];
+
+	const float coeff0 = 1 - (coords[0] + coords[1]);
+	const float coeff1 = coords[0];
+	const float coeff2 = coords[1];
+
+	VectorScale(vertexMoveDirections[cageVertIdx0], coeff0, moveDir);
+	VectorMA(moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir);
+	VectorMA(moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir);
+	VectorNormalizeFast(moveDir);
+
+	const float limit =
+			limitsAtDirections[cageVertIdx0] * coeff0 +
+			limitsAtDirections[cageVertIdx1] * coeff1 +
+			limitsAtDirections[cageVertIdx2] * coeff2;
+
+	const float offset = wsw::min(vertCoords[vertIdx].offset, limit) * scale;
+
+	VectorMA( origin, offset, moveDir, outPos );
+}
+
 IntConfigVar v_testMode( wsw::StringView("testMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
 
 auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *__restrict viewOrigin,
@@ -3575,40 +3637,94 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 		const auto beforeConstruct = Sys_Microseconds();
         for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
             unsigned vertIdx = startVertIdx + vertNum;
-            unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
 
-            vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]};
+			vertexPosFromStaticCage( vertIdx, vertCoords, scale, cageTriIndices, vertexMoveDirections,
+									 limitsAtDirections, origin, destPositions[vertNum] );
 
-            //vec3_t vertPos;
-            vec3_t moveDir;
-
-            const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
-            const unsigned cageVertIdx1 = cageTriIndices[triIdx][1];
-            const unsigned cageVertIdx2 = cageTriIndices[triIdx][2];
-
-            const float coeff0 = 1 - (coords[0] + coords[1]);
-            const float coeff1 = coords[0];
-            const float coeff2 = coords[1];
-
-            VectorScale(vertexMoveDirections[cageVertIdx0], coeff0, moveDir);
-            VectorMA(moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir);
-            VectorMA(moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir);
-            VectorNormalizeFast(moveDir);
-
-            const float limit =
-                    limitsAtDirections[cageVertIdx0] * coeff0 +
-                    limitsAtDirections[cageVertIdx1] * coeff1 +
-                    limitsAtDirections[cageVertIdx2] * coeff2;
-
-            const float offset = wsw::min(vertCoords[vertIdx].offset, limit) * scale;
-
-            //VectorMA( origin, offset, moveDir, vertPos );
-			VectorMA( origin, offset, moveDir, destPositions[vertNum] );
-
-            //VectorCopy( vertPos, &destPositions[vertNum][0] );
             destPositions[vertNum][3] = 1.0f;
         }
 		Com_Printf("Construction took %d millis for %d vertices and %d indices\n", (int)(Sys_Microseconds() - beforeConstruct), (int)numResultVertices, (int)numResultIndices);
+		
+		const unsigned numShadingLayers = meshToRender->numShadingLayers;
+		const unsigned nextFrame = wsw::min( currFrame + 1, numFrames - 1 );
+		const float lerpFrac = (float)numFrames * lifetimeFrac - (float)currFrame;
+
+		for( unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
+			const ShadingLayer &prevShadingLayer = meshToRender->shadingLayers[currFrame * numShadingLayers + layerNum];
+			const ShadingLayer &nextShadingLayer = meshToRender->shadingLayers[nextFrame * numShadingLayers + layerNum];
+			if( const auto *const prevMaskedLayer = std::get_if<MaskedShadingLayer>( &prevShadingLayer ) ) {
+				const auto *const nextMaskedLayer = std::get_if<MaskedShadingLayer>( &nextShadingLayer );
+
+				const unsigned numColors = prevMaskedLayer->colors.size();
+				assert( numColors > 0 && numColors <= kMaxLayerColors );
+
+				byte_vec4_t lerpedColors[kMaxLayerColors];
+				float lerpedColorRanges[kMaxLayerColors];
+				lerpLayerColorsAndRangesBetweenFrames( lerpedColors, lerpedColorRanges, numColors, lerpFrac,
+													   prevMaskedLayer->colors.data(), nextMaskedLayer->colors.data(),
+													   prevMaskedLayer->colorRanges, nextMaskedLayer->colorRanges );
+
+				unsigned vertexNum = 0;
+				do {
+					const float vertexMaskValue = std::lerp( prevMaskedLayer->vertexMaskValues[vertexNum],
+															 nextMaskedLayer->vertexMaskValues[vertexNum],
+															 lerpFrac );
+
+					addLayerContributionToResultColor( vertexMaskValue, numColors, lerpedColors, lerpedColorRanges,
+													   prevMaskedLayer->blendMode, prevMaskedLayer->alphaMode,
+													   destColors[vertexNum], layerNum );
+
+				} while ( ++vertexNum < numVerts );
+			} /*else if( const auto *const prevDotLayer = std::get_if<DotShadingLayer>( &prevShadingLayer ) ) {
+				const auto *const nextDotLayer = std::get_if<DotShadingLayer>( &nextShadingLayer );
+
+				const unsigned numColors = prevDotLayer->colors.size();
+				assert( numColors > 0 && numColors <= kMaxLayerColors );
+
+				byte_vec4_t lerpedColors[kMaxLayerColors];
+				float lerpedColorRanges[kMaxLayerColors];
+				lerpLayerColorsAndRangesBetweenFrames( lerpedColors, lerpedColorRanges, numColors, m_shared->lerpFrac,
+													   prevDotLayer->colors.data(), nextDotLayer->colors.data(),
+													   prevDotLayer->colorRanges, nextDotLayer->colorRanges );
+
+				unsigned vertexNum = 0;
+				do {
+					addLayerContributionToResultColor( viewDotResults[vertexNum], numColors, lerpedColors, lerpedColorRanges,
+													   prevDotLayer->blendMode, prevDotLayer->alphaMode,
+													   destColors[vertexNum], layerNum );
+				} while ( ++vertexNum < numVerts );
+			}
+			else if( const auto *const prevCombinedLayer = std::get_if<CombinedShadingLayer>( &prevShadingLayer ) ) {
+				const auto *const nextCombinedLayer = std::get_if<CombinedShadingLayer>( &nextShadingLayer );
+
+				const unsigned numColors = prevCombinedLayer->colors.size();
+				assert( numColors > 0 && numColors <= kMaxLayerColors );
+
+				byte_vec4_t lerpedColors[kMaxLayerColors];
+				float lerpedColorRanges[kMaxLayerColors];
+				lerpLayerColorsAndRangesBetweenFrames( lerpedColors, lerpedColorRanges, numColors, m_shared->lerpFrac,
+													   prevCombinedLayer->colors.data(), nextCombinedLayer->colors.data(),
+													   prevCombinedLayer->colorRanges, nextCombinedLayer->colorRanges );
+
+				unsigned vertexNum = 0;
+				do {
+					const float vertexDotValue  = viewDotResults[vertexNum];
+					const float vertexMaskValue = std::lerp( prevCombinedLayer->vertexMaskValues[vertexNum],
+															 nextCombinedLayer->vertexMaskValues[vertexNum],
+															 m_shared->lerpFrac );
+
+					const float dotInfluence        = prevCombinedLayer->dotInfluence;
+					const float maskInfluence       = 1.0f - dotInfluence;
+					const float vertexCombinedValue = vertexDotValue * dotInfluence + vertexMaskValue * maskInfluence;
+
+					addLayerContributionToResultColor( vertexCombinedValue, numColors, lerpedColors, lerpedColorRanges,
+													   prevCombinedLayer->blendMode, prevCombinedLayer->alphaMode,
+													   destColors[vertexNum], layerNum );
+				} while ( ++vertexNum < numVerts );
+			} else {
+				wsw::failWithLogicError( "Unreachable" );
+			}*/
+		}
 
         Com_Printf("Total took %d millis for %d vertices and %d indices\n", (int)(Sys_Microseconds() - before), (int)numResultVertices, (int)numResultIndices);
 	}

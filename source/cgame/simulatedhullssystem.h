@@ -11,6 +11,7 @@
 #include "../common/geometry.h"
 #include "../common/wswstring.h"
 #include "polyeffectssystem.h"
+#include "../common/wswstringview.h"
 
 struct CMShapeList;
 
@@ -163,7 +164,8 @@ public:
         unsigned numVertices;
         unsigned numFrames;
         std::span<tri> triIndices;
-        std::span<const ShadingLayer> shadingLayers;
+        ShadingLayer *shadingLayers;
+		unsigned numShadingLayers;
         float *boundingRadii; // maximum radius of the mesh for a given frame for culling
         StaticCagedMesh *nextLOD { nullptr }; // pointer to the next lower detail version
     };
@@ -181,11 +183,15 @@ public:
 
     unsigned maxCagedHullsPerType = 64;
 
+	static void vertexPosFromStaticCage( unsigned vertIdx, const StaticCageCoordinate *vertCoords, float scale,
+							      const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
+							      const float *limitsAtDirections, const vec3_t origin, vec3_t outPos );
+
     void RegisterStaticCage( const wsw::String &identifier );
 
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
-	void applyShading( StaticCagedMesh *mesh );
+	void applyShading( wsw::StringView pathToMesh, SimulatedHullsSystem::StaticCagedMesh *cagedMesh ); // this stuff is terrible, remove ASAP, should be done on GPU WITH SHADERS
 
 	struct OffsetKeyframe {
 		float lifetimeFraction { 0.0f };
@@ -228,9 +234,9 @@ private:
 		// currently for keyframed hull shading
 		bool isAKeyframedHull { false };
         /// DELETE
-		float lerpFrac { 0.0f };
-		std::span<const ShadingLayer> prevShadingLayers;
-		std::span<const ShadingLayer> nextShadingLayers;
+		//float lerpFrac { 0.0f };
+		//std::span<const ShadingLayer> prevShadingLayers;
+		//std::span<const ShadingLayer> nextShadingLayers;
         /// DELETE END
 
         /// for caged hulls

@@ -334,7 +334,6 @@ struct ToonSmokeOffsetKeyframeHolder {
 			SimulatedHullsSystem::MaskedShadingLayer fireMaskedShadingLayer;
 			fireMaskedShadingLayer.vertexMaskValues = frameFireVertexMask;
 			fireMaskedShadingLayer.colors           = kFireColors;
-
 			fireMaskedShadingLayer.colorRanges[0] = fireFrac * fireFrac;
 			fireMaskedShadingLayer.colorRanges[1] = fireFrac;
 			fireMaskedShadingLayer.colorRanges[2] = std::sqrt( fireFrac );
@@ -568,7 +567,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		};
 
 		SimulatedHullsSystem::SolidAppearanceRules solidAppearanceRules = {
-				.material = nullptr,
+				.material = cgs.media.shaderSmokeHull,
 		};
 
 		SimulatedHullsSystem::AppearanceRules appearanceRules;
