@@ -160,8 +160,9 @@ public:
 
     struct StaticCagedMesh {
 		unsigned loadedCageKey;
+		unsigned numVertices;
         StaticCageCoordinate *vertexCoordinates;
-        unsigned numVertices;
+		float *offsetFromLim;
         unsigned numFrames;
         std::span<tri> triIndices;
         ShadingLayer *shadingLayers;
@@ -184,8 +185,9 @@ public:
     unsigned maxCagedHullsPerType = 64;
 
 	static void vertexPosFromStaticCage( unsigned vertIdx, const StaticCageCoordinate *vertCoords, float scale,
-							      const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
-							      const float *limitsAtDirections, const vec3_t origin, vec3_t outPos );
+										 const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
+										 const float *limitsAtDirections, const float *offsetsFromLim,
+										 const vec3_t origin, vec3_t outPos );
 
     void RegisterStaticCage( const wsw::String &identifier );
 

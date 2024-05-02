@@ -472,6 +472,8 @@ FloatConfigVar hullScale( wsw::StringView( "hullScale"), { .byDefault = 35.0f, .
 
 IntConfigVar appearanceMode( wsw::StringView("appearanceMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
 
+FloatConfigVar v_fireHullScale( wsw::StringView( "fireHullScale"), { .byDefault = 1.6f, .flags = CVAR_ARCHIVE });
+
 void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const float *smokeOrigin, const float *dir, float radius ) {
 	// 250 for radius of 64
 	// TODO: Make radius affect hulls
@@ -511,7 +513,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 	const unsigned compoundMeshKey = m_explosionCompoundMeshCounter;
 
 	if( auto *const hull = hullsSystem->allocFireHull( m_lastTime, fireHullTimeout ) ) {
-		hullsSystem->setupHullVertices( hull, fireOrigin, fireHullScale, fireHullLayerParams );
+		hullsSystem->setupHullVertices( hull, fireOrigin, v_fireHullScale.get(), fireHullLayerParams );
 		hull->compoundMeshKey = compoundMeshKey;
 
 		hull->vertexViewDotFade          = SimulatedHullsSystem::ViewDotFade::FadeOutContour;
