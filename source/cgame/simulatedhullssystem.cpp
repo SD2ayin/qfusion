@@ -346,6 +346,56 @@ bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
 
 unsigned GetNumFramesInMD3( const char *fileName );
 
+bool collisionCheck( Geometry *collisionGeometry, vec3_t position, vec3_t dir, float maxDist, unsigned &outTriIdx, float &outDist, vec2_t coordsOnTri ){
+	bool foundCollision = false;
+
+	const unsigned collisionFaces = collisionGeometry->triIndices.size();
+
+	for( unsigned faceNum = 0; ( faceNum < collisionFaces ) && !foundCollision; faceNum++ ) {
+		const uint16_t *faceIndices = collisionGeometry->triIndices[faceNum];
+		vec3_t triCoords[3];
+		getTriCoords( faceIndices, collisionGeometry, triCoords );
+		// calculate offsets of other vertices from the first one in the array
+		vec3_t first; // first base vector
+		vec3_t second; // second base vector
+		VectorSubtract( triCoords[1], triCoords[0], first );
+		VectorSubtract( triCoords[2], triCoords[0], second );
+
+		// only vertices that move in the direction of the face can be bound by that face
+		vec3_t faceNormal;
+		CrossProduct( first, second, faceNormal );
+		if ( DotProduct( faceNormal, dir ) <= 0.f ) {
+			continue;
+		}
+
+		// solve the system of linear equations to express the vertex coordinates in terms of the vertex offsets inside the triangle
+		mat3_t coefficientsMatrix;
+		VectorCopy( dir, &coefficientsMatrix[0] );
+		VectorCopy( first, &coefficientsMatrix[3] );
+		VectorCopy( second, &coefficientsMatrix[6] );
+
+		vec3_t result; // result of the linear matrix equation
+		VectorCopy( triCoords[0], result );
+		VectorSubtract( result, position, result );
+		
+		vec3_t solution;
+		Solve3by3(coefficientsMatrix, result, solution);
+
+		vec2_t coordinates = { -solution[1], -solution[2] };
+		constexpr float FPEmargin = 1e-3f; // to account for floating point error
+		if( ((coordinates[0] + coordinates[1]) < 1.0f + FPEmargin) && (coordinates[0] > 0.0f - FPEmargin) &&
+			(coordinates[1] > 0.0f - FPEmargin) ) {
+			Vector2Copy( coordinates, coordsOnTri );
+			outTriIdx = faceNum;
+
+			foundCollision = true;
+			break;
+		}
+	}
+
+	return foundCollision;
+}
+
 void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     m_loadedStaticCages.emplace_back();
     StaticCage *cage = std::addressof( m_loadedStaticCages.back() );
@@ -421,6 +471,9 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
             VectorCopy( vertexPositions[vertNum], vertPosition );
             bool foundCoords = false;
 			if( VectorLengthFast( vertPosition ) < 1e-3f ) {
+				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
+				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
+				// that the vertex belongs to may not find any solutions.
 				SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
 				cageCoord->cageTriIdx = 0;
 				vec2_t coordinates = { 0.0f, 0.0f };
@@ -457,8 +510,9 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
                 Solve3by3(coefficientsMatrix, triCoords[0], solution);
 
                 vec2_t coordinates = { -solution[1], -solution[2] };
-                if( ((coordinates[0] + coordinates[1]) < 1.0f + 1e-3f) && (coordinates[0] > 0.0f - 1e-3f) &&
-                    (coordinates[1] > 0.0f - 1e-3f)) {
+				constexpr float FPEmargin = 1e-3f; // to account for floating point error
+                if( ((coordinates[0] + coordinates[1]) < 1.0f + FPEmargin) && (coordinates[0] > 0.0f - FPEmargin) &&
+                    (coordinates[1] > 0.0f - FPEmargin) ) {
                     SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
                     cageCoord->cageTriIdx = faceNum;
                     Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
@@ -467,7 +521,6 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 
                     foundCoords = true;
                 }
-
             }
 
             if (!foundCoords) {
