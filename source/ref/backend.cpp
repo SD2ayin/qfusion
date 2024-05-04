@@ -1278,6 +1278,7 @@ void R_SubmitDynamicMeshesToBackend( const FrontendToBackendShared *fsh, const e
 	// Maximum supported icosphere subdiv level
 	// TODO check these values, share with the icosphere code
 	// TODO we do not have to transfer icosphere indices every frame
+	// TODO should be more, maybe up to md3 limit? what will the effect be on performance?
 	constexpr auto maxStorageVertices = 2562;
 	constexpr auto maxStorageIndices  = 15360;
 

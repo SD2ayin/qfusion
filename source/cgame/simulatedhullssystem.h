@@ -165,6 +165,7 @@ public:
 		float *offsetFromLim;
         unsigned numFrames;
         std::span<tri> triIndices;
+        vec2_t *UVCoords;
         ShadingLayer *shadingLayers;
 		unsigned numShadingLayers;
         float *boundingRadii; // maximum radius of the mesh for a given frame for culling

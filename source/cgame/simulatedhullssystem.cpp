@@ -437,6 +437,11 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 
     cagedMesh->numVertices = numVerts;
     cagedMesh->triIndices  = mesh.triIndices;
+    cagedMesh->UVCoords    = mesh.UVCoords;
+
+    for( int i = 0; i < numVerts && i < 10; i++ ){
+        cgNotice() << "uv coords:" << cagedMesh->UVCoords[i][0] << cagedMesh->UVCoords[i][1];
+    }
 
     cagedMesh->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[numVerts * numFrames];
 	cagedMesh->offsetFromLim = new float[numVerts * numFrames];
@@ -494,6 +499,7 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 
         delete[] mesh.vertexPositions.data();
         delete[] mesh.triIndices.data();
+        delete[] mesh.UVCoords;
     }
 
     Com_Printf("It took %d millis\n", (int)(Sys_Milliseconds() - before));
@@ -690,6 +696,7 @@ void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, StaticCaged
 
 		delete[] mesh.vertexPositions.data();
 		delete[] mesh.triIndices.data();
+        delete[] mesh.UVCoords;
 	}
 }
 
@@ -3665,6 +3672,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         const tri *meshTriIndices = meshToRender->triIndices.data();
 
 		std::memcpy( destIndices, meshTriIndices, sizeof( uint16_t ) * numIndices );
+        std::memcpy( destTexCoords, meshToRender->UVCoords, sizeof( vec2_t ) * numVerts );
 
         const tri *cageTriIndices = m_shared->cageTriIndices;
         const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
@@ -3674,13 +3682,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
         const float scale                  = m_shared->scale;
         const float *origin                = m_shared->origin;
-
-		// write colors to dest colors
-        // for now, use simple dark colors
-        byte_vec4_t genericColor = { 125, 125, 125, 255 };
-        for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
-            Vector4Copy( genericColor, destColors[vertNum] );
-        }
 
         // write positions to dest positions
         unsigned currFrame;

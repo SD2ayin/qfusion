@@ -79,7 +79,5 @@ bool collisionCheck( Geometry *collisionGeometry, vec3_t origin, vec3_t dir, flo
 		}
 	}
 
-    cgNotice() << "num collisions:" << numCollisions;
-
 	return foundCollision;
 }

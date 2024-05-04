@@ -6,9 +6,10 @@
 
 typedef uint16_t tri[3];
 
-struct Geometry {
+struct Geometry { // should probably have a destructor and constructor methods from alias.cpp
     std::span<vec3_t> vertexPositions;
     std::span<tri> triIndices;
+    vec2_t *UVCoords; //texture coords, equal to verts
 };
 
 struct TexturedGeometry {

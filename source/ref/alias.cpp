@@ -501,32 +501,41 @@ bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
 
             auto *const triIndices      = new tri[numTris];
             auto *const vertexPositions = new vec3_t[numVerts];
+            auto *const UVCoords        = new vec2_t[numVerts];
 
             std::span<tri> triSpan( triIndices, numTris );
             std::span<vec3_t> verticesSpan( vertexPositions, numVerts );
 
-            outGeometry->triIndices = triSpan;
+            outGeometry->triIndices      = triSpan;
             outGeometry->vertexPositions = verticesSpan;
+            outGeometry->UVCoords        = UVCoords;
 
-            auto *pInTri = ( tri * )(( uint8_t * )pInMesh + LittleLong(inMesh.ofs_elems ) );
-            for( unsigned triNum = 0; triNum < numTris; triNum++, pInTri++ ) {
+            auto *pInIdx = ( unsigned int * )(( uint8_t * )pInMesh + LittleLong(inMesh.ofs_elems ) );
+            for( unsigned triNum = 0; triNum < numTris; triNum++, pInIdx+=3 ) {
 
-                triIndices[triNum][0] = (elem_t)LittleLong( pInTri[0][0] );
-                triIndices[triNum][1] = (elem_t)LittleLong( pInTri[0][1] );
-                triIndices[triNum][2] = (elem_t)LittleLong( pInTri[0][2] );
+                triIndices[triNum][0] = (elem_t)LittleLong( pInIdx[0] );
+                triIndices[triNum][1] = (elem_t)LittleLong( pInIdx[1] );
+                triIndices[triNum][2] = (elem_t)LittleLong( pInIdx[2] );
             }
 
             auto *pInVertex = ( dmd3vertex_t * )(( uint8_t * )pInMesh + LittleLong( inMesh.ofs_verts ) );
             pInVertex += numVerts * chosenFrame;
 
-            for( unsigned vert = 0; vert < numVerts; vert++ ) {
+            for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
                 dmd3vertex_t inVertex;
 
-                memcpy(&inVertex, &(pInVertex[vert]), sizeof(dmd3vertex_t));
+                memcpy(&inVertex, &(pInVertex[vertNum]), sizeof(dmd3vertex_t));
 
-                vertexPositions[vert][0] = LittleShort( pInVertex[vert].point[0] ) * MD3_XYZ_SCALE;
-                vertexPositions[vert][1] = LittleShort( pInVertex[vert].point[1] ) * MD3_XYZ_SCALE;
-                vertexPositions[vert][2] = LittleShort( pInVertex[vert].point[2] ) * MD3_XYZ_SCALE;
+                vertexPositions[vertNum][0] = LittleShort( pInVertex[vertNum].point[0] ) * MD3_XYZ_SCALE;
+                vertexPositions[vertNum][1] = LittleShort( pInVertex[vertNum].point[1] ) * MD3_XYZ_SCALE;
+                vertexPositions[vertNum][2] = LittleShort( pInVertex[vertNum].point[2] ) * MD3_XYZ_SCALE;
+            }
+
+            auto *pInUVCoord = ( dmd3coord_t * )( ( uint8_t * )pInMesh + LittleLong( inMesh.ofs_tcs ) );
+            for( unsigned coordNum = 0; coordNum < numVerts; coordNum++ ) {
+
+                UVCoords[coordNum][0] = LittleFloat( pInUVCoord[coordNum].st[0] );
+                UVCoords[coordNum][1] = LittleFloat( pInUVCoord[coordNum].st[1] );
             }
         }
 
