@@ -580,10 +580,13 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 			appearanceRules = solidAppearanceRules;
 		}
 
+		const float rotation =  m_rng.nextFloat( 0.0f, 360.0f );//m_rng.nextFloat( 0.0f, M_PI * 2.0f );
+		cgNotice() << "rotation:" << rotation;
+
 		SimulatedHullsSystem::StaticKeyframedHullParams hullParams = {
 				.origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
 				.dir      = { dir[0], dir[1], dir[2] },
-				.rotation = m_rng.nextFloat( 0.0f, M_PI * 2.0f ),
+				.rotation = rotation,
 				.scale    = hullScale.get(),
 				.timeout  = hullLifetime.get(),
 				.sharedCageCagedMeshes = cagedMesh,

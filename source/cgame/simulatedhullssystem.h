@@ -193,6 +193,8 @@ public:
 
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
+	void preserveVolumeStatic( wsw::StringView pathToMesh, StaticCagedMesh *cagedMesh );
+
 	void applyShading( wsw::StringView pathToMesh, SimulatedHullsSystem::StaticCagedMesh *cagedMesh ); // this stuff is terrible, remove ASAP, should be done on GPU WITH SHADERS
 
 	struct OffsetKeyframe {
@@ -587,7 +589,7 @@ private:
         HullCloudDynamicMesh *submittedCloudMesh;
         /// END
 
-		vec3_t cageOffsetMinsDir, cageOffsetMaxsDir;
+		vec3_t cageMins, cageMaxs;
 		vec3_t origin;
 
 		unsigned numSharedCageCagedMeshes { 0 };

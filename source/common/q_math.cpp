@@ -874,7 +874,7 @@ void Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
 	CrossProduct( &coefficients[0], result, m );
 	float coefficientsDeterminant = DotProduct( &coefficients[0], n );
 	float rcpDeterminant;
-	if( coefficientsDeterminant > 0.0f +1e-3f ) {
+	if( coefficientsDeterminant > 0.0f + 1e-3f || coefficientsDeterminant < 0.0f - 1e-3f ) {
 		outSolution[0] = DotProduct( result, n );
 		outSolution[1] = DotProduct( &coefficients[6], m );
 		outSolution[2] = -DotProduct( &coefficients[3], m );

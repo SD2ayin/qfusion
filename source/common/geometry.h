@@ -24,4 +24,6 @@ void inline getTriCoords( const uint16_t *triIndices, const Geometry *geometry, 
 
 void unitizeGeometry( Geometry *geometry );
 
+bool collisionCheck( Geometry *collisionGeometry, vec3_t origin, vec3_t dir, float maxDist, unsigned *outTriIdx, float *outDist, vec2_t coordsOnTri );
+
 #endif //QFUSION_GEOMETRY_H
