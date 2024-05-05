@@ -439,10 +439,6 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
     cagedMesh->triIndices  = mesh.triIndices;
     cagedMesh->UVCoords    = mesh.UVCoords;
 
-    for( int i = 0; i < numVerts && i < 10; i++ ){
-        cgNotice() << "uv coords:" << cagedMesh->UVCoords[i][0] << cagedMesh->UVCoords[i][1];
-    }
-
     cagedMesh->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[numVerts * numFrames];
 	cagedMesh->offsetFromLim = new float[numVerts * numFrames];
     cagedMesh->boundingRadii = new float[numFrames];
@@ -2207,6 +2203,7 @@ void SimulatedHullsSystem::BaseRegularSimulatedHull::simulate( int64_t currTime,
 }
 
 BoolConfigVar v_showPerf( wsw::StringView("showPerf"), { .byDefault = 1, .flags = CVAR_ARCHIVE });
+BoolConfigVar v_showConstructPerf( wsw::StringView("showConstructPerf"), { .byDefault = 1, .flags = CVAR_ARCHIVE });
 
 void SimulatedHullsSystem::BaseConcentricSimulatedHull::simulate( int64_t currTime, float timeDeltaSeconds,
 																  wsw::RandomGenerator *__restrict rng ) {
@@ -3661,10 +3658,10 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
 		// write positions to destPositions
 		// memcpy indices from mesh to render
-        const unsigned numFrames = meshToRender->numFrames;
-		const unsigned numTris = meshToRender->triIndices.size();
+        const unsigned numFrames  = meshToRender->numFrames;
+		const unsigned numTris    = meshToRender->triIndices.size();
 		const unsigned numIndices = numTris * 3;
-        const unsigned numVerts = meshToRender->numVertices;
+        const unsigned numVerts   = meshToRender->numVertices;
 
         numResultVertices = numVerts;
         numResultIndices  = numIndices;
@@ -3734,7 +3731,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
             destPositions[vertNum][3] = 1.0f;
         }
-		if( v_showPerf.get() ) {
+		if( v_showConstructPerf.get() ) {
 			Com_Printf( "Construction took %d micros for %d vertices and %d indices\n",
 						(int) (Sys_Microseconds() - beforeConstruct), (int) numResultVertices, (int) numResultIndices );
 		}
@@ -3755,7 +3752,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
 		const auto beforeViewDot = Sys_Microseconds();
 		if( needsViewDotResults ) {
-			const vec4_t *const __restrict positions = destPositions;
 
 			assert( numVertices > 0 && numVertices < 4096 );
 			viewDotResults = (float *)alloca( sizeof( float ) * numVerts );
@@ -3766,7 +3762,6 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 			}
 
 			unsigned triNum = 0;
-			vec4_t *vertexPositions = destPositions;
 			do {
 				const unsigned firstVertIdx  = meshTriIndices[triNum][0];
 				const unsigned secondVertIdx = meshTriIndices[triNum][1];
@@ -3791,7 +3786,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 			} while( ++triNum < numTris );
 
 			for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
-				const float *const __restrict currVertex = positions[vertNum];
+				const float *const __restrict currVertex = destPositions[vertNum];
 				const float *const __restrict currNormal = normals[vertNum];
 
 				const float squaredNormalLength = VectorLengthSquared( currNormal );
@@ -3807,9 +3802,9 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 				} else {
 					viewDotResults[vertNum] = 0.0f;
 				}
-
-				VectorNormalizeFast( normals[vertNum] );
-				viewDotResults[vertNum] = DotProduct( normals[vertNum], viewAxis );
+//
+//				VectorNormalizeFast( normals[vertNum] );
+//				viewDotResults[vertNum] = DotProduct( normals[vertNum], viewAxis );
 			}
 		}
 		if( v_showPerf.get() ) {
@@ -4103,6 +4098,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
 		const tri *cageTriIndices = m_shared->cageTriIndices;
 		const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
+        const float *offsetsFromLim = meshToRender->offsetFromLim;
 
 		const float *limitsAtDirections    = m_shared->limitsAtDirections;
 		const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
@@ -4111,18 +4107,40 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
 		// write positions to destPositions
 		// memcpy indices from mesh to render
-		const unsigned numFrames = meshToRender->numFrames;
+		const unsigned numFrames    = meshToRender->numFrames;
+        const unsigned numTris      = meshToRender->triIndices.size();
 		const unsigned numGridVerts = meshToRender->numVertices;
 
-		// write positions to dest positions
-		unsigned currFrame;
-		if( v_frameToShow.get() < 0 ){
-			currFrame = wsw::min( (unsigned) ((float) numFrames * lifetimeFrac), numFrames - 1 );
-		} else {
-			currFrame = v_frameToShow.get();
-		}
+        const tri *meshTriIndices = meshToRender->triIndices.data();
 
-		unsigned startVertIdx = currFrame * numGridVerts; // currFrame * numVerts;
+        unsigned currFrame;
+        float lerpFrac;
+        if( v_frameToShow.get() < 0 ){
+            currFrame = wsw::min( (unsigned) ((float) numFrames * lifetimeFrac), numFrames - 1 );
+            lerpFrac  = (float)numFrames * lifetimeFrac - (float)currFrame;
+        } else {
+            currFrame = v_frameToShow.get();
+            lerpFrac  = 0.0f;
+        }
+        const unsigned nextFrame   = wsw::min( currFrame + 1, numFrames - 1 );
+        const float complementFrac = 1.0f - lerpFrac;
+
+        unsigned currFrameStartVertIdx = currFrame * numGridVerts;
+        unsigned nextFrameStartVertIdx = nextFrame * numGridVerts;
+
+        bool needsViewDotResults = false;
+        float *viewDotResults    = nullptr;
+
+        const unsigned numShadingLayers = meshToRender->numShadingLayers;
+
+        for(  unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
+            const ShadingLayer &layer = meshToRender->shadingLayers[layerNum];
+            if( !std::holds_alternative<MaskedShadingLayer>( layer ) ) {
+                assert( std::holds_alternative<DotShadingLayer>( layer ) || std::holds_alternative<CombinedShadingLayer>( layer ) );
+                needsViewDotResults = true;
+                break;
+            }
+        }
 
         alignas(16) vec4_t viewLeft, viewUp;
         // TODO: Flip if needed
@@ -4145,65 +4163,27 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
         [[maybe_unused]] vec3_t tmpLeftStorage, tmpUpStorage;
 
-		vec3_t gridVertexPosition;
+		//vec3_t gridVertexPosition;
+        auto *gridVertexPosition = (vec3_t *)alloca( sizeof( vec3_t ) * numGridVerts );
 
         do {
-			unsigned vertIdx = startVertIdx + gridVertNum;
-			unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
 
-			vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]};
+            unsigned currFrameVertIdx = currFrameStartVertIdx + gridVertNum;
+            unsigned nextFrameVertIdx = nextFrameStartVertIdx + gridVertNum;
+            vec3_t nextPositionContrib;
 
-			vec3_t moveDir;
-
-			const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
-			const unsigned cageVertIdx1 = cageTriIndices[triIdx][1];
-			const unsigned cageVertIdx2 = cageTriIndices[triIdx][2];
-
-			const float coeff0 = 1 - (coords[0] + coords[1]);
-			const float coeff1 = coords[0];
-			const float coeff2 = coords[1];
-
-			VectorScale(vertexMoveDirections[cageVertIdx0], coeff0, moveDir);
-			VectorMA(moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir);
-			VectorMA(moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir);
-			VectorNormalizeFast(moveDir);
-
-			const float limit =
-					limitsAtDirections[cageVertIdx0] * coeff0 +
-					limitsAtDirections[cageVertIdx1] * coeff1 +
-					limitsAtDirections[cageVertIdx2] * coeff2;
-
-			const float offset = wsw::min(vertCoords[vertIdx].offset, limit) * scale;
-
-			//VectorMA( origin, offset, moveDir, vertPos );
-			VectorMA( origin, offset, moveDir, gridVertexPosition );
-
-//            const uint8_t *const __restrict vertexColor = colorsToUse[vertexNum];
+            vertexPosFromStaticCage( currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
+                                     vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, gridVertexPosition[gridVertNum] );
+            vertexPosFromStaticCage( nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
+                                     vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, nextPositionContrib );
+            VectorAdd( gridVertexPosition[gridVertNum], nextPositionContrib, gridVertexPosition[gridVertNum] );
+            VectorAdd( gridVertexPosition[gridVertNum], origin, gridVertexPosition[gridVertNum] );
 
             vec4_t *const __restrict positions = destPositions + numResultVertices;
             vec4_t *const __restrict normals = destNormals + numResultVertices;
             byte_vec4_t *const __restrict colors = destColors + numResultVertices;
             vec2_t *const __restrict texCoords = destTexCoords + numResultVertices;
             uint16_t *const __restrict indices = destIndices + numResultIndices;
-
-            // Test the color alpha first for an early cutoff
-
-//            byte_vec4_t resultingColor;
-//            resultingColor[3] = (uint8_t) wsw::clamp((float) vertexColor[3] * m_spriteColor[3] * m_alphaScale, 0.0f,
-//                                                     255.0f);
-//            if (resultingColor[3] < 1) {
-//                continue;
-//            }
-//
-//            resultingColor[0] = (uint8_t) wsw::clamp((float) vertexColor[0] * m_spriteColor[0], 0.0f, 255.0f);
-//            resultingColor[1] = (uint8_t) wsw::clamp((float) vertexColor[1] * m_spriteColor[1], 0.0f, 255.0f);
-//            resultingColor[2] = (uint8_t) wsw::clamp((float) vertexColor[2] * m_spriteColor[2], 0.0f, 255.0f);
-			byte_vec4_t genericColor = { 255, 125, 60, 255 };
-
-            Vector4Copy(genericColor, colors[0]);
-            Vector4Copy(genericColor, colors[1]);
-            Vector4Copy(genericColor, colors[2]);
-            Vector4Copy(genericColor, colors[3]);
 
             // 1 unit is equal to a rotation of 360 degrees
             const float initialPhase =
@@ -4228,11 +4208,11 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
             }
 
             vec3_t point;
-            VectorMA(gridVertexPosition, -radius, up, point);
+            VectorMA(gridVertexPosition[gridVertNum], -radius, up, point);
             VectorMA(point, +radius, left, positions[0]);
             VectorMA(point, -radius, left, positions[3]);
 
-            VectorMA(gridVertexPosition, radius, up, point);
+            VectorMA(gridVertexPosition[gridVertNum], radius, up, point);
             VectorMA(point, +radius, left, positions[1]);
             VectorMA(point, -radius, left, positions[2]);
 
@@ -4254,6 +4234,166 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
             numResultVertices += 4;
             numResultIndices += 6;
         } while ( ++gridVertNum < numGridVerts );
+
+
+        const auto beforeViewDot = Sys_Microseconds();
+        if( needsViewDotResults ) {
+
+            assert( numVertices > 0 && numVertices < 4096 );
+            viewDotResults = (float *)alloca( sizeof( float ) * numGridVerts );
+
+            auto *meshNormals = (vec3_t *)alloca( sizeof( vec3_t ) * numGridVerts );
+            for( unsigned vertNum = 0; vertNum < numGridVerts; vertNum++ ){
+                VectorSet( meshNormals[vertNum], 0.0f, 0.0f, 0.0f );
+            }
+
+            unsigned triNum = 0;
+            do {
+                const unsigned firstVertIdx  = meshTriIndices[triNum][0];
+                const unsigned secondVertIdx = meshTriIndices[triNum][1];
+                const unsigned thirdVertIdx  = meshTriIndices[triNum][2];
+
+                vec3_t triCoords[3];
+                VectorCopy( gridVertexPosition[firstVertIdx], triCoords[0] );
+                VectorCopy( gridVertexPosition[secondVertIdx], triCoords[1] );
+                VectorCopy( gridVertexPosition[thirdVertIdx], triCoords[2] );
+
+                vec3_t vecToSecondVert;
+                vec3_t vecToThirdVert;
+                VectorSubtract( triCoords[1], triCoords[0], vecToSecondVert );
+                VectorSubtract( triCoords[2], triCoords[0], vecToThirdVert );
+
+                vec3_t normal;
+                CrossProduct( vecToThirdVert, vecToSecondVert, normal );
+
+                VectorAdd( meshNormals[firstVertIdx], normal, meshNormals[firstVertIdx] );
+                VectorAdd( meshNormals[secondVertIdx], normal, meshNormals[secondVertIdx] );
+                VectorAdd( meshNormals[thirdVertIdx], normal, meshNormals[thirdVertIdx] );
+            } while( ++triNum < numTris );
+
+            for( unsigned vertNum = 0; vertNum < numGridVerts; vertNum++ ){
+                const float *const __restrict currVertex = gridVertexPosition[vertNum];
+                const float *const __restrict currNormal = meshNormals[vertNum];
+
+                const float squaredNormalLength = VectorLengthSquared( currNormal );
+                vec3_t viewDir;
+                VectorSubtract( currVertex, viewOrigin, viewDir );
+                const float squareDistanceToVertex = VectorLengthSquared( viewDir );
+
+                const float squareRcpNormalizingFactor = squaredNormalLength * squareDistanceToVertex;
+                // check that both the length of the normal and distance to vertex are not 0 in one branch
+                if( squareRcpNormalizingFactor > 1.0f ) [[likely]] {
+                    const float normalizingFactor = Q_RSqrt( squareRcpNormalizingFactor );
+                    viewDotResults[vertNum] = std::fabs( DotProduct( viewDir, currNormal ) ) * normalizingFactor;
+                } else {
+                    viewDotResults[vertNum] = 0.0f;
+                }
+            }
+        }
+        if( v_showPerf.get() ) {
+            Com_Printf( "viewdot results took %d micros for %d vertices and %d indices\n",
+                        (int) (Sys_Microseconds() - beforeViewDot), (int) numResultVertices, (int) numResultIndices );
+        }
+
+        for( unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
+            const ShadingLayer &prevShadingLayer = meshToRender->shadingLayers[currFrame * numShadingLayers +
+                                                                               layerNum];
+            const ShadingLayer &nextShadingLayer = meshToRender->shadingLayers[nextFrame * numShadingLayers +
+                                                                               layerNum];
+
+            const auto beforeLayer = Sys_Microseconds();
+            if (const auto *const prevMaskedLayer = std::get_if<MaskedShadingLayer>(&prevShadingLayer)) {
+                const auto *const nextMaskedLayer = std::get_if<MaskedShadingLayer>(&nextShadingLayer);
+
+                const unsigned numColors = prevMaskedLayer->colors.size();
+                assert(numColors > 0 && numColors <= kMaxLayerColors);
+
+                byte_vec4_t lerpedColors[kMaxLayerColors];
+                float lerpedColorRanges[kMaxLayerColors];
+                lerpLayerColorsAndRangesBetweenFrames(lerpedColors, lerpedColorRanges, numColors, lerpFrac,
+                                                      prevMaskedLayer->colors.data(),
+                                                      nextMaskedLayer->colors.data(),
+                                                      prevMaskedLayer->colorRanges, nextMaskedLayer->colorRanges);
+
+                unsigned vertexNum = 0;
+                do {
+                    byte_vec4_t *const __restrict colors = destColors + vertexNum * 4;
+                    const float vertexMaskValue = std::lerp(prevMaskedLayer->vertexMaskValues[vertexNum],
+                                                            nextMaskedLayer->vertexMaskValues[vertexNum],
+                                                            lerpFrac);
+
+                    addLayerContributionToResultColor(vertexMaskValue, numColors, lerpedColors, lerpedColorRanges,
+                                                      prevMaskedLayer->blendMode, prevMaskedLayer->alphaMode,
+                                                      colors[0], layerNum);
+                    Vector4Copy(colors[0], colors[1]);
+                    Vector4Copy(colors[0], colors[2]);
+                    Vector4Copy(colors[0], colors[3]);
+
+                } while (++vertexNum < numGridVerts);
+            } else if (const auto *const prevDotLayer = std::get_if<DotShadingLayer>(&prevShadingLayer)) {
+                const auto *const nextDotLayer = std::get_if<DotShadingLayer>(&nextShadingLayer);
+
+                const unsigned numColors = prevDotLayer->colors.size();
+                assert(numColors > 0 && numColors <= kMaxLayerColors);
+
+                byte_vec4_t lerpedColors[kMaxLayerColors];
+                float lerpedColorRanges[kMaxLayerColors];
+                lerpLayerColorsAndRangesBetweenFrames(lerpedColors, lerpedColorRanges, numColors, lerpFrac,
+                                                      prevDotLayer->colors.data(), nextDotLayer->colors.data(),
+                                                      prevDotLayer->colorRanges, nextDotLayer->colorRanges);
+
+                unsigned vertexNum = 0;
+                do {
+                    byte_vec4_t *const __restrict colors = destColors + vertexNum * 4;
+                    addLayerContributionToResultColor(viewDotResults[vertexNum], numColors, lerpedColors,
+                                                      lerpedColorRanges,
+                                                      prevDotLayer->blendMode, prevDotLayer->alphaMode,
+                                                      colors[0], layerNum);
+                    Vector4Copy(colors[0], colors[1]);
+                    Vector4Copy(colors[0], colors[2]);
+                    Vector4Copy(colors[0], colors[3]);
+
+                } while (++vertexNum < numGridVerts);
+            } else if (const auto *const prevCombinedLayer = std::get_if<CombinedShadingLayer>(&prevShadingLayer)) {
+                const auto *const nextCombinedLayer = std::get_if<CombinedShadingLayer>(&nextShadingLayer);
+
+                const unsigned numColors = prevCombinedLayer->colors.size();
+                assert(numColors > 0 && numColors <= kMaxLayerColors);
+
+                byte_vec4_t lerpedColors[kMaxLayerColors];
+                float lerpedColorRanges[kMaxLayerColors];
+                lerpLayerColorsAndRangesBetweenFrames(lerpedColors, lerpedColorRanges, numColors, lerpFrac,
+                                                      prevCombinedLayer->colors.data(),
+                                                      nextCombinedLayer->colors.data(),
+                                                      prevCombinedLayer->colorRanges,
+                                                      nextCombinedLayer->colorRanges);
+
+                unsigned vertexNum = 0;
+                do {
+                    byte_vec4_t *const __restrict colors = destColors + vertexNum * 4;
+                    const float vertexDotValue = viewDotResults[vertexNum];
+                    const float vertexMaskValue = std::lerp(prevCombinedLayer->vertexMaskValues[vertexNum],
+                                                            nextCombinedLayer->vertexMaskValues[vertexNum],
+                                                            lerpFrac);
+
+                    const float dotInfluence = prevCombinedLayer->dotInfluence;
+                    const float maskInfluence = 1.0f - dotInfluence;
+                    const float vertexCombinedValue =
+                            vertexDotValue * dotInfluence + vertexMaskValue * maskInfluence;
+
+                    addLayerContributionToResultColor(vertexCombinedValue, numColors, lerpedColors,
+                                                      lerpedColorRanges,
+                                                      prevCombinedLayer->blendMode, prevCombinedLayer->alphaMode,
+                                                      colors[0], layerNum);
+                    Vector4Copy(colors[0], colors[1]);
+                    Vector4Copy(colors[0], colors[2]);
+                    Vector4Copy(colors[0], colors[3]);
+
+                } while (++vertexNum < numGridVerts);
+            } else {
+                wsw::failWithLogicError("Unreachable");
+            }
+        }
     }
 
 	return { numResultVertices, numResultIndices };
