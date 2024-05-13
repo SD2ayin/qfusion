@@ -34,7 +34,7 @@ public:
 
 	struct CloudMeshProps {
 		shader_s *material { nullptr };
-		vec4_t overlayColor { 1.0f, 1.0f, 1.0f, 1.0f };
+		vec4_t overlayColor { 1.0f, 1.0f, 1.0f, 1.0f }; /// could be removed, not used anywhere before and seems unnecessary.
 
 		ValueLifespan alphaScaleLifespan {
 			.initial                      = 0.0f,
@@ -53,8 +53,13 @@ public:
 		};
 
 		// Feasible values of these properties must be non-positive
+        /// should be removed
 		int tessLevelShiftForMinVertexIndex { 0 };
 		int tessLevelShiftForMaxVertexIndex { 0 };
+        /// should be removed END
+
+        float fractionOfParticlesToRender { 1.0f };
+
 		// Feasible values are non-positive (if zero, gets shown only for the extra tesselated lod)
 		int shiftFromDefaultLevelToHide { std::numeric_limits<int>::min() };
 		bool applyRotation { false };
@@ -137,9 +142,12 @@ public:
 
 	using ShadingLayer = std::variant<MaskedShadingLayer, DotShadingLayer, CombinedShadingLayer>;
 
-private: struct KeyframedHull;
+private:
+    struct KeyframedHull;
+    struct DynamicCageHull;
 
 public:
+    // static cage:
     struct StaticCage {
         Geometry cageGeometry;
         wsw::String identifier;
@@ -154,8 +162,8 @@ public:
         unsigned cageTriIdx;
         float coordsOnCageTri[2]; // barycentric coordinates
         float offset; // offset along direction
-        /// ? float moveDir ? precompute the moveDir? -> this should be impossible i guess
-        //float offsetFromLimit; // offset from boundaries like walls
+        /// ? float normalizationFactor ? precompute so we can let extra cage vertex offsets affect mesh rendering?
+        //float offsetFromLimit; here instead?
     };
 
     struct StaticCagedMesh {
@@ -170,6 +178,12 @@ public:
 		unsigned numShadingLayers;
         float *boundingRadii; // maximum radius of the mesh for a given frame for culling
         StaticCagedMesh *nextLOD { nullptr }; // pointer to the next lower detail version
+
+        bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh );
+
+        void optimizeStaticCagedMeshForCache();
+
+        void preserveVolumeStatic( wsw::StringView pathToMesh );
     };
 
     struct StaticKeyframedHullParams {
@@ -183,10 +197,8 @@ public:
         unsigned numCagedMeshes { 1u };
     };
 
-    unsigned maxCagedHullsPerType = 64;
-
 	static void vertexPosFromStaticCage( unsigned vertIdx, const StaticCageCoordinate *vertCoords, float scale,
-										 const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
+										 const tri *cageTriIndices, const vec3_t *vertexMoveDirections, //TODO: should probably be cageVertexMoveDirs
 										 const float *limitsAtDirections, const float *offsetsFromLim,
 										 const vec3_t origin, vec3_t outPos );
 
@@ -194,17 +206,86 @@ public:
 
     StaticCagedMesh *RegisterStaticCagedMesh( const char *name );
 
-	void preserveVolumeStatic( wsw::StringView pathToMesh, StaticCagedMesh *cagedMesh );
+    // // // // // // // // // // // // // // // // // //
 
-	void applyShading( wsw::StringView pathToMesh, SimulatedHullsSystem::StaticCagedMesh *cagedMesh ); // this stuff is terrible, remove ASAP, should be done on GPU WITH SHADERS
+    // dynamic cage:
+    struct DynamicCage {
+        Geometry cageInitialGeometry;
+        vec3_t *vertexVelocities; // defines movement of the dynamic cage, unit/frame
+        unsigned numFrames;
+        wsw::String identifier;
+        float initialBoundingRadius; /// maybe this should combine with scale from params?
+        wsw::HeapBasedFreelistAllocator *allocator;
+        DynamicCageHull *head;
+    };
 
+    wsw::Vector<DynamicCage> m_loadedDynamicCages;
+
+    struct DynamicCageCoordinate {
+        unsigned cageTriIdx;
+        float coordsOnCageTri[2]; // barycentric coordinates
+        float offsetOnTri; // offset along the tri normal at the coords on the tri
+        //float offsetFromLimit; here instead?
+    };
+
+    struct DynamicCagedMesh {
+        unsigned loadedCageKey;
+        unsigned numVertices;
+        StaticCageCoordinate *vertexCoordinates;
+        float *offsetFromLim;
+        unsigned numFrames;
+        std::span<tri> triIndices;
+        vec2_t *UVCoords;
+        ShadingLayer *shadingLayers;
+        unsigned numShadingLayers;
+        float maxOffsetFromCage; // maximum offset of the mesh from the cage triangles
+        DynamicCagedMesh *nextLOD { nullptr }; // pointer to the next lower detail version
+
+        bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh );
+
+        void optimizeDynamicCagedMeshForCache();
+    };
+
+    struct DynamicCageHullParams {
+        vec3_t origin { 0.0f, 0.0f, 0.0f };
+        vec3_t offset { 0.0f, 0.0f, 0.0f };
+        vec3_t dir { 0.0f, 0.0f, 1.0f };
+        float rotation { 0.0f };
+        float scale { 32.0f };
+        unsigned timeout { 400u };
+        DynamicCagedMesh *sharedCageCagedMeshes { nullptr };
+        unsigned numCagedMeshes { 1u };
+
+        // bool preserveVolume { false };
+        // float volumePreservationLocality;
+        // unsigned meshSmoothingIterations { 0u };
+        // float curvatureDeviationForSmoothing ... or something like that
+    };
+
+    static void vertexPosFromDynamicCage( unsigned vertIdx, const DynamicCageCoordinate *vertCoords, float scale,
+                                          const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
+                                          const float *limitsAtDirections, const float *offsetsFromLim,
+                                          const vec3_t origin, vec3_t outPos );
+
+    void RegisterDynamicCage( const wsw::String &identifier );
+
+    DynamicCagedMesh *RegisterDynamicCagedMesh( const char *name );
+
+    // general:
+    // TODO: put general above specifics? make applyShading pure virtual and include as class methods in static/dynamic hulls?
+
+    unsigned maxCagedHullsPerType = 64;
+    void applyShading( wsw::StringView pathToMesh, SimulatedHullsSystem::StaticCagedMesh *cagedMesh ); // TODO: 1) should have func ptr to shading, 2) this stuff is terrible, remove ASAP, should be done on GPU WITH SHADERS
+    void applyShading( wsw::StringView pathToMesh, SimulatedHullsSystem::DynamicCagedMesh *cagedMesh );
+
+    /// DELETE
 	struct OffsetKeyframe {
 		float lifetimeFraction { 0.0f };
 		const float *offsets { nullptr };
 		// The offset from an obstacle
 		const float *offsetsFromLimit { nullptr };
 		std::span<const ShadingLayer> shadingLayers;
-	};
+	}; /// END DELETE
 
 	SimulatedHullsSystem();
 	~SimulatedHullsSystem();
@@ -238,11 +319,6 @@ private:
 
 		// currently for keyframed hull shading
 		bool isAKeyframedHull { false };
-        /// DELETE
-		//float lerpFrac { 0.0f };
-		//std::span<const ShadingLayer> prevShadingLayers;
-		//std::span<const ShadingLayer> nextShadingLayers;
-        /// DELETE END
 
         /// for caged hulls
         float lifetimeFrac { 0.0f };
@@ -258,36 +334,36 @@ private:
         /// for caged hulls END
 	};
 
-    //draft
-    struct SharedCageMeshData {
-        std::optional<std::variant<unsigned, std::monostate>> cachedChosenSolidSubdivLevel; // maybe ?
-        const vec4_t *cageVertexMoveDirs;
-        const float *cageVertexLimits;
-        float nextLodTangentRatio { 0.18f };
-        bool hasSibling { false };
-
-        float lifetimeFrac;
-        std::span<const ShadingLayer> prevShadingLayers;
-        std::span<const ShadingLayer> nextShadingLayers;
-
-        //wsw::Vector<uint32_t> *overrideColorsBuffer { nullptr }; NO NEED DIRECTLY COMPUTE COLORS
-        // Must be reset each frame
-        // std::optional<std::variant<std::pair<unsigned, unsigned>, std::monostate>> cachedOverrideColorsSpanInBuffer; X
-        // const vec4_t *simulatedPositions { nullptr }; NO NEED DIRECTLY COMPUTE POSITIONS
-        //const vec4_t *simulatedNormals { nullptr }; COMPUTE DIRECTLY
-        //const byte_vec4_t *simulatedColors { nullptr }; COMPUTE DIRECTLY
-        //unsigned simulatedSubdivLevel { 0 }; THERE IS NO "SUBDIV LEVEL"
-        //float minZLastFrame { 0.0f }; X
-        //float maxZLastFrame { 0.0f }; X
-        //float minFadedOutAlpha { 0.0f }; X
-        //ViewDotFade viewDotFade { ViewDotFade::NoFade }; X
-        //ZFade zFade { ZFade::NoFade }; X
-        //bool tesselateClosestLod { false }; X
-        //bool lerpNextLevelColors { false }; X
-        // currently for keyframed hull shading
-        //bool isAKeyframedHull { false }; X
-        //float lerpFrac { 0.0f };
-    };
+//    //draft
+//    struct SharedCageMeshData {
+//        std::optional<std::variant<unsigned, std::monostate>> cachedChosenSolidSubdivLevel; // maybe ?
+//        const vec4_t *cageVertexMoveDirs;
+//        const float *cageVertexLimits;
+//        float nextLodTangentRatio { 0.18f };
+//        bool hasSibling { false };
+//
+//        float lifetimeFrac;
+//        std::span<const ShadingLayer> prevShadingLayers;
+//        std::span<const ShadingLayer> nextShadingLayers;
+//
+//        //wsw::Vector<uint32_t> *overrideColorsBuffer { nullptr }; NO NEED DIRECTLY COMPUTE COLORS
+//        // Must be reset each frame
+//        // std::optional<std::variant<std::pair<unsigned, unsigned>, std::monostate>> cachedOverrideColorsSpanInBuffer; X
+//        // const vec4_t *simulatedPositions { nullptr }; NO NEED DIRECTLY COMPUTE POSITIONS
+//        //const vec4_t *simulatedNormals { nullptr }; COMPUTE DIRECTLY
+//        //const byte_vec4_t *simulatedColors { nullptr }; COMPUTE DIRECTLY
+//        //unsigned simulatedSubdivLevel { 0 }; THERE IS NO "SUBDIV LEVEL"
+//        //float minZLastFrame { 0.0f }; X
+//        //float maxZLastFrame { 0.0f }; X
+//        //float minFadedOutAlpha { 0.0f }; X
+//        //ViewDotFade viewDotFade { ViewDotFade::NoFade }; X
+//        //ZFade zFade { ZFade::NoFade }; X
+//        //bool tesselateClosestLod { false }; X
+//        //bool lerpNextLevelColors { false }; X
+//        // currently for keyframed hull shading
+//        //bool isAKeyframedHull { false }; X
+//        //float lerpFrac { 0.0f };
+//    };
 
 	class HullDynamicMesh : public DynamicMesh {
 		friend class SimulatedHullsSystem;
@@ -348,8 +424,11 @@ private:
 		float m_alphaScale { 1.0f };
 		float m_spriteRadius { 16.0f };
 		float m_lifetimeSeconds { 0.0f };
+        /// to be removed
 		int m_tessLevelShiftForMinVertexIndex { 0 };
 		int m_tessLevelShiftForMaxVertexIndex { 0 };
+        /// to be removed END
+        float m_fractionOfParticlesToRender { 1.0f };
 		int m_shiftFromDefaultLevelToHide { std::numeric_limits<int>::min() };
 		// These fields get updated by getStorageRequirements()
 		mutable unsigned m_minVertexNumThisFrame { 0 };
@@ -573,10 +652,6 @@ private:
 		// Externally managed, should point to the unit mesh data
 		vec3_t *vertexMoveDirections;
 
-        /// BGN TEMP!
-        unsigned numVerts;
-        /// END TEMP!
-
 		// Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
 		float *limitsAtDirections;
 		int64_t spawnTime { 0 };
@@ -632,6 +707,70 @@ private:
 		}
 	};
 
+    struct BaseDynamicCageHull {
+
+        float scale;
+        // Externally managed, should point to the unit mesh data
+        vec3_t *vertexPositions;
+        vec3_t *vertexNormals;
+        float maxOffsetFromCage;
+
+        // Distances to the nearest obstacle (or the maximum growth radius in case of no obstacles)
+        float *limitsAtDirections;
+        int64_t spawnTime { 0 };
+
+        /// should these arrays be statically allocated at amount kMaxSharedCageCagedMeshes, or dynamically created with new?
+        DynamicCagedMesh *sharedCageCagedMeshes[kMaxSharedCageCagedMeshes];
+        /// the following should all be arrays, as the above "sharedCageCagedMeshes"
+        SharedMeshData *sharedMeshData;
+        AppearanceRules *appearanceRules;// = SolidAppearanceRules { .material = nullptr };
+        HullSolidDynamicMesh *submittedSolidMesh;
+        HullCloudDynamicMesh *submittedCloudMesh;
+        /// END
+
+        vec3_t cageMins, cageMaxs;
+        vec3_t origin;
+
+        unsigned numSharedCageCagedMeshes { 0 };
+        unsigned lifetime { 0 };
+
+        //bool applyVertexDynLight { false }; should be re-implemented, if useful ->
+        /// physically lights do not really effect see through surfaces, even less waves or emitting objects (like explosions)
+        /// the renderer is currently capable of lighting opaque meshes and this is what should be done
+
+        void simulate( int64_t currTime, float timeDeltaSeconds,
+                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry );
+    };
+
+    struct DynamicCageHull : public BaseDynamicCageHull {
+
+        DynamicCageHull *prev { nullptr }, *next { nullptr };
+
+        SharedMeshData storageOfSharedMeshData[kMaxSharedCageCagedMeshes];
+        AppearanceRules storageOfAppearanceRules[kMaxSharedCageCagedMeshes];
+        HullSolidDynamicMesh storageOfSolidMeshes[kMaxSharedCageCagedMeshes];
+        HullCloudDynamicMesh storageOfCloudMeshes[kMaxSharedCageCagedMeshes];
+
+        explicit DynamicCageHull( unsigned numVerts = 1, void *addressOfMem = nullptr ) {
+            if( addressOfMem ) {
+
+                sharedMeshData     = &storageOfSharedMeshData[0];
+                appearanceRules    = &storageOfAppearanceRules[0];
+                submittedSolidMesh = &storageOfSolidMeshes[0];
+                submittedCloudMesh = &storageOfCloudMeshes[0];
+
+                unsigned offset = sizeof( DynamicCageHull );
+                this->vertexPositions = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );
+                offset += sizeof( *DynamicCageHull::vertexPositions ) * numVerts;
+                this->vertexNormals = ( vec3_t* )( ( uint8_t* )addressOfMem + offset );
+                offset += sizeof( *DynamicCageHull::vertexNormals ) * numVerts;
+                this->limitsAtDirections = ( float* )( ( uint8_t* )addressOfMem + offset );
+
+                this->sharedMeshData = new SharedMeshData;
+            }
+        }
+    };
+
 	static constexpr unsigned kNumFireHullLayers      = 5;
 	static constexpr unsigned kNumToonSmokeHullLayers = 1;
 
@@ -642,6 +781,7 @@ private:
 	using WaveHull        = RegularSimulatedHull<2>;
 
     void unlinkAndFreeStaticCageHull( KeyframedHull *hull );
+    void unlinkAndFreeDynamicCageHull( DynamicCageHull *hull );
 
 	void unlinkAndFreeFireHull( FireHull *hull );
 	void unlinkAndFreeFireClusterHull( FireClusterHull *hull );
@@ -656,8 +796,10 @@ private:
 	// TODO: Having these specialized methods while the actual setup is performed by the caller feels wrong...
 
     [[nodiscard]]
-    auto allocStaticCageHull( KeyframedHull **head, wsw::FreelistAllocator *allocator, int64_t currTime, unsigned lifetime,
-                                                    unsigned numVertices ) -> KeyframedHull *;
+    auto allocStaticCageHull( StaticCage *cage, int64_t currTime, unsigned lifetime ) -> KeyframedHull *;
+    [[nodiscard]]
+    auto allocDynamicCageHull( DynamicCage *cage, int64_t currTime, unsigned lifetime ) -> DynamicCageHull *;
+
 	[[nodiscard]]
 	auto allocFireHull( int64_t currTime, unsigned lifetime ) -> FireHull *;
 	[[nodiscard]]
@@ -680,10 +822,16 @@ private:
 
 	void setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 							float scale, const float *dir, const float rotation,
-                            SimulatedHullsSystem::StaticCagedMesh *meshToRender, PolyEffectsSystem *effectSystem,
+                            SimulatedHullsSystem::StaticCage *cage, PolyEffectsSystem *effectSystem,
+                            const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
+
+    void setupHullVertices( BaseDynamicCageHull *hull, const float *origin,
+                            float scale, const float *dir, const float rotation,
+                            SimulatedHullsSystem::DynamicCage *cage, PolyEffectsSystem *effectSystem,
                             const AppearanceRules &appearanceRules = SolidAppearanceRules { nullptr } );
 
     void addHull( AppearanceRules *appearanceRules, StaticKeyframedHullParams &hullParams );
+    void addHull( AppearanceRules *appearanceRules, DynamicCageHullParams &hullParams );
 
 	void calcSmokeBulgeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );
 	void calcSmokeSpikeSpeedMask( float *__restrict vertexSpeedMask, unsigned subdivLevel, unsigned maxSpikes );

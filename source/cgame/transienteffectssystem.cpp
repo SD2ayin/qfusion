@@ -453,6 +453,7 @@ static SimulatedHullsSystem::CloudMeshProps g_fireInnerCloudMeshProps {
 	.radiusLifespan                  = { .initial = 0.0f, .fadedIn = 3.0f, .fadedOut = 1.0f },
 	.tessLevelShiftForMinVertexIndex = -1,
 	.tessLevelShiftForMaxVertexIndex = -0,
+    .fractionOfParticlesToRender     = 0.5,
 	.shiftFromDefaultLevelToHide     = -1,
 };
 
@@ -469,8 +470,10 @@ static SimulatedHullsSystem::AppearanceRules g_fireOuterCloudAppearanceRules = S
 
 UnsignedConfigVar hullLifetime( wsw::StringView( "hullLifetime"), { .byDefault = 500u, .flags = CVAR_ARCHIVE });
 FloatConfigVar hullScale( wsw::StringView( "hullScale"), { .byDefault = 35.0f, .flags = CVAR_ARCHIVE });
+FloatConfigVar fractionToRender( wsw::StringView( "fractionToRender"), { .byDefault = 1.0f, .flags = CVAR_ARCHIVE });
 
 IntConfigVar appearanceMode( wsw::StringView("appearanceMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
+IntConfigVar hullMode( wsw::StringView("hullMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
 
 FloatConfigVar v_fireHullScale( wsw::StringView( "fireHullScale"), { .byDefault = 1.6f, .flags = CVAR_ARCHIVE });
 
@@ -558,12 +561,9 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const auto toonSmokeLifetime = (unsigned)( (float)toonSmokeKeyframes.kMinLifetime * randomScaling );
 		cgNotice() << "before alloc";
 
-		SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
-		SimulatedHullsSystem::StaticCage *cage = std::addressof( hullsSystem->m_loadedStaticCages[cagedMesh->loadedCageKey] );
-		cgNotice() << S_COLOR_ORANGE << "identifier" << cage->identifier;
-
 		g_fireInnerCloudMeshProps.material = cgs.media.shaderFireHullParticle;
 
+        g_fireInnerCloudMeshProps.fractionOfParticlesToRender = fractionToRender.get();
 		SimulatedHullsSystem::CloudAppearanceRules cloudAppearanceRules = {
 				.spanOfMeshProps = { &g_fireInnerCloudMeshProps, 1 },
 		};
@@ -583,16 +583,32 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 		const float rotation =  m_rng.nextFloat( 0.0f, 360.0f );//m_rng.nextFloat( 0.0f, M_PI * 2.0f );
 		cgNotice() << "rotation:" << rotation;
 
-		SimulatedHullsSystem::StaticKeyframedHullParams hullParams = {
+		SimulatedHullsSystem::StaticKeyframedHullParams staticHullParams = {
 				.origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
 				.dir      = { dir[0], dir[1], dir[2] },
 				.rotation = rotation,
 				.scale    = hullScale.get(),
 				.timeout  = hullLifetime.get(),
-				.sharedCageCagedMeshes = cagedMesh,
+				.sharedCageCagedMeshes = cgs.media.anotherExample2,
 		};
 
-		hullsSystem->addHull( &appearanceRules, hullParams );
+        SimulatedHullsSystem::DynamicCageHullParams dynamicHullParams = {
+                .origin   = { smokeOrigin[0], smokeOrigin[1], smokeOrigin[2] },
+                .dir      = { dir[0], dir[1], dir[2] },
+                .rotation = rotation,
+                .scale    = hullScale.get(),
+                .timeout  = hullLifetime.get(),
+                .sharedCageCagedMeshes = cgs.media.dynamicExample,
+        };
+
+
+        if( hullMode.get() == 0 || hullMode.get() > 1 ) {
+            hullsSystem->addHull(&appearanceRules, staticHullParams);
+        }
+        if( hullMode.get() >= 1 ) {
+            hullsSystem->addHull(&appearanceRules, dynamicHullParams);
+        }
+
 
 
 #if 0

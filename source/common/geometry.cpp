@@ -2,7 +2,7 @@
 #include "geometry.h"
 #include "../cgame/cg_local.h"
 
-void unitizeGeometry( Geometry *geometry ) {
+void unitizeGeometry( Geometry *geometry ) { //TODO: probably remove this?
     const unsigned numVerts = geometry->vertexPositions.size();
     vec3_t *vertexPositions = geometry->vertexPositions.data();
     unsigned vertNum = 0;

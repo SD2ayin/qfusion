@@ -1279,8 +1279,10 @@ void R_SubmitDynamicMeshesToBackend( const FrontendToBackendShared *fsh, const e
 	// TODO check these values, share with the icosphere code
 	// TODO we do not have to transfer icosphere indices every frame
 	// TODO should be more, maybe up to md3 limit? what will the effect be on performance?
-	constexpr auto maxStorageVertices = 2562;
-	constexpr auto maxStorageIndices  = 15360;
+//	constexpr auto maxStorageVertices = 2562;
+//	constexpr auto maxStorageIndices  = 15360;
+    constexpr auto maxStorageVertices = 4096*4; // md3 max * vertices per sprite for cloud hulls
+    constexpr auto maxStorageIndices  = 4096*6; // md3 max vertices * indices per sprite for cloud hulls, SAME as md3 max indices
 
 	// TODO: Point to the dynamic stream memory
 	alignas( 16 ) vec4_t positions[maxStorageVertices];

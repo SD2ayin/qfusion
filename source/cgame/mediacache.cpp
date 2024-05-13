@@ -38,6 +38,11 @@ MediaCache::CachedStaticCagedMesh::CachedStaticCagedMesh( MediaCache *parent, co
 	parent->link( this, &parent->m_staticCagedMeshes );
 }
 
+MediaCache::CachedDynamicCagedMesh::CachedDynamicCagedMesh( MediaCache *parent, const wsw::StringView &name )
+        : m_name( name ) {
+    parent->link( this, &parent->m_dynamicCagedMeshes );
+}
+
 MediaCache::CachedMaterial::CachedMaterial( MediaCache *parent, const wsw::StringView &name )
 	: m_name( name ) {
 	parent->link( this, &parent->m_materials );
@@ -63,6 +68,13 @@ void MediaCache::registerStaticCagedMeshes( SimulatedHullsSystem *hullsSystem ) 
 		registerStaticCagedMesh( cagedMesh, hullsSystem );
         SimulatedHullsSystem::StaticCagedMesh *mesh = *cagedMesh->getAddressOfHandle();
 	}
+}
+
+void MediaCache::registerDynamicCagedMeshes( SimulatedHullsSystem *hullsSystem ) {
+    for( CachedDynamicCagedMesh *cagedMesh = m_dynamicCagedMeshes; cagedMesh; cagedMesh = (CachedDynamicCagedMesh *)cagedMesh->m_next ) {
+        registerDynamicCagedMesh( cagedMesh, hullsSystem );
+        SimulatedHullsSystem::DynamicCagedMesh *mesh = *cagedMesh->getAddressOfHandle();
+    }
 }
 
 void MediaCache::registerMaterials() {
@@ -91,6 +103,13 @@ void MediaCache::registerStaticCagedMesh( CachedStaticCagedMesh *cagedMesh, Simu
     }
 }
 
+void MediaCache::registerDynamicCagedMesh( CachedDynamicCagedMesh *cagedMesh, SimulatedHullsSystem *hullsSystem ) {
+    if( !cagedMesh->m_handle ) {
+        cagedMesh->m_handle = CG_RegisterDynamicCagedMesh( cagedMesh->m_name.data(), hullsSystem );
+        SimulatedHullsSystem::DynamicCagedMesh *mesh = *cagedMesh->getAddressOfHandle();
+    }
+}
+
 void MediaCache::registerMaterial( CachedMaterial *material ) {
 	if( !material->m_handle ) {
 		assert( material->m_name.isZeroTerminated() );
@@ -116,6 +135,11 @@ struct model_s *CG_RegisterModel( const char *name ) {
 
 SimulatedHullsSystem::StaticCagedMesh *CG_RegisterStaticCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem ) {
     SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullsSystem->RegisterStaticCagedMesh( name );
+    return cagedMesh;
+}
+
+SimulatedHullsSystem::DynamicCagedMesh *CG_RegisterDynamicCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem ) {
+    SimulatedHullsSystem::DynamicCagedMesh *cagedMesh = hullsSystem->RegisterDynamicCagedMesh( name );
     return cagedMesh;
 }
 

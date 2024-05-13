@@ -342,21 +342,24 @@ SimulatedHullsSystem::~SimulatedHullsSystem() {
 	CM_FreeShapeList( cl.cms, m_tmpShapeList );
 }
 
+// facilities for dealing with md3
 bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
-
 unsigned GetNumFramesInMD3( const char *fileName );
 
-void SimulatedHullsSystem::preserveVolumeStatic( wsw::StringView pathToMesh, StaticCagedMesh *cagedMesh ){
-	const unsigned numFrames = cagedMesh->numFrames;
-	const unsigned numVertices = cagedMesh->numVertices;
-	cagedMesh->offsetFromLim = new float[numFrames * numVertices];
+#define maxLODs 3
+
+// static hulls:
+void SimulatedHullsSystem::StaticCagedMesh::preserveVolumeStatic( wsw::StringView pathToMesh ){
+	const unsigned numFrames = this->numFrames;
+	const unsigned numVertices = this->numVertices;
+	this->offsetFromLim = new float[numFrames * numVertices];
 
 	Geometry mesh;
 
 	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ) {
 		GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
 
-		float *offsetFromLim  = cagedMesh->offsetFromLim + frameNum * numVertices;
+		float *offsetFromLim  = this->offsetFromLim + frameNum * numVertices;
 		vec3_t *vertPositions = mesh.vertexPositions.data();
 
 		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
@@ -370,7 +373,7 @@ void SimulatedHullsSystem::preserveVolumeStatic( wsw::StringView pathToMesh, Sta
 			foundCollision = collisionCheck( &mesh, vertOrigin, vertDir, std::numeric_limits<float>::infinity(),
 											 nullptr, &offsetFromLim[vertexNum], nullptr );
 			if( !foundCollision ){
-				offsetFromLim[vertexNum] = cagedMesh->boundingRadii[frameNum] * 4e-2f ;
+				offsetFromLim[vertexNum] = this->boundingRadii[frameNum] * 4e-2f ;
 			}
 
             if( frameNum == numFrames && vertexNum % 100 ){
@@ -381,6 +384,64 @@ void SimulatedHullsSystem::preserveVolumeStatic( wsw::StringView pathToMesh, Sta
 		delete[] mesh.vertexPositions.data();
 		delete[] mesh.triIndices.data();
 	}
+}
+
+void SimulatedHullsSystem::StaticCagedMesh::optimizeStaticCagedMeshForCache(){ // still broken for now
+    const unsigned numVerts  = this->numVertices;
+    const unsigned numFrames = this->numFrames;
+    const unsigned numTris   = this->triIndices.size();
+
+    StaticCage *cage = std::addressof( cg.simulatedHullsSystem.m_loadedStaticCages[this->loadedCageKey] );
+    const unsigned cageTris = cage->cageGeometry.triIndices.size();
+
+    StaticCageCoordinate *originalCoordinates = this->vertexCoordinates;
+    tri *originalTriIndices                   = this->triIndices.data();
+    float *originalOffsetFromLimit            = this->offsetFromLim;
+    vec2_t *originalUVCoords                  = this->UVCoords;
+
+    StaticCageCoordinate *newCoordinates = new StaticCageCoordinate[numVerts * numFrames];
+    tri *newTriIndices                   = new tri[numTris];
+    float *newOffsetFromLimit            = new float[numVerts * numFrames];
+    vec2_t *newUVCoords                  = new vec2_t[numVerts * numFrames];
+
+    unsigned *numOfVertsForCageTri     = new unsigned[cageTris];
+    unsigned *originalIndicesForCageTri = new unsigned[cageTris * numVerts];
+
+    for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
+        unsigned cageTriIdxOfVert = originalCoordinates->cageTriIdx;
+        numOfVertsForCageTri[cageTriIdxOfVert]++;
+        unsigned vertIdxForCageTri = numOfVertsForCageTri[cageTriIdxOfVert] - 1;
+        originalIndicesForCageTri[cageTriIdxOfVert * numVerts + vertIdxForCageTri] = vertNum;
+    }
+    unsigned newProcessedVertices = 0;
+    for( unsigned cageTriNum = 0; cageTriNum < cageTris; cageTriNum++ ){
+        for( unsigned vertNum = 0; vertNum < numOfVertsForCageTri[cageTriNum]; vertNum++ ){
+            const unsigned newIdx = newProcessedVertices + vertNum;
+            const unsigned oldIdx = originalIndicesForCageTri[cageTriNum * numVerts + vertNum];
+
+            newCoordinates[newIdx]          = originalCoordinates[oldIdx];
+            originalOffsetFromLimit[newIdx] = originalOffsetFromLimit[oldIdx];
+
+            newTriIndices[newIdx][0] = originalTriIndices[oldIdx][0];
+            newTriIndices[newIdx][1] = originalTriIndices[oldIdx][1];
+            newTriIndices[newIdx][2] = originalTriIndices[oldIdx][2];
+
+            newUVCoords[newIdx][0] = originalUVCoords[oldIdx][0];
+            newUVCoords[newIdx][1] = originalUVCoords[oldIdx][1];
+        }
+        newProcessedVertices += numOfVertsForCageTri[cageTriNum];
+    }
+    std::span<tri> spanOfNewTriIndices( newTriIndices, numTris );
+
+    delete[] this->vertexCoordinates;
+    delete[] this->offsetFromLim;
+    delete[] this->triIndices.data();
+    delete[] this->UVCoords;
+
+    this->vertexCoordinates = newCoordinates;
+    this->offsetFromLim     = newOffsetFromLimit;
+    this->triIndices        = spanOfNewTriIndices;
+    this->UVCoords          = newUVCoords;
 }
 
 void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
@@ -402,12 +463,11 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     unsigned numCageVertices = cageGeometry->vertexPositions.size();
     cgNotice() << "number of vertices in cage:" << numCageVertices;
 
-	float maxRadius;
+	float maxRadius = 0;
 	for( unsigned i = 0; i < numCageVertices; i++ ){
-		if( VectorLengthFast( cageGeometry->vertexPositions[i] ) > 1.0f + 1e-1f ){
+		if( VectorLengthSquared( cageGeometry->vertexPositions[i] ) > 1e-3f ){
 			const float radius = VectorLengthFast( cageGeometry->vertexPositions[i] );
 			maxRadius = wsw::max( maxRadius, radius );
-			cgNotice() << "radius:" << radius;
 		}
 	}
 	cage->boundingRadius = maxRadius;
@@ -420,14 +480,14 @@ void SimulatedHullsSystem::RegisterStaticCage( const wsw::String &identifier ) {
     cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
 }
 
-bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, SimulatedHullsSystem::StaticCagedMesh *cagedMesh ){
+bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh ){
     const auto before = Sys_Milliseconds();
 
 	vec3_t origin = { 0.0f, 0.0f, 0.0f };
 
     unsigned numFrames = GetNumFramesInMD3( pathToMesh.data() );
     cgNotice() << "number of frames in caged mesh:" << numFrames;
-    cagedMesh->numFrames = numFrames;
+    this->numFrames = numFrames;
 
     Geometry mesh;
     if( !GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, 0 ) ){
@@ -435,13 +495,13 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
     }
     unsigned numVerts = mesh.vertexPositions.size();
 
-    cagedMesh->numVertices = numVerts;
-    cagedMesh->triIndices  = mesh.triIndices;
-    cagedMesh->UVCoords    = mesh.UVCoords;
+    this->numVertices = numVerts;
+    this->triIndices  = mesh.triIndices;
+    this->UVCoords    = mesh.UVCoords;
 
-    cagedMesh->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[numVerts * numFrames];
-	cagedMesh->offsetFromLim = new float[numVerts * numFrames];
-    cagedMesh->boundingRadii = new float[numFrames];
+    this->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[numVerts * numFrames];
+	this->offsetFromLim = new float[numVerts * numFrames];
+    this->boundingRadii = new float[numFrames];
 
     delete[] mesh.vertexPositions.data();
 
@@ -453,7 +513,7 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
         unsigned meshVerts = mesh.vertexPositions.size();
         vec3_t *vertexPositions = mesh.vertexPositions.data();
 
-        SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &cagedMesh->vertexCoordinates[frameNum * meshVerts];
+        SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
 
         float maxRadius = 0.0f;
         for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
@@ -472,12 +532,8 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 
 				foundCoords = true;
 			} else {
-                float distToCollision;
 				foundCoords = collisionCheck( cage, origin, vertPosition, std::numeric_limits<float>::infinity(),
-											  &cageCoord->cageTriIdx, &distToCollision, cageCoord->coordsOnCageTri );
-                if( frameNum == (numFrames - 1) && vertNum % 100 == 0 ){
-                    cgNotice() << "dist to collision" << distToCollision;
-                }
+											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
 			}
 
 			if( foundCoords ) {
@@ -489,8 +545,8 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 			}
         }
 
-        cagedMesh->boundingRadii[frameNum] = maxRadius;
-		float *currFrameOffsetsFromLim = cagedMesh->offsetFromLim + frameNum * numVerts;
+        this->boundingRadii[frameNum] = maxRadius;
+		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * numVerts;
 		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + numVerts,  maxRadius * 6e-2f );
 
         delete[] mesh.vertexPositions.data();
@@ -502,12 +558,10 @@ bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh, Simulated
 	return true;
 }
 
-#define maxLODs 3
-
 SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCagedMesh( const char *name ) {
     auto *cagedMesh = new SimulatedHullsSystem::StaticCagedMesh;
     auto filepath = wsw::StringView( name );
-    cgNotice() << "starting caged mesh registration for" << filepath;
+    cgNotice() << "starting static caged mesh registration for" << filepath;
 
     unsigned suffixIdx = filepath.lastIndexOf('_').value_or( 0 );
     const bool foundSuffix = suffixIdx != 0;
@@ -543,11 +597,12 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 
     StaticCage *cage = std::addressof( m_loadedStaticCages[cagedMesh->loadedCageKey] );
 
-    transformToCageSpace( &cage->cageGeometry, filepath, cagedMesh );
+    cagedMesh->transformToCageSpace( &cage->cageGeometry, filepath );
 	applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
     cagedMesh->offsetFromLim = new float[cagedMesh->numFrames * cagedMesh->numVertices];
     std::fill( cagedMesh->offsetFromLim, cagedMesh->offsetFromLim + cagedMesh->numFrames * cagedMesh->numVertices, 0.0f );
-	//preserveVolumeStatic( filepath, cagedMesh );
+	//cagedMesh->preserveVolumeStatic( filepath );
+    //cagedMesh->optimizeStaticCageForCache();
 
 	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
     for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
@@ -558,14 +613,16 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
 
         cgNotice() << "next LOD" << wsw::StringView( filepathToLOD.data() );
 
-		lastLOD->nextLOD = new SimulatedHullsSystem::StaticCagedMesh;
-        if( transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ), lastLOD->nextLOD ) ){
-			applyShading( wsw::StringView( filepathToLOD.data() ), lastLOD->nextLOD );
-			preserveVolumeStatic( wsw::StringView( filepathToLOD.data() ), lastLOD->nextLOD );
+        auto *currLOD = new SimulatedHullsSystem::StaticCagedMesh;
+		lastLOD->nextLOD = currLOD;
+        if( currLOD->transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ) ) ){
+			applyShading( wsw::StringView( filepathToLOD.data() ), currLOD );
+			currLOD->preserveVolumeStatic( wsw::StringView( filepathToLOD.data() ) );
+            //currLOD->optimizeStaticCagedMeshForCache();
 			lastLOD = lastLOD->nextLOD;
             lastLOD->nextLOD = nullptr;
 		} else{
-			delete[] lastLOD->nextLOD;
+			delete currLOD;
 			lastLOD->nextLOD = nullptr;
 			cgNotice() << "found" << LODnum - 1 << "LODs";
 			break;
@@ -575,7 +632,133 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     return cagedMesh;
 }
 
-void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, StaticCagedMesh *cagedMesh ){
+void SimulatedHullsSystem::RegisterDynamicCage( const wsw::String &identifier ) {
+    m_loadedDynamicCages.emplace_back();
+    DynamicCage *cage = std::addressof( m_loadedDynamicCages.back() );
+
+    cage->identifier = identifier;
+
+    cgNotice() << "cage identifier found:" << cage->identifier;
+
+    const char *format = ".md3"; // we are only using md3 format for now
+    auto filepathToCage = wsw::String( cage->identifier.data(), cage->identifier.length() ).append( format );
+    cgNotice() << "path to cage:" << filepathToCage;
+
+    Geometry *cageGeometry = &cage->cageInitialGeometry;
+    GetGeometryFromFileAliasMD3( filepathToCage.data(), cageGeometry );
+
+    unsigned numCageVertices = cageGeometry->vertexPositions.size();
+    unsigned numFrames       = GetNumFramesInMD3( filepathToCage.data() );
+    cgNotice() << "number of vertices in cage:" << numCageVertices;
+
+    float maxRadius = 0;
+    for( unsigned i = 0; i < numCageVertices; i++ ){
+        if( VectorLengthSquared( cageGeometry->vertexPositions[i] ) > 1e-3f ){
+            const float radius = VectorLengthFast( cageGeometry->vertexPositions[i] );
+            maxRadius = wsw::max( maxRadius, radius );
+            cgNotice() << "radius:" << radius;
+        }
+    }
+
+    cage->initialBoundingRadius = maxRadius;
+    cage->numFrames             = numFrames;
+    cage->vertexVelocities      = new vec3_t[numCageVertices * ( numFrames - 1 )]; // we cant calculate/ dont use velocities at the last frame
+
+    Geometry prevGeom, nextGeom;
+    for( unsigned frameNum = 0; frameNum < ( numFrames - 1 ); frameNum++ ){
+        GetGeometryFromFileAliasMD3( filepathToCage.data(), &prevGeom, nullptr, frameNum );
+        GetGeometryFromFileAliasMD3( filepathToCage.data(), &nextGeom, nullptr, ( frameNum + 1 ) );
+
+        vec3_t *prevVertexPositions = prevGeom.vertexPositions.data();
+        vec3_t *nextVertexPositions = nextGeom.vertexPositions.data();
+
+        unsigned startVertIdxForFrame = frameNum * numCageVertices;
+        vec3_t *vertexVelocities = cage->vertexVelocities + startVertIdxForFrame;
+        for( unsigned vertNum = 0; vertNum < numCageVertices; vertNum++ ){
+            VectorSubtract( nextVertexPositions[vertNum], prevVertexPositions[vertNum], vertexVelocities[vertNum] );
+        }
+    }
+
+    size_t sizeOfBaseHull = sizeof( SimulatedHullsSystem::DynamicCageHull );
+    size_t sizeOfPositions = sizeof( *DynamicCageHull::vertexPositions ) * numCageVertices;
+    size_t sizeOfNormals = sizeof( *DynamicCageHull::vertexNormals ) * numCageVertices;
+    size_t sizeOfLimits = sizeof( *DynamicCageHull::limitsAtDirections ) * numCageVertices;
+    size_t requiredSize = sizeOfBaseHull + sizeOfPositions + sizeOfNormals + sizeOfLimits;
+
+    cage->allocator = new wsw::HeapBasedFreelistAllocator( requiredSize, maxCagedHullsPerType );
+}
+
+SimulatedHullsSystem::DynamicCagedMesh *SimulatedHullsSystem::RegisterDynamicCagedMesh( const char *name ) {
+    auto *cagedMesh = new SimulatedHullsSystem::DynamicCagedMesh;
+    auto filepath = wsw::StringView( name );
+    cgNotice() << "starting dynamic caged mesh registration for" << filepath;
+
+    unsigned suffixIdx = filepath.lastIndexOf('_').value_or( 0 );
+    const bool foundSuffix = ( suffixIdx != 0 );
+    if( !foundSuffix ) {
+        cgNotice() << "static caged mesh " << wsw::StringView( name ) << "is incorrectly formatted";
+        return nullptr;
+    }
+
+    unsigned suffixLength = filepath.length() - suffixIdx;
+    auto identifier = filepath.dropRight( suffixLength );
+
+    bool foundCage = false;
+    unsigned loadedCageNum = 0;
+
+    for( ; loadedCageNum < m_loadedDynamicCages.size(); loadedCageNum++ ) {
+        DynamicCage *loadedCage = std::addressof( m_loadedDynamicCages[loadedCageNum] );
+        cgNotice() << S_COLOR_BLUE << "loaded cage num:" << loadedCageNum << "of" << m_loadedDynamicCages.size() << S_COLOR_WHITE;
+        if( wsw::StringView( loadedCage->identifier.data(), loadedCage->identifier.size() ).equals( identifier ) ){
+            foundCage = true;
+            break;
+        }
+    }
+
+    if( foundCage ) {
+        cagedMesh->loadedCageKey = loadedCageNum;
+        DynamicCage *cage = std::addressof( m_loadedDynamicCages[loadedCageNum] );
+        cgNotice() << S_COLOR_GREEN << "cage" << cage->identifier << "was already loaded" << "for filepath:" << filepath << S_COLOR_WHITE;
+    } else {
+        RegisterDynamicCage( wsw::String( identifier.data(), identifier.length() ) );
+        cagedMesh->loadedCageKey = m_loadedDynamicCages.size() - 1; // -1 to convert to idx of the elem
+    }
+
+    DynamicCage *cage = std::addressof( m_loadedDynamicCages[cagedMesh->loadedCageKey] );
+
+    //cagedMesh->transformToCageSpace( &cage->cageInitialGeometry, filepath );
+    //applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
+    cagedMesh->offsetFromLim = new float[cagedMesh->numFrames * cagedMesh->numVertices];
+    std::fill( cagedMesh->offsetFromLim, cagedMesh->offsetFromLim + cagedMesh->numFrames * cagedMesh->numVertices, 0.0f );
+
+//    SimulatedHullsSystem::DynamicCagedMesh *lastLOD = cagedMesh;
+//    for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
+//        wsw::String filepathToLOD = wsw::String( filepath.data(), filepath.length() );
+//        unsigned lengthOfMD3Suffix = sizeof( ".md3" );
+//        filepathToLOD.insert( filepathToLOD.end() - lengthOfMD3Suffix + 1, '_' );
+//        filepathToLOD.insert( filepathToLOD.length() - lengthOfMD3Suffix + 1, std::to_string( LODnum ) );
+//
+//        cgNotice() << "next LOD" << wsw::StringView( filepathToLOD.data() );
+//
+//        auto *currLOD = new SimulatedHullsSystem::DynamicCagedMesh;
+//        lastLOD->nextLOD = currLOD;
+//        if( currLOD->transformToCageSpace( &cage->cageInitialGeometry, wsw::StringView( filepathToLOD.data() ) ) ){
+//            applyShading( wsw::StringView( filepathToLOD.data() ), currLOD );
+//            //currLOD->optimizeStaticCagedMeshForCache();
+//            lastLOD = lastLOD->nextLOD;
+//            lastLOD->nextLOD = nullptr;
+//        } else{
+//            delete currLOD;
+//            lastLOD->nextLOD = nullptr;
+//            cgNotice() << "found" << LODnum - 1 << "LODs";
+//            break;
+//        }
+//    }
+
+    return cagedMesh;
+}
+
+void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, StaticCagedMesh *cagedMesh ){ // this is smoke/fire shading
 	static constexpr byte_vec4_t kFireColors[3] {
 			{ 25, 25, 25, 255 },   // Gray
 			{ 255, 70, 30, 255 },  // Orange
@@ -708,10 +891,7 @@ void SimulatedHullsSystem::clear() {
 	}
 	for( SmokeHull *hull = m_smokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeSmokeHull( hull );
-	}/*
-	for( ToonSmokeHull *hull = m_toonSmokeHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
-		unlinkAndFreeToonSmokeHull( hull );
-	}*/
+	}
 	for( WaveHull *hull = m_waveHullsHead, *nextHull; hull; hull = nextHull ) { nextHull = hull->next;
 		unlinkAndFreeWaveHull( hull );
 	}
@@ -725,6 +905,17 @@ void SimulatedHullsSystem::unlinkAndFreeStaticCageHull( KeyframedHull *hull ) {
 
     wsw::unlink( hull, &cage->head );
     hull->~KeyframedHull();
+    cage->allocator->free( hull );
+}
+
+void SimulatedHullsSystem::unlinkAndFreeDynamicCageHull( DynamicCageHull *hull ) {
+    unsigned cageKey = hull->sharedCageCagedMeshes[0]->loadedCageKey;
+    cgNotice() << "cage key is:" << cageKey;
+    DynamicCage *cage = std::addressof( m_loadedDynamicCages[cageKey] );
+    cgNotice() << "unlinking:" << cage->identifier;
+
+    wsw::unlink( hull, &cage->head );
+    hull->~DynamicCageHull();
     cage->allocator->free( hull );
 }
 
@@ -760,10 +951,11 @@ void SimulatedHullsSystem::unlinkAndFreeBlastHull( BlastHull *hull ) {
 	m_blastHullsAllocator.free( hull );
 }
 
+auto SimulatedHullsSystem::allocStaticCageHull( StaticCage *cage, int64_t currTime, unsigned lifetime ) -> KeyframedHull * {
+    unsigned numVertices = cage->cageGeometry.vertexPositions.size();
+    wsw::HeapBasedFreelistAllocator *allocator = cage->allocator;
+    KeyframedHull **head = &cage->head;
 
-auto SimulatedHullsSystem::allocStaticCageHull( KeyframedHull **head, wsw::FreelistAllocator *allocator,
-                                                int64_t currTime, unsigned lifetime,
-                                                unsigned numVertices ) -> KeyframedHull * {
     void *mem = allocator->allocOrNull();
     CMShapeList *hullShapeList = nullptr;
     if( mem ) [[likely]] {
@@ -785,6 +977,39 @@ auto SimulatedHullsSystem::allocStaticCageHull( KeyframedHull **head, wsw::Freel
     }
 
     auto *const hull = new( mem )KeyframedHull( numVertices, ( void* )mem );
+    hull->spawnTime  = currTime;
+    hull->lifetime   = lifetime;
+
+    wsw::link( hull, head );
+    return hull;
+}
+
+auto SimulatedHullsSystem::allocDynamicCageHull( DynamicCage *cage, int64_t currTime, unsigned lifetime ) -> DynamicCageHull * {
+    unsigned numVertices = cage->cageInitialGeometry.vertexPositions.size();
+    wsw::HeapBasedFreelistAllocator *allocator = cage->allocator;
+    DynamicCageHull **head = &cage->head;
+
+    void *mem = allocator->allocOrNull();
+    CMShapeList *hullShapeList = nullptr;
+    if( mem ) [[likely]] {
+        hullShapeList = m_freeShapeLists.back();
+        m_freeShapeLists.pop_back();
+    } else {
+        DynamicCageHull *oldestHull = nullptr;
+        int64_t oldestSpawnTime = std::numeric_limits<int64_t>::max();
+        for( DynamicCageHull *hull = *head; hull; hull = hull->next ) {
+            if( oldestSpawnTime > hull->spawnTime ) {
+                oldestSpawnTime = hull->spawnTime;
+                oldestHull = hull;
+            }
+        }
+        assert( oldestHull );
+        wsw::unlink( oldestHull, head );
+        oldestHull->~DynamicCageHull();
+        mem = oldestHull;
+    }
+
+    auto *const hull = new( mem )DynamicCageHull( numVertices, ( void* )mem );
     hull->spawnTime  = currTime;
     hull->lifetime   = lifetime;
 
@@ -1048,15 +1273,12 @@ IntConfigVar v_triIdx( wsw::StringView( "triIdx"), { .byDefault = -1, .flags = C
 
 void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const float *origin,
 											  const float scale, const float *dir, const float rotation,
-                                              SimulatedHullsSystem::StaticCagedMesh *meshToRender,
+                                              SimulatedHullsSystem::StaticCage *cage,
                                               PolyEffectsSystem *effectsSystem,
                                               const AppearanceRules &appearanceRules ) {
 	const float originX = origin[0], originY = origin[1], originZ = origin[2];
-	//const auto [verticesSpan, indicesSpan, neighboursSpan] = ::basicHullsHolder.getIcosphereForLevel( hull->subdivLevel );
 	BoundsBuilder cageBoundsBuilder;
-	//const vec4_t *__restrict vertices = verticesSpan.data();
 
-	StaticCage *cage = std::addressof( m_loadedStaticCages[meshToRender->loadedCageKey] );
 	Geometry *cageGeometry = &cage->cageGeometry;
 	vec3_t *vertexPositions = cageGeometry->vertexPositions.data();
 	unsigned numVerts = cageGeometry->vertexPositions.size();
@@ -1075,16 +1297,15 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
     mat3_t transformMatrixForDir;
     Matrix3_ForRotationOfDirs( &axis_identity[AXIS_UP], dir, transformMatrixForDir );
 
-	vec3_t z_dir = { 0.0f, 0.0f, 1.0f };
-
-    // MULTIPLY WITH ROTATION ANGLE
     mat3_t transformMatrix;
-    Matrix3_Rotate( transformMatrixForDir, rotation, z_dir, transformMatrix );
+    Matrix3_Rotate( transformMatrixForDir, rotation, &axis_identity[AXIS_UP], transformMatrix );
 
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
+    vec3_t *moveDirections    = hull->vertexMoveDirections;
+    float *limitsAtDirections = hull->limitsAtDirections;
+
 	if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
-		vec3_t *moveDirections = hull->vertexMoveDirections;
 		for( size_t i = 0; i < numVerts; i++ ) {
 			Matrix3_TransformVector( transformMatrix, vertexPositions[i], moveDirections[i] );
 
@@ -1095,14 +1316,11 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
         cageBoundsBuilder.storeTo( hull->cageMins, hull->cageMaxs );
 
 		// Limits at each direction just match the given radius in this case
-		std::fill( hull->limitsAtDirections, hull->limitsAtDirections + numVerts, radius );
+		std::fill( limitsAtDirections, limitsAtDirections + numVerts, radius );
 		cgNotice() << "no shapes";
 
 	} else {
 		trace_t trace;
-
-        vec3_t *moveDirections = hull->vertexMoveDirections;
-        float *limitsAtDirections = hull->limitsAtDirections;
 
         cgNotice() << "identifier size" << cage->identifier.size();
         cgNotice() << "vertices size" << cage->cageGeometry.vertexPositions.size();
@@ -1209,15 +1427,247 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 	hull->scale = scale;
 }
 
+//do {
+//const unsigned firstVertIdx  = meshTriIndices[triNum][0];
+//const unsigned secondVertIdx = meshTriIndices[triNum][1];
+//const unsigned thirdVertIdx  = meshTriIndices[triNum][2];
+//
+//vec3_t triCoords[3];
+//VectorCopy( destPositions[firstVertIdx], triCoords[0] );
+//VectorCopy( destPositions[secondVertIdx], triCoords[1] );
+//VectorCopy( destPositions[thirdVertIdx], triCoords[2] );
+//
+//vec3_t vecToSecondVert;
+//vec3_t vecToThirdVert;
+//VectorSubtract( triCoords[1], triCoords[0], vecToSecondVert );
+//VectorSubtract( triCoords[2], triCoords[0], vecToThirdVert );
+//
+//vec3_t normal;
+//CrossProduct( vecToThirdVert, vecToSecondVert, normal );
+//
+//VectorAdd( normals[firstVertIdx], normal, normals[firstVertIdx] );
+//VectorAdd( normals[secondVertIdx], normal, normals[secondVertIdx] );
+//VectorAdd( normals[thirdVertIdx], normal, normals[thirdVertIdx] );
+//}
+
+void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const float *origin,
+                                              const float scale, const float *dir, const float rotation,
+                                              SimulatedHullsSystem::DynamicCage *cage,
+                                              PolyEffectsSystem *effectsSystem,
+                                              const AppearanceRules &appearanceRules ) {
+    const float originX = origin[0], originY = origin[1], originZ = origin[2];
+    BoundsBuilder cageBoundsBuilder;
+
+    Geometry *cageInitialGeometry = &cage->cageInitialGeometry;
+    vec3_t *vertexPositions = cageInitialGeometry->vertexPositions.data();
+    unsigned numVerts = cageInitialGeometry->vertexPositions.size();
+
+    const float maxOffsetFromCage = hull->maxOffsetFromCage; // TODO: find the max offset among dynamic cage meshes for this value
+
+    cgNotice() << "set up hull vertices";
+    // Calculate move limits in each direction
+
+    const float radius = scale * cage->initialBoundingRadius + maxOffsetFromCage;
+
+    cgNotice() << "radius when setting up verts: " << radius;
+
+    const vec3_t growthMins { originX - radius, originY - radius, originZ - radius };
+    const vec3_t growthMaxs { originX + radius, originY + radius, originZ + radius };
+
+    // TODO: Add a fused call
+    CM_BuildShapeList( cl.cms, m_tmpShapeList, growthMins, growthMaxs, MASK_SOLID );
+    CM_ClipShapeList( cl.cms, m_tmpShapeList, m_tmpShapeList, growthMins, growthMaxs );
+
+    mat3_t transformMatrixForDir;
+    Matrix3_ForRotationOfDirs( &axis_identity[AXIS_UP], dir, transformMatrixForDir );
+
+    // MULTIPLY WITH ROTATION ANGLE
+    mat3_t transformMatrix;
+    Matrix3_Rotate( transformMatrixForDir, rotation, &axis_identity[AXIS_UP], transformMatrix );
+
+    vec3_t color { 0.99f, 0.4f, 0.1f };
+
+    vec3_t *hullVertexPositions = hull->vertexPositions;
+    vec3_t *hullVertexNormals   = hull->vertexNormals;
+    float *limitsAtDirections   = hull->limitsAtDirections;
+
+    const vec3_t maxCageBoundsOffset = { maxOffsetFromCage, maxOffsetFromCage, maxOffsetFromCage };
+
+    if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
+        for( size_t i = 0; i < numVerts; i++ ) {
+            Matrix3_TransformVector(transformMatrix, vertexPositions[i], hullVertexPositions[i] );
+
+            vec3_t limitPoint;
+            VectorMA( origin, scale, hullVertexPositions[i], hullVertexPositions[i] );
+            cageBoundsBuilder.addPoint( limitPoint );
+        }
+
+        cageBoundsBuilder.storeTo( hull->cageMins, hull->cageMaxs );
+        VectorAdd( hull->cageMaxs, maxCageBoundsOffset, hull->cageMaxs );
+        VectorSubtract( hull->cageMins, maxCageBoundsOffset, hull->cageMins );
+
+        cgNotice() << "no shapes";
+
+    } else {
+        trace_t trace;
+
+        cgNotice() << "identifier size" << cage->identifier.size();
+        cgNotice() << "vertices size" << cage->cageInitialGeometry.vertexPositions.size();
+
+        for( size_t i = 0; i < numVerts; i++ ) {
+            Matrix3_TransformVector(transformMatrix, vertexPositions[i], hullVertexPositions[i] );
+
+            vec3_t limitPoint;
+            VectorMA(origin, scale, hullVertexPositions[i], limitPoint );
+
+            CM_ClipToShapeList( cl.cms, m_tmpShapeList, &trace, origin, limitPoint, vec3_origin, vec3_origin,
+                                MASK_SOLID );
+
+            const float moveDirLength = VectorLengthFast( hullVertexPositions[i] );
+            limitsAtDirections[i] = trace.fraction * moveDirLength;
+
+            VectorMA( origin, scale * trace.fraction, hullVertexPositions[i], limitPoint );
+            cageBoundsBuilder.addPoint( limitPoint );
+            VectorCopy( limitPoint, hullVertexPositions[i] );
+
+            if( trace.fraction < 0.99f ){
+                VectorSet( color, 0.99f, 0.4f, 0.1f );
+
+            } else {
+                VectorSet( color, 0.4f, 0.99f, 0.1f );
+            }
+
+            if ( v_showVectorsToLim.get()) {
+                effectsSystem->spawnTransientBeamEffect( origin, limitPoint, {
+                        .material          = cgs.media.shaderLaser,
+                        .beamColorLifespan = {
+                                .initial  = {color[0], color[1], color[2]},
+                                .fadedIn  = {color[0], color[1], color[2]},
+                                .fadedOut = {color[0], color[1], color[2]},
+                        },
+                        .width             = 8.0f,
+                        .timeout           = v_trisLifetime.get(),
+                } );
+            }
+
+        }
+
+        cageBoundsBuilder.storeTo( hull->cageMins, hull->cageMaxs );
+        VectorAdd( hull->cageMaxs, maxCageBoundsOffset, hull->cageMaxs );
+        VectorSubtract( hull->cageMins, maxCageBoundsOffset, hull->cageMins );
+
+    }
+
+    vec3_t colorB { 0.1f, 0.4f, 0.99f };
+    vec3_t colorC { 0.99f, 0.2f, 0.1f };
+
+    tri *tris = cageInitialGeometry->triIndices.data();
+    unsigned numTris = cageInitialGeometry->triIndices.size();
+
+    for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
+        VectorSet( hullVertexNormals[vertNum], 0.0f, 0.0f, 0.0f );
+    }
+
+    for( int triNum = 0; triNum < numTris; triNum++ ) {
+        const unsigned firstVertIdx  = tris[triNum][0];
+        const unsigned secondVertIdx = tris[triNum][1];
+        const unsigned thirdVertIdx  = tris[triNum][2];
+
+        vec3_t triCoords[3];
+        VectorCopy( hullVertexPositions[firstVertIdx], triCoords[0] );
+        VectorCopy( hullVertexPositions[secondVertIdx], triCoords[1] );
+        VectorCopy( hullVertexPositions[thirdVertIdx], triCoords[2] );
+
+        vec3_t vecToSecondVert;
+        vec3_t vecToThirdVert;
+        VectorSubtract( triCoords[1], triCoords[0], vecToSecondVert );
+        VectorSubtract( triCoords[2], triCoords[0], vecToThirdVert );
+
+        vec3_t normal;
+        CrossProduct( vecToThirdVert, vecToSecondVert, normal );
+
+        VectorAdd( hullVertexNormals[firstVertIdx], normal, hullVertexNormals[firstVertIdx] );
+        VectorAdd( hullVertexNormals[secondVertIdx], normal, hullVertexNormals[secondVertIdx] );
+        VectorAdd( hullVertexNormals[thirdVertIdx], normal, hullVertexNormals[thirdVertIdx] );
+    }
+
+    for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
+        VectorNormalizeFast( hullVertexNormals[vertNum] );
+        // TODO: while the mesh the artist made has to be very messed up for this to occur (possibly a flattened mesh) shouldn't we provide some clear error/crash in this case?
+    }
+
+    if( CM_GetNumShapesInShapeList( m_tmpShapeList ) == 0 ) {
+        // Limits at each direction just match the maximum offset from the cage in this cage
+        std::fill( limitsAtDirections, limitsAtDirections + numVerts, maxOffsetFromCage );
+    } else {
+        trace_t trace;
+        for( size_t i = 0; i < numVerts; i++ ) {
+            vec3_t limitPoint;
+            VectorMA( hullVertexPositions[i], maxOffsetFromCage, hullVertexNormals[i], limitPoint );
+            CM_ClipToShapeList(cl.cms, m_tmpShapeList, &trace, hullVertexPositions[i],
+                               limitPoint, vec3_origin, vec3_origin, MASK_SOLID);
+            limitsAtDirections[i] = maxOffsetFromCage * trace.fraction;
+        }
+    }
+
+
+    for( int triNum = 0; triNum < numTris; triNum++ ){
+        for( int idxNum = 0; idxNum < 3; idxNum++ ){
+            unsigned firstIdx  = idxNum;
+            unsigned secondIdx = ( idxNum + 1 ) % 3;
+
+            unsigned firstVertex  = tris[triNum][firstIdx];
+            unsigned secondVertex = tris[triNum][secondIdx];
+
+            vec3_t firstPosition;
+            vec3_t secondPosition;
+
+            VectorCopy( hullVertexPositions[firstVertex], firstPosition );
+            VectorCopy( hullVertexPositions[secondVertex], secondPosition );
+
+            vec3_t firstOffsetPos;
+            vec3_t secondOffsetPos;
+
+            VectorMA( hullVertexPositions[firstVertex], limitsAtDirections[firstVertex], hullVertexNormals[firstVertex], firstOffsetPos );
+            VectorMA( hullVertexPositions[secondVertex], limitsAtDirections[secondVertex], hullVertexNormals[secondVertex], secondOffsetPos );
+
+            if( v_triIdx.get() < 0 || triNum == v_triIdx.get() ){
+                effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
+                        .material          = cgs.media.shaderLaser,
+                        .beamColorLifespan = {
+                                .initial  = {colorB[0], colorB[1], colorB[2]},
+                                .fadedIn  = {colorB[0], colorB[1], colorB[2]},
+                                .fadedOut = {colorB[0], colorB[1], colorB[2]},
+                        },
+                        .width             = 8.0f,
+                        .timeout           = v_trisLifetime.get(),
+                } );
+
+                effectsSystem->spawnTransientBeamEffect( firstOffsetPos, secondOffsetPos, {
+                        .material          = cgs.media.shaderLaser,
+                        .beamColorLifespan = {
+                                .initial  = {colorC[0], colorC[1], colorC[2]},
+                                .fadedIn  = {colorC[0], colorC[1], colorC[2]},
+                                .fadedOut = {colorC[0], colorC[1], colorC[2]},
+                        },
+                        .width             = 8.0f,
+                        .timeout           = v_trisLifetime.get(),
+                } );
+            }
+        }
+    }
+
+    VectorCopy( origin, hull->origin );
+    hull->scale = scale;
+}
+
 void SimulatedHullsSystem::addHull( AppearanceRules *appearanceRules, StaticKeyframedHullParams &hullParams ) {
 
     SimulatedHullsSystem::StaticCagedMesh *cagedMesh = hullParams.sharedCageCagedMeshes;
     SimulatedHullsSystem::StaticCage *cage = std::addressof( SimulatedHullsSystem::m_loadedStaticCages[cagedMesh->loadedCageKey] );
-    unsigned numVertices = cage->cageGeometry.vertexPositions.size();
-    wsw::HeapBasedFreelistAllocator *allocator = cage->allocator;
     cgNotice() << "identifier" << cage->identifier;
 
-    if( auto *const hull = SimulatedHullsSystem::allocStaticCageHull( &cage->head, allocator, m_lastTime, hullParams.timeout, numVertices ) ){
+    if( auto *const hull = SimulatedHullsSystem::allocStaticCageHull( cage, m_lastTime, hullParams.timeout ) ){
         const vec3_t hullOrigin {
                 hullParams.origin[0] + hullParams.offset[0],
                 hullParams.origin[1] + hullParams.offset[1],
@@ -1232,9 +1682,42 @@ void SimulatedHullsSystem::addHull( AppearanceRules *appearanceRules, StaticKeyf
 			hull->appearanceRules[meshNum]       = appearanceRules[meshNum];
         }
 
+        SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
+                                                 hullParams.rotation, cage, &cg.polyEffectsSystem );
+
+    }
+
+}
+
+void SimulatedHullsSystem::addHull( AppearanceRules *appearanceRules, DynamicCageHullParams &hullParams ) {
+
+    SimulatedHullsSystem::DynamicCagedMesh *cagedMeshes = hullParams.sharedCageCagedMeshes;
+    SimulatedHullsSystem::DynamicCage *cage = std::addressof( m_loadedDynamicCages[cagedMeshes->loadedCageKey] );
+
+    cgNotice() << "identifier" << cage->identifier;
+    //cgNotice() << "size" << m_loadedDynamicCages.size();
+
+    //cgNotice() << "amk";
+
+    if( auto *const hull = SimulatedHullsSystem::allocDynamicCageHull( cage, m_lastTime, hullParams.timeout ) ){
+        const vec3_t hullOrigin {
+                hullParams.origin[0] + hullParams.offset[0],
+                hullParams.origin[1] + hullParams.offset[1],
+                hullParams.origin[2] + hullParams.offset[2]
+        };
+
+        const unsigned numMeshes = hullParams.numCagedMeshes;
+        hull->numSharedCageCagedMeshes = numMeshes;
+
+        for( unsigned meshNum = 0; meshNum < numMeshes; meshNum++ ) {
+            hull->sharedCageCagedMeshes[meshNum] = &cagedMeshes[meshNum];
+            hull->appearanceRules[meshNum]       = appearanceRules[meshNum];    
+            hull->maxOffsetFromCage              = hullParams.scale * cage->initialBoundingRadius * 0.2f;
+            //hull->maxOffsetFromCage              = wsw::max( hull->maxOffsetFromCage, cagedMeshes[meshNum].maxOffsetFromCage); // TODO: use this instead when mesh registration works
+        }
 
         SimulatedHullsSystem::setupHullVertices( hull, hullOrigin, hullParams.scale, hullParams.dir,
-                                                 hullParams.rotation, cagedMesh, &cg.polyEffectsSystem );
+                                                 hullParams.rotation, cage, &cg.polyEffectsSystem );
 
     }
 
@@ -1409,6 +1892,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 	wsw::StaticVector<BaseRegularSimulatedHull *, kMaxRegularHulls> activeRegularHulls;
 	wsw::StaticVector<BaseConcentricSimulatedHull *, kMaxConcentricHulls> activeConcentricHulls;
 	wsw::StaticVector<BaseKeyframedHull *, kMaxKeyframedHulls> activeKeyframedHulls;
+    wsw::StaticVector<DynamicCageHull *, kMaxKeyframedHulls> activeDynamicCageHulls;
 
 	for( FireHull *hull = m_fireHullsHead, *nextHull = nullptr; hull; hull = nextHull ) { nextHull = hull->next;
 		if( hull->spawnTime + hull->lifetime > currTime ) [[likely]] {
@@ -1651,24 +2135,9 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
             const unsigned numFrames = meshToRender->numFrames;
             const unsigned currFrame = wsw::min( numFrames - 1, (unsigned)( lifetimeFrac * numFrames ) );
 
-
-
             // we can assume the LODs have about the same bounding radius as the most detailed version, also:
             // as other LODs are used at longer distances, even if the LOD was slightly larger, it will not be noticeable
             // if the culling is premature.
-			//BoundsBuilder meshBoundsBuilder;
-
-
-//			vec3_t maxsFromRadius = { currBoundingRadius, currBoundingRadius, currBoundingRadius };
-//			VectorAdd( maxsFromRadius, hull->origin, maxsFromRadius );
-//			vec3_t minsFromRadius = { -currBoundingRadius, -currBoundingRadius, -currBoundingRadius };
-//			VectorAdd( minsFromRadius, hull->origin, minsFromRadius );
-//
-//			meshBoundsBuilder.addPoint( maxsFromRadius );
-//			meshBoundsBuilder.addPoint( minsFromRadius );
-//			meshBoundsBuilder.addPoint( hull->cageMins );
-//			meshBoundsBuilder.addPoint( hull->cageMaxs );
-//			meshBoundsBuilder.storeTo( mins, maxs );
 
 			vec4_t mins, maxs;
 			const float currBoundingRadius = meshToRender->boundingRadii[currFrame] * hull->scale;
@@ -1699,7 +2168,6 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			}
 
             if( cloudAppearanceRules ) [[unlikely]] {
-				cgNotice() << "cloud appearance rules found";
 
                 assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
                 assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
@@ -1726,6 +2194,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
                         mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
                         mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
+                        mesh->m_fractionOfParticlesToRender     = meshProps.fractionOfParticlesToRender;
+                        cgNotice() << "fraction" << mesh->m_fractionOfParticlesToRender << " " << meshProps.fractionOfParticlesToRender;
                         mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
 
                         if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
@@ -3423,20 +3893,21 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 	unsigned numGridVertices;
 
 	assert( m_shiftFromDefaultLevelToHide <= 0 );
-	if( m_chosenSubdivLevel > m_shared->simulatedSubdivLevel ) {
-		m_chosenSubdivLevel = m_shared->simulatedSubdivLevel;
-	} else {
-		const int shiftFromDefaultLevel = (int)m_chosenSubdivLevel - (int)m_shared->simulatedSubdivLevel;
-		if( shiftFromDefaultLevel <= m_shiftFromDefaultLevelToHide ) {
-			return std::nullopt;
-		}
-	}
 
 	assert( m_tessLevelShiftForMinVertexIndex <= 0 );
 	assert( m_tessLevelShiftForMaxVertexIndex <= 0 );
 	assert( m_tessLevelShiftForMinVertexIndex <= m_tessLevelShiftForMaxVertexIndex );
 
 	if( !m_shared->isAKeyframedHull ){
+        if( m_chosenSubdivLevel > m_shared->simulatedSubdivLevel ) {
+            m_chosenSubdivLevel = m_shared->simulatedSubdivLevel;
+        } else {
+            const int shiftFromDefaultLevel = (int)m_chosenSubdivLevel - (int)m_shared->simulatedSubdivLevel;
+            if( shiftFromDefaultLevel <= m_shiftFromDefaultLevelToHide ) {
+                return std::nullopt;
+            }
+        }
+
 		if( const int level = (int) m_chosenSubdivLevel + this->m_tessLevelShiftForMinVertexIndex; level > 0 ) {
 			m_minVertexNumThisFrame = (unsigned) ::basicHullsHolder.getIcosphereForLevel( level - 1 ).vertices.size();
 		} else {
@@ -3458,6 +3929,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 			LODtoRender = v_LODtoShow.get();
 		} else {
 			LODtoRender = m_chosenSubdivLevel;
+            cgNotice() << "lod to render in get storage" << LODtoRender;
 		}
 		StaticCagedMesh *meshToRender = m_shared->meshToRender;
 
@@ -3468,7 +3940,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 		// TODO: won't reassigning m_shared->meshToRender like this in this stage confuse others?
 		m_shared->meshToRender = meshToRender; // assign the appropriate LOD
 
-		numGridVertices = meshToRender->numVertices;
+		numGridVertices = meshToRender->numVertices * m_fractionOfParticlesToRender;
 		cgNotice() << "grid vertices:" << numGridVertices;
 	}
 
@@ -3767,7 +4239,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 				const unsigned secondVertIdx = meshTriIndices[triNum][1];
 				const unsigned thirdVertIdx  = meshTriIndices[triNum][2];
 
-				vec3_t triCoords[3];
+				vec3_t triCoords[3]; // TODO: eliminate this copying here and in cloud one
 				VectorCopy( destPositions[firstVertIdx], triCoords[0] );
 				VectorCopy( destPositions[secondVertIdx], triCoords[1] );
 				VectorCopy( destPositions[thirdVertIdx], triCoords[2] );
@@ -4111,6 +4583,10 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
         const unsigned numTris      = meshToRender->triIndices.size();
 		const unsigned numGridVerts = meshToRender->numVertices;
 
+        const float fractionOfParticlesToRender = m_fractionOfParticlesToRender;
+        const auto numParticlesToRender         = (unsigned)( fractionOfParticlesToRender * numGridVerts );
+        const float rcpFractionToRender         = 1 / fractionOfParticlesToRender;
+
         const tri *meshTriIndices = meshToRender->triIndices.data();
 
         unsigned currFrame;
@@ -4128,8 +4604,9 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
         unsigned currFrameStartVertIdx = currFrame * numGridVerts;
         unsigned nextFrameStartVertIdx = nextFrame * numGridVerts;
 
-        bool needsViewDotResults = false;
-        float *viewDotResults    = nullptr;
+        bool needsViewDotResults   = false;
+        float *viewDotResults      = nullptr;
+        vec3_t *gridVertexPosition = nullptr;
 
         const unsigned numShadingLayers = meshToRender->numShadingLayers;
 
@@ -4163,84 +4640,85 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
         [[maybe_unused]] vec3_t tmpLeftStorage, tmpUpStorage;
 
-		//vec3_t gridVertexPosition;
-        auto *gridVertexPosition = (vec3_t *)alloca( sizeof( vec3_t ) * numGridVerts );
+        if( needsViewDotResults ){
+            gridVertexPosition = (vec3_t *)alloca( sizeof( vec3_t ) * numGridVerts );
 
-        do {
+            do {
+                unsigned currFrameVertIdx = currFrameStartVertIdx + gridVertNum;
+                unsigned nextFrameVertIdx = nextFrameStartVertIdx + gridVertNum;
+                vec3_t nextPositionContrib;
 
-            unsigned currFrameVertIdx = currFrameStartVertIdx + gridVertNum;
-            unsigned nextFrameVertIdx = nextFrameStartVertIdx + gridVertNum;
-            vec3_t nextPositionContrib;
+                vertexPosFromStaticCage( currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
+                                         vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, gridVertexPosition[gridVertNum] );
+                vertexPosFromStaticCage( nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
+                                         vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, nextPositionContrib );
+                VectorAdd( gridVertexPosition[gridVertNum], nextPositionContrib, gridVertexPosition[gridVertNum] );
+                VectorAdd( gridVertexPosition[gridVertNum], origin, gridVertexPosition[gridVertNum] );
+            } while ( ++gridVertNum < numGridVerts );
 
-            vertexPosFromStaticCage( currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
-                                     vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, gridVertexPosition[gridVertNum] );
-            vertexPosFromStaticCage( nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
-                                     vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, nextPositionContrib );
-            VectorAdd( gridVertexPosition[gridVertNum], nextPositionContrib, gridVertexPosition[gridVertNum] );
-            VectorAdd( gridVertexPosition[gridVertNum], origin, gridVertexPosition[gridVertNum] );
+            gridVertNum = 0;
 
-            vec4_t *const __restrict positions = destPositions + numResultVertices;
-            vec4_t *const __restrict normals = destNormals + numResultVertices;
-            byte_vec4_t *const __restrict colors = destColors + numResultVertices;
-            vec2_t *const __restrict texCoords = destTexCoords + numResultVertices;
-            uint16_t *const __restrict indices = destIndices + numResultIndices;
+            do {
+                const auto vertToRenderIdx = (unsigned)( (float)gridVertNum * rcpFractionToRender );
 
-            // 1 unit is equal to a rotation of 360 degrees
-            const float initialPhase =
-                    ((float) kRandomBytes[gridVertNum + m_phaseIndexShiftInTable] - 127.0f) * normalizer;
-            const float angularSpeed =
-                    ((float) kRandomBytes[gridVertNum + m_speedIndexShiftInTable] - 127.0f) * normalizer;
-			/// IMPORTANT: won't kRandomBytes[vertexNum + shift] go out of index? the array has 1024 entries and vertexNum can be >1024, while shift<=255.
-            const float rotationDegrees = 360.0f * (initialPhase + angularSpeed * m_lifetimeSeconds);
+                vec4_t *const __restrict positions = destPositions + numResultVertices;
+                vec4_t *const __restrict normals = destNormals + numResultVertices;
+                byte_vec4_t *const __restrict colors = destColors + numResultVertices;
+                vec2_t *const __restrict texCoords = destTexCoords + numResultVertices;
+                uint16_t *const __restrict indices = destIndices + numResultIndices;
 
-            const float *left, *up;
-            // TODO: Avoid dynamic branching, add templated specializations?
-            if (m_applyRotation) {
-                // TODO: This could be probably reduced to a single sincos() calculation + few vector transforms
-                RotatePointAroundVector(tmpLeftStorage, normal, viewLeft, rotationDegrees);
-                RotatePointAroundVector(tmpUpStorage, normal, viewUp, rotationDegrees);
+                // 1 unit is equal to a rotation of 360 degrees
+                const float initialPhase =
+                        ((float) kRandomBytes[gridVertNum + m_phaseIndexShiftInTable] - 127.0f) * normalizer;
+                const float angularSpeed =
+                        ((float) kRandomBytes[gridVertNum + m_speedIndexShiftInTable] - 127.0f) * normalizer;
+                /// IMPORTANT: won't kRandomBytes[vertexNum + shift] go out of index? the array has 1024 entries and vertexNum can be >1024, while shift<=255.
+                const float rotationDegrees = 360.0f * (initialPhase + angularSpeed * m_lifetimeSeconds);
 
-                left = tmpLeftStorage;
-                up = tmpUpStorage;
-            } else {
-                left = viewLeft;
-                up = viewUp;
-            }
+                const float *left, *up;
+                // TODO: Avoid dynamic branching, add templated specializations?
+                if (m_applyRotation) {
+                    // TODO: This could be probably reduced to a single sincos() calculation + few vector transforms
+                    RotatePointAroundVector(tmpLeftStorage, normal, viewLeft, rotationDegrees);
+                    RotatePointAroundVector(tmpUpStorage, normal, viewUp, rotationDegrees);
 
-            vec3_t point;
-            VectorMA(gridVertexPosition[gridVertNum], -radius, up, point);
-            VectorMA(point, +radius, left, positions[0]);
-            VectorMA(point, -radius, left, positions[3]);
+                    left = tmpLeftStorage;
+                    up = tmpUpStorage;
+                } else {
+                    left = viewLeft;
+                    up = viewUp;
+                }
 
-            VectorMA(gridVertexPosition[gridVertNum], radius, up, point);
-            VectorMA(point, +radius, left, positions[1]);
-            VectorMA(point, -radius, left, positions[2]);
+                vec3_t point;
+                VectorMA(gridVertexPosition[vertToRenderIdx], -radius, up, point);
+                VectorMA(point, +radius, left, positions[0]);
+                VectorMA(point, -radius, left, positions[3]);
 
-            positions[0][3] = positions[1][3] = positions[2][3] = positions[3][3] = 1.0f;
+                VectorMA(gridVertexPosition[vertToRenderIdx], radius, up, point);
+                VectorMA(point, +radius, left, positions[1]);
+                VectorMA(point, -radius, left, positions[2]);
 
-            Vector4Copy(normal, normals[0]);
-            Vector4Copy(normal, normals[1]);
-            Vector4Copy(normal, normals[2]);
-            Vector4Copy(normal, normals[3]);
+                positions[0][3] = positions[1][3] = positions[2][3] = positions[3][3] = 1.0f;
 
-            VectorSet(indices + 0, numResultVertices + 0, numResultVertices + 1, numResultVertices + 2);
-            VectorSet(indices + 3, numResultVertices + 0, numResultVertices + 2, numResultVertices + 3);
+                Vector4Copy(normal, normals[0]);
+                Vector4Copy(normal, normals[1]);
+                Vector4Copy(normal, normals[2]);
+                Vector4Copy(normal, normals[3]);
 
-            Vector2Set(texCoords[0], 0.0f, 1.0f);
-            Vector2Set(texCoords[1], 0.0f, 0.0f);
-            Vector2Set(texCoords[2], 1.0f, 0.0f);
-            Vector2Set(texCoords[3], 1.0f, 1.0f);
+                VectorSet(indices + 0, numResultVertices + 0, numResultVertices + 1, numResultVertices + 2);
+                VectorSet(indices + 3, numResultVertices + 0, numResultVertices + 2, numResultVertices + 3);
 
-            numResultVertices += 4;
-            numResultIndices += 6;
-        } while ( ++gridVertNum < numGridVerts );
+                Vector2Set(texCoords[0], 0.0f, 1.0f);
+                Vector2Set(texCoords[1], 0.0f, 0.0f);
+                Vector2Set(texCoords[2], 1.0f, 0.0f);
+                Vector2Set(texCoords[3], 1.0f, 1.0f);
 
-
-        const auto beforeViewDot = Sys_Microseconds();
-        if( needsViewDotResults ) {
+                numResultVertices += 4;
+                numResultIndices += 6;
+            } while ( ++gridVertNum < numParticlesToRender );
 
             assert( numVertices > 0 && numVertices < 4096 );
-            viewDotResults = (float *)alloca( sizeof( float ) * numGridVerts );
+            viewDotResults = (float *)alloca( sizeof( float ) * numParticlesToRender );
 
             auto *meshNormals = (vec3_t *)alloca( sizeof( vec3_t ) * numGridVerts );
             for( unsigned vertNum = 0; vertNum < numGridVerts; vertNum++ ){
@@ -4263,17 +4741,19 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                 VectorSubtract( triCoords[1], triCoords[0], vecToSecondVert );
                 VectorSubtract( triCoords[2], triCoords[0], vecToThirdVert );
 
-                vec3_t normal;
-                CrossProduct( vecToThirdVert, vecToSecondVert, normal );
+                vec3_t normalContrib;
+                CrossProduct( vecToThirdVert, vecToSecondVert, normalContrib );
 
-                VectorAdd( meshNormals[firstVertIdx], normal, meshNormals[firstVertIdx] );
-                VectorAdd( meshNormals[secondVertIdx], normal, meshNormals[secondVertIdx] );
-                VectorAdd( meshNormals[thirdVertIdx], normal, meshNormals[thirdVertIdx] );
+                VectorAdd( meshNormals[firstVertIdx], normalContrib, meshNormals[firstVertIdx] );
+                VectorAdd( meshNormals[secondVertIdx], normalContrib, meshNormals[secondVertIdx] );
+                VectorAdd( meshNormals[thirdVertIdx], normalContrib, meshNormals[thirdVertIdx] );
             } while( ++triNum < numTris );
 
-            for( unsigned vertNum = 0; vertNum < numGridVerts; vertNum++ ){
-                const float *const __restrict currVertex = gridVertexPosition[vertNum];
-                const float *const __restrict currNormal = meshNormals[vertNum];
+            for( unsigned vertNum = 0; vertNum < numParticlesToRender; vertNum++ ){
+                const unsigned vertToRenderIdx = vertNum * rcpFractionToRender;
+
+                const float *const __restrict currVertex = gridVertexPosition[vertToRenderIdx];
+                const float *const __restrict currNormal = meshNormals[vertToRenderIdx];
 
                 const float squaredNormalLength = VectorLengthSquared( currNormal );
                 vec3_t viewDir;
@@ -4289,7 +4769,84 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                     viewDotResults[vertNum] = 0.0f;
                 }
             }
+        } else {
+            do {
+                const unsigned vertToRenderIdx = gridVertNum * rcpFractionToRender;
+
+                vec3_t gridVertPosition;
+
+                unsigned currFrameVertIdx = currFrameStartVertIdx + vertToRenderIdx;
+                unsigned nextFrameVertIdx = nextFrameStartVertIdx + vertToRenderIdx;
+                vec3_t nextPositionContrib;
+
+                vertexPosFromStaticCage(currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
+                                        vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin,
+                                        gridVertPosition);
+                vertexPosFromStaticCage(nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
+                                        vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin,
+                                        nextPositionContrib);
+                VectorAdd(gridVertPosition, nextPositionContrib, gridVertPosition);
+                VectorAdd(gridVertPosition, origin, gridVertPosition);
+
+                vec4_t *const __restrict positions = destPositions + numResultVertices;
+                vec4_t *const __restrict normals = destNormals + numResultVertices;
+                byte_vec4_t *const __restrict colors = destColors + numResultVertices;
+                vec2_t *const __restrict texCoords = destTexCoords + numResultVertices;
+                uint16_t *const __restrict indices = destIndices + numResultIndices;
+
+                // 1 unit is equal to a rotation of 360 degrees
+                const float initialPhase =
+                        ((float) kRandomBytes[gridVertNum + m_phaseIndexShiftInTable] - 127.0f) * normalizer;
+                const float angularSpeed =
+                        ((float) kRandomBytes[gridVertNum + m_speedIndexShiftInTable] - 127.0f) * normalizer;
+                /// IMPORTANT: won't kRandomBytes[vertexNum + shift] go out of index? the array has 1024 entries and vertexNum can be >1024, while shift<=255.
+                const float rotationDegrees = 360.0f * (initialPhase + angularSpeed * m_lifetimeSeconds);
+
+                const float *left, *up;
+                // TODO: Avoid dynamic branching, add templated specializations?
+                if (m_applyRotation) {
+                    // TODO: This could be probably reduced to a single sincos() calculation + few vector transforms
+                    RotatePointAroundVector(tmpLeftStorage, normal, viewLeft, rotationDegrees);
+                    RotatePointAroundVector(tmpUpStorage, normal, viewUp, rotationDegrees);
+
+                    left = tmpLeftStorage;
+                    up = tmpUpStorage;
+                } else {
+                    left = viewLeft;
+                    up = viewUp;
+                }
+
+                vec3_t point;
+                VectorMA(gridVertPosition, -radius, up, point);
+                VectorMA(point, +radius, left, positions[0]);
+                VectorMA(point, -radius, left, positions[3]);
+
+                VectorMA(gridVertPosition, radius, up, point);
+                VectorMA(point, +radius, left, positions[1]);
+                VectorMA(point, -radius, left, positions[2]);
+
+                positions[0][3] = positions[1][3] = positions[2][3] = positions[3][3] = 1.0f;
+
+                Vector4Copy(normal, normals[0]);
+                Vector4Copy(normal, normals[1]);
+                Vector4Copy(normal, normals[2]);
+                Vector4Copy(normal, normals[3]);
+
+                VectorSet(indices + 0, numResultVertices + 0, numResultVertices + 1, numResultVertices + 2);
+                VectorSet(indices + 3, numResultVertices + 0, numResultVertices + 2, numResultVertices + 3);
+
+                Vector2Set(texCoords[0], 0.0f, 1.0f);
+                Vector2Set(texCoords[1], 0.0f, 0.0f);
+                Vector2Set(texCoords[2], 1.0f, 0.0f);
+                Vector2Set(texCoords[3], 1.0f, 1.0f);
+
+                numResultVertices += 4;
+                numResultIndices += 6;
+            } while ( ++gridVertNum < numParticlesToRender );
         }
+
+
+        const auto beforeViewDot = Sys_Microseconds();
         if( v_showPerf.get() ) {
             Com_Printf( "viewdot results took %d micros for %d vertices and %d indices\n",
                         (int) (Sys_Microseconds() - beforeViewDot), (int) numResultVertices, (int) numResultIndices );
@@ -4317,9 +4874,11 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
                 unsigned vertexNum = 0;
                 do {
+                    const unsigned vertToRenderIdx = vertexNum * rcpFractionToRender;
+
                     byte_vec4_t *const __restrict colors = destColors + vertexNum * 4;
-                    const float vertexMaskValue = std::lerp(prevMaskedLayer->vertexMaskValues[vertexNum],
-                                                            nextMaskedLayer->vertexMaskValues[vertexNum],
+                    const float vertexMaskValue = std::lerp(prevMaskedLayer->vertexMaskValues[vertToRenderIdx],
+                                                            nextMaskedLayer->vertexMaskValues[vertToRenderIdx],
                                                             lerpFrac);
 
                     addLayerContributionToResultColor(vertexMaskValue, numColors, lerpedColors, lerpedColorRanges,
@@ -4329,7 +4888,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                     Vector4Copy(colors[0], colors[2]);
                     Vector4Copy(colors[0], colors[3]);
 
-                } while (++vertexNum < numGridVerts);
+                } while (++vertexNum < numParticlesToRender);
             } else if (const auto *const prevDotLayer = std::get_if<DotShadingLayer>(&prevShadingLayer)) {
                 const auto *const nextDotLayer = std::get_if<DotShadingLayer>(&nextShadingLayer);
 
@@ -4353,7 +4912,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                     Vector4Copy(colors[0], colors[2]);
                     Vector4Copy(colors[0], colors[3]);
 
-                } while (++vertexNum < numGridVerts);
+                } while (++vertexNum < numParticlesToRender);
             } else if (const auto *const prevCombinedLayer = std::get_if<CombinedShadingLayer>(&prevShadingLayer)) {
                 const auto *const nextCombinedLayer = std::get_if<CombinedShadingLayer>(&nextShadingLayer);
 
@@ -4370,10 +4929,12 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
                 unsigned vertexNum = 0;
                 do {
+                    const unsigned vertToRenderIdx = vertexNum * rcpFractionToRender;
+
                     byte_vec4_t *const __restrict colors = destColors + vertexNum * 4;
                     const float vertexDotValue = viewDotResults[vertexNum];
-                    const float vertexMaskValue = std::lerp(prevCombinedLayer->vertexMaskValues[vertexNum],
-                                                            nextCombinedLayer->vertexMaskValues[vertexNum],
+                    const float vertexMaskValue = std::lerp(prevCombinedLayer->vertexMaskValues[vertToRenderIdx],
+                                                            nextCombinedLayer->vertexMaskValues[vertToRenderIdx],
                                                             lerpFrac);
 
                     const float dotInfluence = prevCombinedLayer->dotInfluence;
@@ -4389,7 +4950,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                     Vector4Copy(colors[0], colors[2]);
                     Vector4Copy(colors[0], colors[3]);
 
-                } while (++vertexNum < numGridVerts);
+                } while (++vertexNum < numParticlesToRender);
             } else {
                 wsw::failWithLogicError("Unreachable");
             }

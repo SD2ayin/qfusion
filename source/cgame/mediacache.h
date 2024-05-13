@@ -51,6 +51,11 @@ public:
         CachedStaticCagedMesh( MediaCache *parent, const wsw::StringView &name );
         const wsw::StringView m_name;
     };
+    class CachedDynamicCagedMesh : public CachedHandle<SimulatedHullsSystem::DynamicCagedMesh> {
+        friend class MediaCache;
+        CachedDynamicCagedMesh( MediaCache *parent, const wsw::StringView &name );
+        const wsw::StringView m_name;
+    };
 	class CachedMaterial : public CachedHandle<shader_s> {
 		friend class MediaCache;
 		CachedMaterial( MediaCache *parent, const wsw::StringView &name );
@@ -60,12 +65,14 @@ public:
 	void registerSounds();
 	void registerModels();
     void registerStaticCagedMeshes( SimulatedHullsSystem *hullsSystem );
+    void registerDynamicCagedMeshes( SimulatedHullsSystem *hullsSystem );
 	void registerMaterials();
 private:
 	// TODO: Should we just keep precached and non-precached linked handles in different lists?
 	CachedSound *m_sounds { nullptr };
 	CachedModel *m_models { nullptr };
     CachedStaticCagedMesh *m_staticCagedMeshes { nullptr };
+    CachedDynamicCagedMesh *m_dynamicCagedMeshes { nullptr };
 	CachedMaterial *m_materials { nullptr };
 
 	template <typename T>
@@ -77,6 +84,7 @@ private:
 	void registerSound( CachedSound *sound );
 	void registerModel( CachedModel *model );
     void registerStaticCagedMesh( CachedStaticCagedMesh *cagedMesh, SimulatedHullsSystem *hullsSystem );
+    void registerDynamicCagedMesh( CachedDynamicCagedMesh *cagedMesh, SimulatedHullsSystem *hullsSystem );
 	void registerMaterial( CachedMaterial *material );
 public:
 	MediaCache();
@@ -171,6 +179,8 @@ public:
 //
 //    CachedStaticCagedMesh anotherExample { this, wsw::StringView( "gfx/hulls/anotherExample_mesh.md3" ) };
     CachedStaticCagedMesh anotherExample2 { this, wsw::StringView( "gfx/hulls/anotherExample_second.md3" ) };
+
+    CachedDynamicCagedMesh dynamicExample { this, wsw::StringView( "gfx/hulls/dynamicExample_first.md3" ) };
 
     CachedMaterial shaderLaserSpikeParticle { this, wsw::StringView( "gfx/effects/laser_spike_particle" ) };
 	CachedMaterial shaderLaserImpactParticle { this, wsw::StringView( "gfx/effects/laser_impact_particle" ) };

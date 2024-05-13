@@ -687,6 +687,7 @@ void CG_ShutdownCrosshairs();
 struct model_s *CG_RegisterModel( const char *name );
 
 SimulatedHullsSystem::StaticCagedMesh *CG_RegisterStaticCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem );
+SimulatedHullsSystem::DynamicCagedMesh *CG_RegisterDynamicCagedMesh( const char *name, SimulatedHullsSystem *hullsSystem );
 
 void CG_ResetClientInfos( void );
 void CG_LoadClientInfo( unsigned client, const wsw::StringView &configString );
