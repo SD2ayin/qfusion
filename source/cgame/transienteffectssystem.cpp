@@ -468,8 +468,9 @@ static SimulatedHullsSystem::CloudMeshProps g_fireOuterCloudMeshProps {
 static SimulatedHullsSystem::AppearanceRules g_fireInnerCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 static SimulatedHullsSystem::AppearanceRules g_fireOuterCloudAppearanceRules = SimulatedHullsSystem::SolidAppearanceRules {};
 
-UnsignedConfigVar hullLifetime( wsw::StringView( "hullLifetime"), { .byDefault = 500u, .flags = CVAR_ARCHIVE });
+UnsignedConfigVar hullLifetime( wsw::StringView( "hullLifetime"), { .byDefault = 1280u, .flags = CVAR_ARCHIVE });
 FloatConfigVar hullScale( wsw::StringView( "hullScale"), { .byDefault = 35.0f, .flags = CVAR_ARCHIVE });
+FloatConfigVar hullOffsetSpeed( wsw::StringView( "hullOffsetSpeed"), { .byDefault = 320.0f, .flags = CVAR_ARCHIVE });
 FloatConfigVar fractionToRender( wsw::StringView( "fractionToRender"), { .byDefault = 1.0f, .flags = CVAR_ARCHIVE });
 
 IntConfigVar appearanceMode( wsw::StringView("appearanceMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
@@ -597,6 +598,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
                 .dir      = { dir[0], dir[1], dir[2] },
                 .rotation = rotation,
                 .scale    = hullScale.get(),
+				.maxOffsetSpeed = hullOffsetSpeed.get(),
                 .timeout  = hullLifetime.get(),
                 .sharedCageCagedMeshes = cgs.media.dynamicExample,
         };

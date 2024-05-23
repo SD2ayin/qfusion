@@ -215,6 +215,7 @@ public:
         unsigned numFrames;
         wsw::String identifier;
         float initialBoundingRadius; /// maybe this should combine with scale from params?
+        float *maxVelocityThisFrame;
         wsw::HeapBasedFreelistAllocator *allocator;
         DynamicCageHull *head;
     };
@@ -252,6 +253,7 @@ public:
         vec3_t dir { 0.0f, 0.0f, 1.0f };
         float rotation { 0.0f };
         float scale { 32.0f };
+		float maxOffsetSpeed { 320.0f };
         unsigned timeout { 400u };
         DynamicCagedMesh *sharedCageCagedMeshes { nullptr };
         unsigned numCagedMeshes { 1u };
@@ -708,8 +710,9 @@ private:
 	};
 
     struct BaseDynamicCageHull {
-
         float scale;
+		float maxOffsetSpeed;
+		mat3_t transformMatrix;
         // Externally managed, should point to the unit mesh data
         vec3_t *vertexPositions;
         vec3_t *vertexNormals;
@@ -728,7 +731,7 @@ private:
         HullCloudDynamicMesh *submittedCloudMesh;
         /// END
 
-        vec3_t cageMins, cageMaxs;
+        vec3_t mins, maxs;
         vec3_t origin;
 
         unsigned numSharedCageCagedMeshes { 0 };
@@ -739,7 +742,7 @@ private:
         /// the renderer is currently capable of lighting opaque meshes and this is what should be done
 
         void simulate( int64_t currTime, float timeDeltaSeconds,
-                       PolyEffectsSystem *effectsSystem, Geometry *cageGeometry );
+                       PolyEffectsSystem *effectsSystem );
     };
 
     struct DynamicCageHull : public BaseDynamicCageHull {
@@ -879,7 +882,7 @@ private:
 	SmokeHull *m_smokeHullsHead { nullptr };
 	WaveHull *m_waveHullsHead { nullptr };
 
-	wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists;
+	wsw::StaticVector<CMShapeList *, kMaxSmokeHulls + kMaxWaveHulls> m_freeShapeLists; // should be changed
 	CMShapeList *m_tmpShapeList { nullptr };
 
 	wsw::HeapBasedFreelistAllocator m_fireHullsAllocator { sizeof( FireHull ), kMaxFireHulls };
