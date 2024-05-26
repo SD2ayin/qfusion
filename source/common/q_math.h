@@ -840,7 +840,7 @@ void Matrix3_Rotate( const mat3_t in, vec_t angle, vec_t x, vec_t y, vec_t z, ma
 void Matrix3_ForRotationOfDirs( const float *fromDir, const float *toDir, mat3_t out );
 void Matrix3_FromPoints( const vec3_t v1, const vec3_t v2, const vec3_t v3, mat3_t m );
 void Matrix3_Normalize( mat3_t m );
-void Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution );
+bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution );
 
 inline void Matrix3_Rotate( const mat3_t in, float angle, const vec3_t axisDir, mat3_t out ) {
 	Matrix3_Rotate( in, angle, axisDir[0], axisDir[1], axisDir[2], out );

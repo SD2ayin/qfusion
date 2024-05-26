@@ -242,7 +242,7 @@ public:
         float maxOffsetFromCage; // maximum offset of the mesh from the cage triangles
         DynamicCagedMesh *nextLOD { nullptr }; // pointer to the next lower detail version
 
-        bool transformToCageSpace( Geometry *cage, wsw::StringView pathToMesh );
+        bool transformToCageSpace( DynamicCage *cage, wsw::StringView pathToMesh );
 
         void optimizeDynamicCagedMeshForCache();
     };
