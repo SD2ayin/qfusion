@@ -490,39 +490,36 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
     this->numFrames = numFrames;
 
     Geometry mesh;
-    if( mesh.vertexPositions.data() ){
-        cgNotice() << S_COLOR_RED << "not nullptr";
-    } else {
-        cgNotice() << S_COLOR_GREEN << "nullptr";
-    }
-    for( int i; i < 100; i++ ){
-        Geometry g;
-        if( g.vertexPositions.data() ){
-            cgNotice() << S_COLOR_RED << "not nullptr";
-        } else {
-            cgNotice() << S_COLOR_GREEN << "nullptr";
-        }
-        //g.vertexPositions = std::span( nullptr, 0 );
-    }
+//    if( mesh.vertexPositions.data() ){
+//        cgNotice() << S_COLOR_RED << "not nullptr";
+//    } else {
+//        cgNotice() << S_COLOR_GREEN << "nullptr";
+//    }
+////    for( int i; i < 100; i++ ){
+////        Geometry g;
+////        if( g.vertexPositions.data() ){
+////            cgNotice() << S_COLOR_RED << "not nullptr";
+////        } else {
+////            cgNotice() << S_COLOR_GREEN << "nullptr";
+////        }
+////        //g.vertexPositions = std::span( nullptr, 0 );
+////    }
     if( !GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, 0 ) ){
         return false;
     }
     unsigned numVerts = mesh.vertexPositions.size();
 
-//    this->numVertices = numVerts;
-//    this->triIndices  = mesh.triIndices;
-//    this->UVCoords    = mesh.UVCoords;
-
     this->numVertices = numVerts;
-    //this->triIndices  = mesh.triIndices;
-    //this->UVCoords    = mesh.UVCoords;
+    this->triIndices  = mesh.triIndices;
+    this->UVCoords    = mesh.UVCoords;
+
     // i find this so ugly.. isn't there something like copy()
-    auto triIndicesCopy = new tri[triIndices.size()];
-    auto UVCoordsCopy  = new vec2_t[numVerts];
-    std::memcpy( triIndicesCopy, triIndices.data(), triIndices.size() );
-    std::memcpy( UVCoordsCopy, UVCoords, numVerts );
-    this->triIndices = std::span( triIndicesCopy, triIndices.size() );
-    this->UVCoords   = UVCoordsCopy;
+//    auto triIndicesCopy = new tri[mesh.triIndices.size()];
+//    auto UVCoordsCopy  = new vec2_t[numVerts];
+//    std::memcpy( triIndicesCopy, mesh.triIndices.data(), mesh.triIndices.size() * sizeof(tri) );
+//    std::memcpy( UVCoordsCopy, mesh.UVCoords, numVerts * sizeof(vec2_t) );
+//    this->triIndices = std::span( triIndicesCopy, mesh.triIndices.size() );
+//    this->UVCoords   = UVCoordsCopy;
 
     this->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[numVerts * numFrames];
 	this->offsetFromLim = new float[numVerts * numFrames];
@@ -530,54 +527,56 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
 
     //delete[] mesh.vertexPositions.data();
 
-//    for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
-//        unsigned cageFaces = cage->triIndices.size();
-//
-//        GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
-//
-//        unsigned meshVerts = mesh.vertexPositions.size();
-//        vec3_t *vertexPositions = mesh.vertexPositions.data();
-//
-//        SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
-//
-//        float maxRadius = 0.0f;
-//        for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
-//            vec3_t vertPosition;
-//            VectorCopy( vertexPositions[vertNum], vertPosition );
-//            bool foundCoords = false;
-//
-//			SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
-//			if( VectorLengthFast( vertPosition ) < 1e-3f ) {
-//				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
-//				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
-//				// that the vertex belongs to may not find any solutions.
-//				cageCoord->cageTriIdx = 0;
-//				vec2_t coordinates = { 0.0f, 0.0f };
-//				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
-//
-//				foundCoords = true;
-//			} else {
-//				foundCoords = collisionCheck( cage, origin, vertPosition, std::numeric_limits<float>::infinity(),
-//											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
-//			}
-//
-//			if( foundCoords ) {
-//				cageCoord->offset = VectorLengthFast( vertPosition );
-//				maxRadius = wsw::max( maxRadius, cageCoord->offset );
-//			} else {
-//				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
-//				return false;
-//			}
-//        }
-//
-//        this->boundingRadii[frameNum] = maxRadius;
-//		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * numVerts;
-//		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + numVerts,  maxRadius * 6e-2f );
-//
-////        delete[] mesh.vertexPositions.data();
-////        delete[] mesh.triIndices.data();
-////        delete[] mesh.UVCoords;
-//    }
+    for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
+        unsigned cageFaces = cage->triIndices.size();
+
+        GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
+
+        unsigned meshVerts = mesh.vertexPositions.size();
+        vec3_t *vertexPositions = mesh.vertexPositions.data();
+
+        SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
+
+        float maxRadius = 0.0f;
+        for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
+            vec3_t vertPosition;
+            VectorCopy( vertexPositions[vertNum], vertPosition );
+            bool foundCoords = false;
+
+			SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
+			if( VectorLengthFast( vertPosition ) < 1e-3f ) {
+				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
+				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
+				// that the vertex belongs to may not find any solutions.
+				cgNotice() << "vert at origin for" << pathToMesh << "at frame" << frameNum;
+
+				cageCoord->cageTriIdx = 0;
+				vec2_t coordinates = { 0.0f, 0.0f };
+				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
+
+				foundCoords = true;
+			} else {
+				foundCoords = collisionCheck( cage, origin, vertPosition, std::numeric_limits<float>::infinity(),
+											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
+			}
+
+			if( foundCoords ) {
+				cageCoord->offset = VectorLengthFast( vertPosition );
+				maxRadius = wsw::max( maxRadius, cageCoord->offset );
+			} else {
+				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
+				return false;
+			}
+        }
+
+        this->boundingRadii[frameNum] = maxRadius;
+		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * numVerts;
+		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + numVerts,  maxRadius * 6e-2f );
+
+//        delete[] mesh.vertexPositions.data();
+//        delete[] mesh.triIndices.data();
+//        delete[] mesh.UVCoords;
+    }
 
     Com_Printf("It took %d millis\n", (int)(Sys_Milliseconds() - before));
 	return true;
@@ -623,37 +622,37 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     StaticCage *cage = std::addressof( m_loadedStaticCages[cagedMesh->loadedCageKey] );
 
     cagedMesh->transformToCageSpace( &cage->cageGeometry, filepath );
-	//applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
+	applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
     cagedMesh->offsetFromLim = new float[cagedMesh->numFrames * cagedMesh->numVertices];
     std::fill( cagedMesh->offsetFromLim, cagedMesh->offsetFromLim + cagedMesh->numFrames * cagedMesh->numVertices, 0.0f );
 
 	//cagedMesh->preserveVolumeStatic( filepath );
     //cagedMesh->optimizeStaticCageForCache();
-//
-//	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
-//    for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
-//        wsw::String filepathToLOD = wsw::String( filepath.data(), filepath.length() );
-//		unsigned lengthOfMD3Suffix = sizeof( ".md3" );
-//        filepathToLOD.insert( filepathToLOD.end() - lengthOfMD3Suffix + 1, '_' );
-//        filepathToLOD.insert( filepathToLOD.length() - lengthOfMD3Suffix + 1, std::to_string( LODnum ) );
-//
-//        cgNotice() << "next LOD" << wsw::StringView( filepathToLOD.data() );
-//
-//        auto *currLOD = new SimulatedHullsSystem::StaticCagedMesh;
-//		lastLOD->nextLOD = currLOD;
-//        if( currLOD->transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ) ) ){
-//			applyShading( wsw::StringView( filepathToLOD.data() ), currLOD );
-//			currLOD->preserveVolumeStatic( wsw::StringView( filepathToLOD.data() ) );
-//            //currLOD->optimizeStaticCagedMeshForCache();
-//			lastLOD = lastLOD->nextLOD;
-//            lastLOD->nextLOD = nullptr;
-//		} else{
-//			delete currLOD;
-//			lastLOD->nextLOD = nullptr;
-//			cgNotice() << "found" << LODnum - 1 << "LODs";
-//			break;
-//		}
-//    }
+
+	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
+    for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
+        wsw::String filepathToLOD = wsw::String( filepath.data(), filepath.length() );
+		unsigned lengthOfMD3Suffix = sizeof( ".md3" );
+        filepathToLOD.insert( filepathToLOD.end() - lengthOfMD3Suffix + 1, '_' );
+        filepathToLOD.insert( filepathToLOD.length() - lengthOfMD3Suffix + 1, std::to_string( LODnum ) );
+
+        cgNotice() << "next LOD" << wsw::StringView( filepathToLOD.data() );
+
+        auto *currLOD = new SimulatedHullsSystem::StaticCagedMesh;
+		lastLOD->nextLOD = currLOD;
+        if( currLOD->transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ) ) ){
+			applyShading( wsw::StringView( filepathToLOD.data() ), currLOD );
+			currLOD->preserveVolumeStatic( wsw::StringView( filepathToLOD.data() ) );
+            //currLOD->optimizeStaticCagedMeshForCache();
+			lastLOD = lastLOD->nextLOD;
+            lastLOD->nextLOD = nullptr;
+		} else{
+			delete currLOD;
+			lastLOD->nextLOD = nullptr;
+			cgNotice() << "found" << LODnum - 1 << "LODs";
+			break;
+		}
+    }
 
     return cagedMesh;
 }
