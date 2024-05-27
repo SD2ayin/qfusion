@@ -490,6 +490,20 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
     this->numFrames = numFrames;
 
     Geometry mesh;
+    if( mesh.vertexPositions.data() ){
+        cgNotice() << S_COLOR_RED << "not nullptr";
+    } else {
+        cgNotice() << S_COLOR_GREEN << "nullptr";
+    }
+    for( int i; i < 100; i++ ){
+        Geometry g;
+        if( g.vertexPositions.data() ){
+            cgNotice() << S_COLOR_RED << "not nullptr";
+        } else {
+            cgNotice() << S_COLOR_GREEN << "nullptr";
+        }
+        //g.vertexPositions = std::span( nullptr, 0 );
+    }
     if( !GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, 0 ) ){
         return false;
     }
@@ -516,54 +530,54 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
 
     //delete[] mesh.vertexPositions.data();
 
-    for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
-        unsigned cageFaces = cage->triIndices.size();
-
-        GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
-
-        unsigned meshVerts = mesh.vertexPositions.size();
-        vec3_t *vertexPositions = mesh.vertexPositions.data();
-
-        SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
-
-        float maxRadius = 0.0f;
-        for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
-            vec3_t vertPosition;
-            VectorCopy( vertexPositions[vertNum], vertPosition );
-            bool foundCoords = false;
-
-			SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
-			if( VectorLengthFast( vertPosition ) < 1e-3f ) {
-				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
-				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
-				// that the vertex belongs to may not find any solutions.
-				cageCoord->cageTriIdx = 0;
-				vec2_t coordinates = { 0.0f, 0.0f };
-				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
-
-				foundCoords = true;
-			} else {
-				foundCoords = collisionCheck( cage, origin, vertPosition, std::numeric_limits<float>::infinity(),
-											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
-			}
-
-			if( foundCoords ) {
-				cageCoord->offset = VectorLengthFast( vertPosition );
-				maxRadius = wsw::max( maxRadius, cageCoord->offset );
-			} else {
-				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
-				return false;
-			}
-        }
-
-        this->boundingRadii[frameNum] = maxRadius;
-		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * numVerts;
-		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + numVerts,  maxRadius * 6e-2f );
-
-//        delete[] mesh.vertexPositions.data();
-//        delete[] mesh.triIndices.data();
-//        delete[] mesh.UVCoords;
-    }
+//    for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
+//        unsigned cageFaces = cage->triIndices.size();
+//
+//        GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
+//
+//        unsigned meshVerts = mesh.vertexPositions.size();
+//        vec3_t *vertexPositions = mesh.vertexPositions.data();
+//
+//        SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
+//
+//        float maxRadius = 0.0f;
+//        for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
+//            vec3_t vertPosition;
+//            VectorCopy( vertexPositions[vertNum], vertPosition );
+//            bool foundCoords = false;
+//
+//			SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
+//			if( VectorLengthFast( vertPosition ) < 1e-3f ) {
+//				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
+//				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
+//				// that the vertex belongs to may not find any solutions.
+//				cageCoord->cageTriIdx = 0;
+//				vec2_t coordinates = { 0.0f, 0.0f };
+//				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
+//
+//				foundCoords = true;
+//			} else {
+//				foundCoords = collisionCheck( cage, origin, vertPosition, std::numeric_limits<float>::infinity(),
+//											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
+//			}
+//
+//			if( foundCoords ) {
+//				cageCoord->offset = VectorLengthFast( vertPosition );
+//				maxRadius = wsw::max( maxRadius, cageCoord->offset );
+//			} else {
+//				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
+//				return false;
+//			}
+//        }
+//
+//        this->boundingRadii[frameNum] = maxRadius;
+//		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * numVerts;
+//		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + numVerts,  maxRadius * 6e-2f );
+//
+////        delete[] mesh.vertexPositions.data();
+////        delete[] mesh.triIndices.data();
+////        delete[] mesh.UVCoords;
+//    }
 
     Com_Printf("It took %d millis\n", (int)(Sys_Milliseconds() - before));
 	return true;
@@ -609,46 +623,55 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     StaticCage *cage = std::addressof( m_loadedStaticCages[cagedMesh->loadedCageKey] );
 
     cagedMesh->transformToCageSpace( &cage->cageGeometry, filepath );
-	applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
+	//applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
     cagedMesh->offsetFromLim = new float[cagedMesh->numFrames * cagedMesh->numVertices];
     std::fill( cagedMesh->offsetFromLim, cagedMesh->offsetFromLim + cagedMesh->numFrames * cagedMesh->numVertices, 0.0f );
+
 	//cagedMesh->preserveVolumeStatic( filepath );
     //cagedMesh->optimizeStaticCageForCache();
-
-	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
-    for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
-        wsw::String filepathToLOD = wsw::String( filepath.data(), filepath.length() );
-		unsigned lengthOfMD3Suffix = sizeof( ".md3" );
-        filepathToLOD.insert( filepathToLOD.end() - lengthOfMD3Suffix + 1, '_' );
-        filepathToLOD.insert( filepathToLOD.length() - lengthOfMD3Suffix + 1, std::to_string( LODnum ) );
-
-        cgNotice() << "next LOD" << wsw::StringView( filepathToLOD.data() );
-
-        auto *currLOD = new SimulatedHullsSystem::StaticCagedMesh;
-		lastLOD->nextLOD = currLOD;
-        if( currLOD->transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ) ) ){
-			applyShading( wsw::StringView( filepathToLOD.data() ), currLOD );
-			currLOD->preserveVolumeStatic( wsw::StringView( filepathToLOD.data() ) );
-            //currLOD->optimizeStaticCagedMeshForCache();
-			lastLOD = lastLOD->nextLOD;
-            lastLOD->nextLOD = nullptr;
-		} else{
-			delete currLOD;
-			lastLOD->nextLOD = nullptr;
-			cgNotice() << "found" << LODnum - 1 << "LODs";
-			break;
-		}
-    }
+//
+//	SimulatedHullsSystem::StaticCagedMesh *lastLOD = cagedMesh;
+//    for( unsigned LODnum = 1; LODnum <= maxLODs; LODnum++ ){
+//        wsw::String filepathToLOD = wsw::String( filepath.data(), filepath.length() );
+//		unsigned lengthOfMD3Suffix = sizeof( ".md3" );
+//        filepathToLOD.insert( filepathToLOD.end() - lengthOfMD3Suffix + 1, '_' );
+//        filepathToLOD.insert( filepathToLOD.length() - lengthOfMD3Suffix + 1, std::to_string( LODnum ) );
+//
+//        cgNotice() << "next LOD" << wsw::StringView( filepathToLOD.data() );
+//
+//        auto *currLOD = new SimulatedHullsSystem::StaticCagedMesh;
+//		lastLOD->nextLOD = currLOD;
+//        if( currLOD->transformToCageSpace( &cage->cageGeometry, wsw::StringView( filepathToLOD.data() ) ) ){
+//			applyShading( wsw::StringView( filepathToLOD.data() ), currLOD );
+//			currLOD->preserveVolumeStatic( wsw::StringView( filepathToLOD.data() ) );
+//            //currLOD->optimizeStaticCagedMeshForCache();
+//			lastLOD = lastLOD->nextLOD;
+//            lastLOD->nextLOD = nullptr;
+//		} else{
+//			delete currLOD;
+//			lastLOD->nextLOD = nullptr;
+//			cgNotice() << "found" << LODnum - 1 << "LODs";
+//			break;
+//		}
+//    }
 
     return cagedMesh;
 }
 
-void getError( vec3_t *triCoords, vec3_t *triNormals, vec3_t coords, vec3_t vertexPosition, vec3_t error ){
+//void construct
+
+void getError( vec3_t *triVertices, vec3_t *triNormals, vec3_t coords, vec3_t vertexPosition, vec3_t outError ){
+    //
+
+    vec2_t coordsOnTri;
+    Vector2Copy( coords, coordsOnTri );
+    const float offset = coords[2];
+
     vec3_t firstToSecond;
     vec3_t firstToThird;
 
-    VectorSubtract( triCoords[1], triCoords[0], firstToSecond );
-    VectorSubtract( triCoords[2], triCoords[0], firstToThird );
+    VectorSubtract( triVertices[1], triVertices[0], firstToSecond );
+    VectorSubtract( triVertices[2], triVertices[0], firstToThird );
 
     vec3_t normalDiffSecond;
     vec3_t normalDiffThird;
@@ -658,13 +681,13 @@ void getError( vec3_t *triCoords, vec3_t *triNormals, vec3_t coords, vec3_t vert
 
     vec3_t position;
 
-    VectorMA( triCoords[0], coords[0], firstToSecond, position );
-    VectorMA( position, coords[1], firstToThird, position );
-    VectorMA( position, coords[2], triNormals[0], position );
-    VectorMA( position, coords[0] * coords[2], normalDiffSecond, position );
-    VectorMA( position, coords[1] * coords[2], normalDiffThird, position );
+    VectorMA( triVertices[0], coordsOnTri[0], firstToSecond, position );
+    VectorMA( position, coordsOnTri[1], firstToThird, position );
+    VectorMA( position, offset, triNormals[0], position );
+    VectorMA( position, coordsOnTri[0] * offset, normalDiffSecond, position );
+    VectorMA( position, coordsOnTri[1] * offset, normalDiffThird, position );
 
-    VectorSubtract( position, vertexPosition, error );
+    VectorSubtract( position, vertexPosition, outError );
 }
 
 void SimulatedHullsSystem::RegisterDynamicCage( const wsw::String &identifier ) {

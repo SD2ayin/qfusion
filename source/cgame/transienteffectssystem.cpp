@@ -590,7 +590,7 @@ void TransientEffectsSystem::spawnExplosionHulls( const float *fireOrigin, const
 				.rotation = rotation,
 				.scale    = hullScale.get(),
 				.timeout  = hullLifetime.get(),
-				//.sharedCageCagedMeshes = cgs.media.anotherExample2,
+				.sharedCageCagedMeshes = cgs.media.anotherExample2,
 		};
 
         SimulatedHullsSystem::DynamicCageHullParams dynamicHullParams = {

@@ -178,7 +178,7 @@ public:
 //    CachedStaticCagedMesh testExample2 { this, wsw::StringView( "gfx/hulls/testExample_second.md3" ) };
 //
 //    CachedStaticCagedMesh anotherExample { this, wsw::StringView( "gfx/hulls/anotherExample_mesh.md3" ) };
-    //CachedStaticCagedMesh anotherExample2 { this, wsw::StringView( "gfx/hulls/anotherExample_second.md3" ) };
+    CachedStaticCagedMesh anotherExample2 { this, wsw::StringView( "gfx/hulls/anotherExample_second.md3" ) };
 
     CachedDynamicCagedMesh dynamicExample { this, wsw::StringView( "gfx/hulls/dynamicExample_first.md3" ) };
 

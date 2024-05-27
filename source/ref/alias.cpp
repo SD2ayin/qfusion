@@ -478,9 +478,9 @@ bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
     }
 
     if( outGeometry->vertexPositions.data() ){
-        delete[] outGeometry->vertexPositions.data();
-        delete[] outGeometry->triIndices.data();
-        delete[] outGeometry->UVCoords;
+//        delete[] outGeometry->vertexPositions.data();
+//        delete[] outGeometry->triIndices.data();
+//        delete[] outGeometry->UVCoords;
     }
 
     //
