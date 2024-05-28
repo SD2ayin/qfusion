@@ -867,7 +867,7 @@ void Matrix3_Normalize( mat3_t m ) {
 	VectorNormalize( &m[6] );
 }
 
-void Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
+bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
 	vec3_t n;
 	CrossProduct( &coefficients[3], &coefficients[6], n );
 	vec3_t m;
@@ -882,13 +882,14 @@ void Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
 		VectorScale( outSolution, rcpDeterminant, outSolution );
 	} else {
 		/// tmp
-		outSolution[0] = -1.f;
-		outSolution[1] = -1.f;
-		outSolution[2] = -1.f;
+//		outSolution[0] = -1.f;
+//		outSolution[1] = -1.f;
+//		outSolution[2] = -1.f;
 		/// end tmp
-		//Com_Printf( "%s determinant was 0\n", S_COLOR_RED );
-		return;
+		Com_Printf( "%s determinant was 0\n", S_COLOR_RED );
+		return false;
 	}
+	return true;
 }
 
 //============================================================================

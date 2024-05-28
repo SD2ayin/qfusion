@@ -6,10 +6,29 @@
 
 typedef uint16_t tri[3];
 
+struct Geometry;
+
+// having this function that's in alias here, with Geometry pre-declared seems very weird and could be confusing..
+bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
+
 struct Geometry { // should probably have a destructor and constructor methods from alias.cpp
     std::span<vec3_t> vertexPositions;
     std::span<tri> triIndices;
     vec2_t *UVCoords; //texture coords, equal to verts
+
+    Geometry(){
+        UVCoords = nullptr;
+    }
+    Geometry( const char *fileName, const char *meshName = nullptr, const unsigned chosenFrame = 0 ){
+        GetGeometryFromFileAliasMD3( fileName, this, meshName, chosenFrame );
+    }
+    ~Geometry(){
+        if( vertexPositions.data() ) {
+            delete[] vertexPositions.data();
+            delete[] triIndices.data();
+            delete[] UVCoords;
+        }
+    }
 };
 
 struct TexturedGeometry {

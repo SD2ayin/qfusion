@@ -450,7 +450,7 @@ unsigned GetNumFramesInMD3( const char *fileName ) {
 	return numFrames;
 }
 
-bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 ) {
+bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName, const unsigned chosenFrame ) {
     unsigned *fileBuffer;
     (void)R_LoadFile( fileName, (void **)&fileBuffer );
     auto fileNameAsView = wsw::StringView( fileName );
@@ -475,6 +475,12 @@ bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
     if( numMeshes <= 0 ) {
         cgError() << fileNameAsView << "has no meshes";
         return false;
+    }
+
+    if( outGeometry->vertexPositions.data() ){
+        delete[] outGeometry->vertexPositions.data();
+        delete[] outGeometry->triIndices.data();
+        delete[] outGeometry->UVCoords;
     }
 
     //
@@ -545,42 +551,42 @@ bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
     return true;
 }
 
-Geometry GetGeometryFromLoadedAliasMD3( model_t *model, const char *meshName ){
-    Geometry geometry;
-
-    const auto before = Sys_Microseconds();
-    const auto *aliasModel = ( const maliasmodel_t * )model->extradata;
-    for( int meshNum = 0; meshNum < aliasModel->nummeshes; meshNum++ ) {
-        maliasmesh_s mesh = aliasModel->meshes[meshNum];
-        if( !strcmp( mesh.name, meshName ) ){
-            cgNotice() << wsw::StringView( mesh.name ) << wsw::StringView( meshName );
-            const unsigned numVerts = mesh.numverts;
-            const unsigned numTris  = mesh.numtris;
-            auto *const vertexPositions = new float[numVerts][3];
-            auto *const triIndices      = new tri[numTris];
-            std::span<vec3_t> verticesSpan(vertexPositions, numVerts);
-            std::span<tri> triSpan(triIndices, numTris);
-            for( int vertNum = 0; vertNum < mesh.numverts; vertNum++ ) {
-                vertexPositions[vertNum][0] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[0]);
-                vertexPositions[vertNum][1] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[1]);
-                vertexPositions[vertNum][2] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[2]);
-                cgNotice() << "vertex positions " << vertexPositions[vertNum][0] << vertexPositions[vertNum][1] << vertexPositions[vertNum][2];
-            }
-            for( int triNum = 0; triNum < mesh.numtris; triNum++ ){
-                triIndices[triNum][0] = mesh.elems[3*triNum+0];
-                triIndices[triNum][1] = mesh.elems[3*triNum+1];
-                triIndices[triNum][2] = mesh.elems[3*triNum+2];
-                cgNotice() << "triangle indices " << triIndices[triNum][0] << triIndices[triNum][1] << triIndices[triNum][2];
-            }
-
-            geometry.vertexPositions = verticesSpan;
-            geometry.triIndices      = triSpan;
-        }
-    }
-    Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
-
-    return geometry;
-}
+//Geometry GetGeometryFromLoadedAliasMD3( model_t *model, const char *meshName ){
+//    Geometry geometry;
+//
+//    const auto before = Sys_Microseconds();
+//    const auto *aliasModel = ( const maliasmodel_t * )model->extradata;
+//    for( int meshNum = 0; meshNum < aliasModel->nummeshes; meshNum++ ) {
+//        maliasmesh_s mesh = aliasModel->meshes[meshNum];
+//        if( !strcmp( mesh.name, meshName ) ){
+//            cgNotice() << wsw::StringView( mesh.name ) << wsw::StringView( meshName );
+//            const unsigned numVerts = mesh.numverts;
+//            const unsigned numTris  = mesh.numtris;
+//            auto *const vertexPositions = new float[numVerts][3];
+//            auto *const triIndices      = new tri[numTris];
+//            std::span<vec3_t> verticesSpan(vertexPositions, numVerts);
+//            std::span<tri> triSpan(triIndices, numTris);
+//            for( int vertNum = 0; vertNum < mesh.numverts; vertNum++ ) {
+//                vertexPositions[vertNum][0] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[0]);
+//                vertexPositions[vertNum][1] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[1]);
+//                vertexPositions[vertNum][2] = MD3_XYZ_SCALE * (float) ( mesh.vertexes[vertNum].point[2]);
+//                cgNotice() << "vertex positions " << vertexPositions[vertNum][0] << vertexPositions[vertNum][1] << vertexPositions[vertNum][2];
+//            }
+//            for( int triNum = 0; triNum < mesh.numtris; triNum++ ){
+//                triIndices[triNum][0] = mesh.elems[3*triNum+0];
+//                triIndices[triNum][1] = mesh.elems[3*triNum+1];
+//                triIndices[triNum][2] = mesh.elems[3*triNum+2];
+//                cgNotice() << "triangle indices " << triIndices[triNum][0] << triIndices[triNum][1] << triIndices[triNum][2];
+//            }
+//
+//            geometry.vertexPositions = verticesSpan;
+//            geometry.triIndices      = triSpan;
+//        }
+//    }
+//    Com_Printf("It took %d micros\n", (int)(Sys_Microseconds() - before));
+//
+//    return geometry;
+//}
 
 model_t *R_AliasModelLOD( const entity_t *e, const float *viewOrigin, float fovDotScale ) {
 	if( !e->model->numlods || ( e->flags & RF_FORCENOLOD ) ) {

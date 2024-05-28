@@ -5591,7 +5591,7 @@ static void CG_RegisterWeaponModels( void ) {
 
 }
 
-bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
+//bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, const char *meshName = nullptr, const unsigned chosenFrame = 0 );
 
 static void CG_RegisterModels( void ) {
 	if( cgs.precacheModelsStart == MAX_MODELS ) {
