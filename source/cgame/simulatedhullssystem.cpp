@@ -1004,7 +1004,7 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 //			} else {
 //				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
 //				return false;
-//			}
+//			}//
 		}
 
 		this->maxOffsetFromCageForFrame[frameNum] = maxOffsetFromCage;
