@@ -197,10 +197,9 @@ public:
         unsigned numCagedMeshes { 1u };
     };
 
-	static void vertexPosFromStaticCage( unsigned vertIdx, const StaticCageCoordinate *vertCoords, float scale,
-										 const tri *cageTriIndices, const vec3_t *vertexMoveDirections, //TODO: should probably be cageVertexMoveDirs
-										 const float *limitsAtDirections, const float *offsetsFromLim,
-										 const vec3_t origin, vec3_t outPos );
+	static void vertexPosFromStaticCage( const StaticCageCoordinate vertCoord, float scale, const tri *cageTriIndices,
+										 const vec3_t *vertexMoveDirections, const float *limitsAtDirections,
+										 const float offsetFromLim, vec3_t outPos ); // //TODO: vertexMoveDirections should probably be cageVertexMoveDirs
 
     void RegisterStaticCage( const wsw::String &identifier );
 
@@ -239,7 +238,7 @@ public:
         vec2_t *UVCoords;
         ShadingLayer *shadingLayers;
         unsigned numShadingLayers;
-        float maxOffsetFromCage; // maximum offset of the mesh from the cage triangles
+        float *maxOffsetFromCageForFrame; // maximum offset of the mesh from the cage triangles
         DynamicCagedMesh *nextLOD { nullptr }; // pointer to the next lower detail version
 
         bool transformToCageSpace( DynamicCage *cage, wsw::StringView pathToMesh );
@@ -264,10 +263,10 @@ public:
         // float curvatureDeviationForSmoothing ... or something like that
     };
 
-    static void vertexPosFromDynamicCage( unsigned vertIdx, const DynamicCageCoordinate *vertCoords, float scale,
-                                          const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
-                                          const float *limitsAtDirections, const float *offsetsFromLim,
-                                          const vec3_t origin, vec3_t outPos );
+    static void vertexPosFromDynamicCage( const DynamicCageCoordinate vertCoord, float scale,
+										  const tri *cageTriIndices, const vec3_t *vertexPositions,
+										  const vec3_t *vertexNormals, const float *limitsAtDirections,
+										  const float offsetFromLim, vec3_t outPos );
 
     void RegisterDynamicCage( const wsw::String &identifier );
 

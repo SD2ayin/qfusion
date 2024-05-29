@@ -886,10 +886,56 @@ bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
 //		outSolution[1] = -1.f;
 //		outSolution[2] = -1.f;
 		/// end tmp
-		Com_Printf( "%s determinant was 0\n", S_COLOR_RED );
+		//Com_Printf( "%s determinant was 0\n", S_COLOR_RED );
 		return false;
 	}
 	return true;
+}
+
+bool testNewThing( vec3_t initialGuess, float maxError, float thresholdError, unsigned maxIterations,
+				   std::function<void(vec3_t, vec3_t)> function,
+				   std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution ){
+	return true;
+}
+
+bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresholdError,
+						 unsigned maxIterations, std::function<void(vec3_t, vec3_t)> function,
+						 std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution ){
+	vec3_t guess = { initialGuess[0], initialGuess[1], initialGuess[2] };
+
+	vec3_t functionResult;
+	mat3_t Jacobian;
+
+	const float thresholdErrorSquared = thresholdError * thresholdError;
+	bool solutionFound = false;
+	for( int i = 0; i < maxIterations; i++ ) {
+		function( guess, functionResult );
+		//Com_Printf("iteration:%i error:%f\n", i, VectorLengthSquared( functionResult ));
+
+		if( VectorLengthSquared( functionResult ) < thresholdErrorSquared ){
+			break;
+		}
+
+		getJacobianForFunction( guess, Jacobian );
+
+		vec3_t offset;
+		if( !Solve3by3( Jacobian, functionResult, offset ) ){
+			break;
+		}
+
+		VectorSubtract( guess, offset, guess );
+	}
+
+	const float maxErrorSquared = maxError * maxError;
+	if( VectorLengthSquared( functionResult ) < maxErrorSquared ){
+		solutionFound = true;
+	}
+
+	if( solutionFound ){
+		VectorCopy( guess, outSolution );
+	}
+
+	return solutionFound;
 }
 
 //============================================================================

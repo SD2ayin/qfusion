@@ -11,6 +11,7 @@
 #include <memory>
 #include <unordered_map>
 #include <algorithm>
+#include <functional>
 
 struct IcosphereData {
 	std::span<const vec4_t> vertices;
@@ -381,9 +382,6 @@ void SimulatedHullsSystem::StaticCagedMesh::preserveVolumeStatic( wsw::StringVie
             }
 		}
 
-//		delete[] mesh.vertexPositions.data();
-//		delete[] mesh.triIndices.data();
-//      delete[] mesh.UVCoords;
 	}
 }
 
@@ -494,32 +492,25 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
     if( !GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, 0 ) ){
         return false;
     }
-    unsigned numVerts = mesh.vertexPositions.size();
+    const unsigned meshVerts = mesh.vertexPositions.size();
 
-    this->numVertices = numVerts;
-//    this->triIndices  = mesh.triIndices;
-//    this->UVCoords    = mesh.UVCoords;
+    this->numVertices = meshVerts;
 
     // i find this so ugly.. isn't there something like copy()
     auto triIndicesCopy = new tri[mesh.triIndices.size()];
-    auto UVCoordsCopy  = new vec2_t[numVerts];
+    auto UVCoordsCopy  = new vec2_t[meshVerts];
     std::memcpy( triIndicesCopy, mesh.triIndices.data(), mesh.triIndices.size() * sizeof(tri) );
-    std::memcpy( UVCoordsCopy, mesh.UVCoords, numVerts * sizeof(vec2_t) );
+    std::memcpy( UVCoordsCopy, mesh.UVCoords, meshVerts * sizeof(vec2_t) );
     this->triIndices = std::span( triIndicesCopy, mesh.triIndices.size() );
     this->UVCoords   = UVCoordsCopy;
 
-    this->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[numVerts * numFrames];
-	this->offsetFromLim = new float[numVerts * numFrames];
+    this->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[meshVerts * numFrames];
+	this->offsetFromLim = new float[meshVerts * numFrames];
     this->boundingRadii = new float[numFrames];
 
-    //delete[] mesh.vertexPositions.data();
-
     for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
-        unsigned cageFaces = cage->triIndices.size();
-
         GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
 
-        unsigned meshVerts = mesh.vertexPositions.size();
         vec3_t *vertexPositions = mesh.vertexPositions.data();
 
         SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
@@ -535,7 +526,6 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
 				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
 				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
 				// that the vertex belongs to may not find any solutions.
-				cgNotice() << "vert at origin for" << pathToMesh << "at frame" << frameNum;
 
 				cageCoord->cageTriIdx = 0;
 				vec2_t coordinates = { 0.0f, 0.0f };
@@ -557,12 +547,9 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
         }
 
         this->boundingRadii[frameNum] = maxRadius;
-		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * numVerts;
-		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + numVerts,  maxRadius * 6e-2f );
+		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * meshVerts;
+		std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + meshVerts,  maxRadius * 6e-2f );
 
-//        delete[] mesh.vertexPositions.data();
-//        delete[] mesh.triIndices.data();
-//        delete[] mesh.UVCoords;
     }
 
     Com_Printf("It took %d millis\n", (int)(Sys_Milliseconds() - before));
@@ -644,20 +631,78 @@ SimulatedHullsSystem::StaticCagedMesh *SimulatedHullsSystem::RegisterStaticCaged
     return cagedMesh;
 }
 
-//void construct
+void JacobianForDynamicCageTransform( vec3_t coords, const vec3_t *triPositions, const vec3_t *triNormals,
+									  mat3_t outJacobian ) {
+	const vec2_t coordsOnTri = { coords[0], coords[1] }; // 2: vertCoords
+	const float L = coords[2];
 
-void getError( vec3_t *triVertices, vec3_t *triNormals, vec3_t coords, vec3_t vertexPosition, vec3_t outError ){
-    //
+	vec3_t position;
 
-    vec2_t coordsOnTri;
-    Vector2Copy( coords, coordsOnTri );
-    const float offset = coords[2];
+	vec3_t firstToSecond;
+	vec3_t firstToThird;
 
-    vec3_t firstToSecond;
+	VectorSubtract( triPositions[1], triPositions[0], firstToSecond );
+	VectorSubtract( triPositions[2], triPositions[0], firstToThird );
+
+	vec3_t normalDiffSecond;
+	vec3_t normalDiffThird;
+
+	VectorSubtract( triNormals[1], triNormals[0], normalDiffSecond );
+	VectorSubtract( triNormals[2], triNormals[0], normalDiffThird );
+
+	vec3_t firstColumn;
+	vec3_t secondColumn;
+	vec3_t thirdColumn;
+
+	VectorMA( firstToSecond, L, normalDiffSecond, firstColumn );
+	VectorMA( firstToThird, L, normalDiffThird, secondColumn );
+	VectorMA( triNormals[0], coordsOnTri[0], normalDiffSecond, thirdColumn );
+	VectorMA( thirdColumn, coordsOnTri[1], normalDiffThird, thirdColumn );
+
+	const unsigned numRows = 3;
+	VectorCopy( firstColumn, &outJacobian[0*numRows] );
+	VectorCopy( secondColumn, &outJacobian[1*numRows] );
+	VectorCopy( thirdColumn, &outJacobian[2*numRows] );
+	// we do NOT normalize the outcome of the linear combination of normals to keep the math simple,
+	// such that the moveDir is a linear combination of the normals (it is not upon normalization)
+
+//	VectorMA( triPositions[0], coordsOnTri[0], firstToSecond, outPos );
+//	VectorMA( outPos, coordsOnTri[1], firstToThird, outPos );
+//	VectorMA( outPos, L, triNormals[0], outPos );
+//	VectorMA( outPos, coordsOnTri[0] * L, normalDiffSecond, outPos );
+//	VectorMA( outPos, coordsOnTri[1] * L, normalDiffThird, outPos );
+
+}
+
+void vertexPosForDynamicCageTransform( vec3_t coords, const vec3_t *triPositions, const vec3_t *triNormals,
+									   vec3_t outPos ) {
+
+	const vec2_t coordsOnTri = { coords[0], coords[1] }; // 2: vertCoords
+	const float L = coords[2];
+
+	//vec3_t position;
+
+//	const float coeff0 = 1 - (coordsOnTri[0] + coordsOnTri[1]);
+//	const float coeff1 = coordsOnTri[0];
+//	const float coeff2 = coordsOnTri[1];
+//
+//	VectorScale( triPositions[0], coeff0, position );
+//	VectorMA( position, coeff1, triPositions[1], position );
+//	VectorMA( position, coeff2, triPositions[2], position );
+//
+//	vec3_t moveDir;
+//	VectorScale( triNormals[0], coeff0, moveDir );
+//	VectorMA( moveDir, coeff1, triNormals[1], moveDir );
+//	VectorMA( moveDir, coeff2, triNormals[2], moveDir );
+//	// we do NOT normalize here to keep the math simple, such that the moveDir is a linear combination of the normals (it is not upon normalization)
+//
+//	VectorMA( position, L, moveDir, outPos );
+
+	vec3_t firstToSecond;
     vec3_t firstToThird;
 
-    VectorSubtract( triVertices[1], triVertices[0], firstToSecond );
-    VectorSubtract( triVertices[2], triVertices[0], firstToThird );
+    VectorSubtract( triPositions[1], triPositions[0], firstToSecond );
+    VectorSubtract( triPositions[2], triPositions[0], firstToThird );
 
     vec3_t normalDiffSecond;
     vec3_t normalDiffThird;
@@ -665,15 +710,52 @@ void getError( vec3_t *triVertices, vec3_t *triNormals, vec3_t coords, vec3_t ve
     VectorSubtract( triNormals[1], triNormals[0], normalDiffSecond );
     VectorSubtract( triNormals[2], triNormals[0], normalDiffThird );
 
-    vec3_t position;
+    VectorMA( triPositions[0], coordsOnTri[0], firstToSecond, outPos );
+    VectorMA( outPos, coordsOnTri[1], firstToThird, outPos );
+    VectorMA( outPos, L, triNormals[0], outPos );
+    VectorMA( outPos, coordsOnTri[0] * L, normalDiffSecond, outPos );
+    VectorMA( outPos, coordsOnTri[1] * L, normalDiffThird, outPos );
+	// we do NOT normalize the outcome of the linear combination of normals to keep the math simple,
+	// such that the moveDir is a linear combination of the normals (it is not upon normalization)
+}
 
-    VectorMA( triVertices[0], coordsOnTri[0], firstToSecond, position );
-    VectorMA( position, coordsOnTri[1], firstToThird, position );
-    VectorMA( position, offset, triNormals[0], position );
-    VectorMA( position, coordsOnTri[0] * offset, normalDiffSecond, position );
-    VectorMA( position, coordsOnTri[1] * offset, normalDiffThird, position );
+void getErrorForDynamicCageTransform( vec3_t coords, const vec3_t *triPositions, const vec3_t *triNormals,
+									  const vec3_t vertexPosition, vec3_t outError ){
 
-    VectorSubtract( position, vertexPosition, outError );
+//    vec2_t coordsOnTri;
+//    Vector2Copy( coords, coordsOnTri );
+//    const float offset = coords[2];
+//
+//    vec3_t firstToSecond;
+//    vec3_t firstToThird;
+//
+//    VectorSubtract( triVertices[1], triVertices[0], firstToSecond );
+//    VectorSubtract( triVertices[2], triVertices[0], firstToThird );
+//
+//    vec3_t normalDiffSecond;
+//    vec3_t normalDiffThird;
+//
+//    VectorSubtract( triNormals[1], triNormals[0], normalDiffSecond );
+//    VectorSubtract( triNormals[2], triNormals[0], normalDiffThird );
+//
+//    vec3_t position;
+//
+//    VectorMA( triVertices[0], coordsOnTri[0], firstToSecond, position );
+//    VectorMA( position, coordsOnTri[1], firstToThird, position );
+//    VectorMA( position, offset, triNormals[0], position );
+//    VectorMA( position, coordsOnTri[0] * offset, normalDiffSecond, position );
+//    VectorMA( position, coordsOnTri[1] * offset, normalDiffThird, position );
+	cgNotice() << "AAa";
+	vec3_t resultingPosition;
+
+	vertexPosForDynamicCageTransform( coords, triPositions, triNormals, resultingPosition );
+
+	cgNotice() << "coords:" << coords[0] << coords[1] << coords[2];
+	cgNotice() << "triPositions[0]:" << triPositions[0][0] << triPositions[0][1] << triPositions[0][2];
+	cgNotice() << "triNormals[0]:" << triNormals[0][0] << triNormals[0][1] << triNormals[0][2];
+	cgNotice() << "resultingPosition:" << resultingPosition[0] << resultingPosition[1] << resultingPosition[2];
+
+    VectorSubtract( resultingPosition, vertexPosition, outError );
 }
 
 void SimulatedHullsSystem::RegisterDynamicCage( const wsw::String &identifier ) {
@@ -746,8 +828,193 @@ void SimulatedHullsSystem::RegisterDynamicCage( const wsw::String &identifier ) 
     cgNotice() << "it took" << Sys_Milliseconds() - before << "millis";
 }
 
-bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *cage, wsw::StringView pathToMesh ){
+//void add(vec3_t x, int y) { cgNotice() << x[0] + y; }
+//void multiply(vec3_t x, int y) { cgNotice() << x[0] * y; }
+//
+//// Function that accepts an object of
+//// type std::function<> as a parameter
+//// as well
+//void invoke(vec3_t x, int y, std::function<void(vec3_t, int)> func)
+//{
+//	return func(x, y);
+//}
 
+
+
+bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *cage, wsw::StringView pathToMesh ){
+	const auto before = Sys_Milliseconds();
+	const Geometry *initialCageGeometry = &cage->cageInitialGeometry;
+
+	vec3_t origin = { 0.0f, 0.0f, 0.0f };
+
+	unsigned numFrames = GetNumFramesInMD3( pathToMesh.data() );
+	if( numFrames == cage->numFrames ) {
+		cgNotice() << "number of frames in caged mesh:" << numFrames;
+		this->numFrames = numFrames;
+	} else {
+		cgNotice() << S_COLOR_RED << "number of frames in dynamic caged mesh doesnt match number of frames in cage";
+	}
+
+	Geometry mesh;
+	if( !GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, 0 ) ){
+		return false;
+	}
+	const unsigned meshVerts = mesh.vertexPositions.size();
+
+	this->numVertices = meshVerts;
+
+	// i find this so ugly.. isn't there something like copy()
+	auto triIndicesCopy = new tri[mesh.triIndices.size()];
+	auto UVCoordsCopy  = new vec2_t[meshVerts];
+	std::memcpy( triIndicesCopy, mesh.triIndices.data(), mesh.triIndices.size() * sizeof(tri) );
+	std::memcpy( UVCoordsCopy, mesh.UVCoords, meshVerts * sizeof(vec2_t) );
+	this->triIndices = std::span( triIndicesCopy, mesh.triIndices.size() );
+	this->UVCoords   = UVCoordsCopy;
+
+	this->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[meshVerts * numFrames];
+	this->offsetFromLim = new float[meshVerts * numFrames];
+	this->maxOffsetFromCageForFrame = new float[numFrames];
+
+	const unsigned cageVerts = initialCageGeometry->vertexPositions.size();
+	auto cageVertPositions = (vec3_t *)alloca( sizeof( vec3_t ) * cageVerts );
+	auto cageVertNormals   = (vec3_t *)alloca( sizeof( vec3_t ) * cageVerts );
+	std::memcpy( initialCageGeometry->vertexPositions.data(), cageVertPositions, cageVerts * sizeof(vec3_t) );
+
+	std::span<tri> cageTriIndices = initialCageGeometry->triIndices;
+	const unsigned cageFaces = cageTriIndices.size();
+
+	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
+		const int lastFrame = (int)frameNum - 1;
+		if( lastFrame >= 0 ) {
+			vec3_t *distancesTravelled = cage->vertexVelocities + cageVerts * lastFrame; // velocity [units/frame] * 1 [frame]
+			for( unsigned vertNum = 0; vertNum < cageVerts; vertNum++ ){
+				VectorAdd( cageVertPositions[vertNum], distancesTravelled[vertNum], cageVertPositions[vertNum] );
+			}
+		}
+
+		///
+		// TODO: this could be more accurate with getVolume( cageVertPositions, etc ) and avgCageExtent = (volume)^(1/3)
+		BoundsBuilder cageBoundsBuilder;
+		vec3_t cageMins, cageMaxs;
+		for( unsigned vertNum = 0; vertNum < cageVerts; vertNum++ ) {
+			cageBoundsBuilder.addPoint( cageVertPositions[vertNum] );
+		}
+		cageBoundsBuilder.storeTo( cageMins, cageMaxs );
+		const float avgCageExtent = 0.333f * ( cageMaxs[0] - cageMins[0] + cageMaxs[1] - cageMins[1] + cageMaxs[2] - cageMins[2] );
+		///
+		constexpr float avgVertexSeparation = 3.0f/100; // percentage of average extent based on a cube
+		const float maxAllowableError = 0.2f * avgVertexSeparation;
+		const float thresholdError    = 0.005f * avgVertexSeparation;
+
+		vec3_t initialCoordsGuess = { 0.333f, 0.333f, 0.2f * avgCageExtent };
+
+		calculateNormals( cageTriIndices, cageVerts, cageVertPositions, cageVertNormals );
+
+		GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
+		vec3_t *meshVertPositions = mesh.vertexPositions.data();
+
+		SimulatedHullsSystem::StaticCageCoordinate *cageCoordinates = &this->vertexCoordinates[frameNum * meshVerts];
+
+		float maxOffsetFromCage = 0.0f;
+		for( unsigned vertNum = 0; vertNum < meshVerts; vertNum++ ) {
+			vec3_t meshVertPosition;
+			VectorCopy( meshVertPositions[vertNum], meshVertPosition );
+			bool foundCoords = false;
+
+			SimulatedHullsSystem::StaticCageCoordinate *cageCoord = &cageCoordinates[vertNum];
+			cageCoord->offset = std::numeric_limits<float>::infinity();
+
+			for( unsigned faceNum = 0; faceNum < cageFaces; faceNum++ ){
+				const uint16_t *faceIndices = cageTriIndices[faceNum];
+				vec3_t triPositions[3];
+				vec3_t triNormals[3];
+
+				getTriCoords( faceIndices, cageVertPositions, triPositions );
+				getTriNormals( faceIndices, cageVertNormals, triNormals );
+
+				std::function<void( vec3_t, vec3_t )> function = [triPositions, triNormals, meshVertPosition]( vec3_t coords, vec3_t outError ) {
+					getErrorForDynamicCageTransform( coords, triPositions, triNormals, meshVertPosition, outError );
+				};
+				std::function<void( vec3_t, mat3_t )> getFunctionJacobian = [triPositions, triNormals]( vec3_t coords, vec3_t outJacobian ){
+					JacobianForDynamicCageTransform( coords, triPositions, triNormals, outJacobian );
+				};
+
+				vec3_t error;
+				function( initialCoordsGuess, error );
+				cgNotice() << "initial guess:" << initialCoordsGuess[0] << initialCoordsGuess[1] << initialCoordsGuess[2];
+				cgNotice() << "initial error:" << VectorLengthFast(error) << error[0] << error[1] << error[2];
+
+				constexpr unsigned maxIterations = 12; // arbitrarily chosen, not sure if optimal
+				vec3_t outCoords;
+
+				float offset;
+				if( findRootVec3Newton( initialCoordsGuess, maxAllowableError, thresholdError,
+										maxIterations, function, getFunctionJacobian,outCoords ) ) {
+					// convert the L coordinate to physical offset that we did not do inside the function:
+					vec3_t linCombiOfNormals;
+					VectorScale( triNormals[0], 1 - ( outCoords[0] + outCoords[1] ), linCombiOfNormals );
+					VectorMA( linCombiOfNormals, outCoords[0], triNormals[1], linCombiOfNormals );
+					VectorMA( linCombiOfNormals, outCoords[1], triNormals[2], linCombiOfNormals );
+					offset = outCoords[2] * Q_RSqrt( VectorLengthSquared(linCombiOfNormals) );
+				} else {
+					continue;
+				}
+				vec2_t coordsOnTri = { outCoords[0], outCoords[1] };
+
+				constexpr float margin = 5e-3f; // to account for floating point error and solver error
+				const float compareValue = offset > 0.0f ? offset : 2 * abs( offset ); // prefer positive offset
+				const bool isOnTri = ((coordsOnTri[0] + coordsOnTri[1]) < 1.0f + margin) &&
+						              (coordsOnTri[0] > 0.0f - margin) && (coordsOnTri[1] > 0.0f - margin);
+				if( isOnTri && ( compareValue < cageCoord->offset ) ){
+					cageCoord->offset = offset;
+					cageCoord->cageTriIdx = faceNum;
+					cageCoord->coordsOnCageTri[0] = coordsOnTri[0];
+					cageCoord->coordsOnCageTri[1] = coordsOnTri[1];
+
+//					cgNotice() << "offset:" << offset;
+//					vec3_t error;
+//					function( outCoords, error );
+//					cgNotice() << "error:" << VectorLengthFast( error );
+//					cgNotice() << "relative error:" << VectorLengthFast( error ) * Q_Rcp( avgCageExtent );
+				}
+			}
+
+			if( cageCoord->offset == std::numeric_limits<float>::infinity() ){
+				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum;
+				return false;
+			}
+//			if( VectorLengthFast( meshVertPosition ) < 1e-3f ) {
+//				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
+//				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
+//				// that the vertex belongs to may not find any solutions.
+//
+//				cageCoord->cageTriIdx = 0;
+//				vec2_t coordinates = { 0.0f, 0.0f };
+//				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
+//
+//				foundCoords = true;
+//			} else {
+//				foundCoords = collisionCheck( cage, origin, meshVertPosition, std::numeric_limits<float>::infinity(),
+//											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
+//			}
+//
+//			if( foundCoords ) {
+//				cageCoord->offset = VectorLengthFast( meshVertPosition );
+//				maxRadius = wsw::max( maxRadius, cageCoord->offset );
+//			} else {
+//				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
+//				return false;
+//			}
+		}
+
+		this->maxOffsetFromCageForFrame[frameNum] = maxOffsetFromCage;
+		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * meshVerts;
+		//std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + meshVerts,  maxRadius * 6e-2f );
+
+	}
+
+	Com_Printf("It took %d millis\n", (int)(Sys_Milliseconds() - before));
+	return true;
 }
 
 SimulatedHullsSystem::DynamicCagedMesh *SimulatedHullsSystem::RegisterDynamicCagedMesh( const char *name ) {
@@ -788,7 +1055,7 @@ SimulatedHullsSystem::DynamicCagedMesh *SimulatedHullsSystem::RegisterDynamicCag
 
     DynamicCage *cage = std::addressof( m_loadedDynamicCages[cagedMesh->loadedCageKey] );
 
-    //cagedMesh->transformToCageSpace( &cage, filepath ); should check the mesh has the SAME NUMBER OF FRAMES as the cage
+    //cagedMesh->transformToCageSpace( cage, filepath ); // should check the mesh has the SAME NUMBER OF FRAMES as the cage
     //applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
     cagedMesh->offsetFromLim = new float[cagedMesh->numFrames * cagedMesh->numVertices];
     std::fill( cagedMesh->offsetFromLim, cagedMesh->offsetFromLim + cagedMesh->numFrames * cagedMesh->numVertices, 0.0f );
@@ -1484,43 +1751,6 @@ void SimulatedHullsSystem::setupHullVertices( BaseKeyframedHull *hull, const flo
 
 	VectorCopy( origin, hull->origin );
 	hull->scale = scale;
-}
-
-void calculateNormals( std::span<tri> triIndices, unsigned numVerts, vec3_t *vertexPositions, vec3_t *outNormals ){
-	tri *tris = triIndices.data();
-	unsigned numTris = triIndices.size();
-
-	for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
-		VectorSet( outNormals[vertNum], 0.0f, 0.0f, 0.0f );
-	}
-
-	for( int triNum = 0; triNum < numTris; triNum++ ) {
-		const unsigned firstVertIdx  = tris[triNum][0];
-		const unsigned secondVertIdx = tris[triNum][1];
-		const unsigned thirdVertIdx  = tris[triNum][2];
-
-		vec3_t triCoords[3];
-		VectorCopy( vertexPositions[firstVertIdx], triCoords[0] );
-		VectorCopy( vertexPositions[secondVertIdx], triCoords[1] );
-		VectorCopy( vertexPositions[thirdVertIdx], triCoords[2] );
-
-		vec3_t vecToSecondVert;
-		vec3_t vecToThirdVert;
-		VectorSubtract( triCoords[1], triCoords[0], vecToSecondVert );
-		VectorSubtract( triCoords[2], triCoords[0], vecToThirdVert );
-
-		vec3_t normal;
-		CrossProduct( vecToThirdVert, vecToSecondVert, normal );
-
-		VectorAdd( outNormals[firstVertIdx], normal, outNormals[firstVertIdx] );
-		VectorAdd( outNormals[secondVertIdx], normal, outNormals[secondVertIdx] );
-		VectorAdd( outNormals[thirdVertIdx], normal, outNormals[thirdVertIdx] );
-	}
-
-	for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ){
-		VectorNormalizeFast( outNormals[vertNum] );
-		// TODO: while the mesh the artist made has to be very messed up for this to occur (possibly a flattened mesh) shouldn't we provide some clear error/crash in this case?
-	}
 }
 
 void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const float *origin,
@@ -4263,13 +4493,12 @@ static void addLayerContributionToResultColor( float rampValue, unsigned numColo
 	}
 }
 
-void SimulatedHullsSystem::vertexPosFromStaticCage( unsigned vertIdx, const StaticCageCoordinate *vertCoords, float scale,
-													const tri *cageTriIndices, const vec3_t *vertexMoveDirections,
-													const float *limitsAtDirections, const float *offsetsFromLim,
-													const vec3_t origin, vec3_t outPos ) {
-	unsigned triIdx = vertCoords[vertIdx].cageTriIdx;
+void SimulatedHullsSystem::vertexPosFromStaticCage( const StaticCageCoordinate vertCoord, float scale, const tri *cageTriIndices,
+													const vec3_t *vertexMoveDirections, const float *limitsAtDirections,
+													const float offsetFromLim, vec3_t outPos ) {
+	unsigned triIdx = vertCoord.cageTriIdx;
 
-	vec2_t coords = {vertCoords[vertIdx].coordsOnCageTri[0], vertCoords[vertIdx].coordsOnCageTri[1]}; // 2: vertCoords
+	const vec2_t coords = { vertCoord.coordsOnCageTri[0], vertCoord.coordsOnCageTri[1] }; // 2: vertCoords
 
 	vec3_t moveDir;
 
@@ -4284,6 +4513,46 @@ void SimulatedHullsSystem::vertexPosFromStaticCage( unsigned vertIdx, const Stat
 	VectorScale( vertexMoveDirections[cageVertIdx0], coeff0, moveDir );
 	VectorMA( moveDir, coeff1, vertexMoveDirections[cageVertIdx1], moveDir );
 	VectorMA( moveDir, coeff2, vertexMoveDirections[cageVertIdx2], moveDir );
+	VectorNormalizeFast( moveDir );
+
+	const float limit =
+			limitsAtDirections[cageVertIdx0] * coeff0 +
+			limitsAtDirections[cageVertIdx1] * coeff1 +
+			limitsAtDirections[cageVertIdx2] * coeff2;
+
+	const float maxOffset = wsw::max( 0.0f, limit - offsetFromLim );
+
+	const float offset = wsw::min( vertCoord.offset, maxOffset ) * scale;
+
+	VectorScale( moveDir, offset, outPos );
+}
+
+void SimulatedHullsSystem::vertexPosFromDynamicCage( const DynamicCageCoordinate vertCoord, float scale,
+													 const tri *cageTriIndices, const vec3_t *vertexPositions,
+													 const vec3_t *vertexNormals, const float *limitsAtDirections,
+													 const float offsetFromLim, vec3_t outPos ) {
+	unsigned triIdx = vertCoord.cageTriIdx;
+
+	const vec2_t coords = { vertCoord.coordsOnCageTri[0], vertCoord.coordsOnCageTri[1] }; // 2: vertCoords
+
+	vec3_t position;
+
+	const unsigned cageVertIdx0 = cageTriIndices[triIdx][0];
+	const unsigned cageVertIdx1 = cageTriIndices[triIdx][1];
+	const unsigned cageVertIdx2 = cageTriIndices[triIdx][2];
+
+	const float coeff0 = 1 - (coords[0] + coords[1]);
+	const float coeff1 = coords[0];
+	const float coeff2 = coords[1];
+
+	VectorScale( vertexPositions[cageVertIdx0], coeff0, position );
+	VectorMA( position, coeff1, vertexPositions[cageVertIdx1], position );
+	VectorMA( position, coeff2, vertexPositions[cageVertIdx2], position );
+
+	vec3_t moveDir;
+	VectorScale( vertexNormals[cageVertIdx0], coeff0, moveDir );
+	VectorMA( moveDir, coeff1, vertexNormals[cageVertIdx1], moveDir );
+	VectorMA( moveDir, coeff2, vertexNormals[cageVertIdx2], moveDir );
 	VectorNormalizeFast(moveDir);
 
 	const float limit =
@@ -4291,11 +4560,11 @@ void SimulatedHullsSystem::vertexPosFromStaticCage( unsigned vertIdx, const Stat
 			limitsAtDirections[cageVertIdx1] * coeff1 +
 			limitsAtDirections[cageVertIdx2] * coeff2;
 
-	const float maxOffset = wsw::max( 0.0f, limit - offsetsFromLim[vertIdx] );
+	const float maxOffset = wsw::max( 0.0f, limit - offsetFromLim );
 
-	const float offset = wsw::min( vertCoords[vertIdx].offset, maxOffset ) * scale;
+	const float offset = wsw::min( vertCoord.offsetOnTri, maxOffset ) * scale;
 
-	VectorScale( moveDir, offset, outPos );
+	VectorMA( position, offset, moveDir, outPos );
 }
 
 IntConfigVar v_testMode( wsw::StringView("testMode"), { .byDefault = 0, .flags = CVAR_ARCHIVE } );
@@ -4428,10 +4697,12 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 			unsigned nextFrameVertIdx = nextFrameStartVertIdx + vertNum;
 			vec3_t nextPositionContrib;
 
-			vertexPosFromStaticCage( currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
-									 vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, destPositions[vertNum] );
-			vertexPosFromStaticCage( nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
-									 vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, nextPositionContrib );
+			vertexPosFromStaticCage( vertCoords[currFrameVertIdx], scale * complementFrac, cageTriIndices,
+									 vertexMoveDirections, limitsAtDirections, offsetsFromLim[currFrameVertIdx],
+									 destPositions[vertNum] );
+			vertexPosFromStaticCage( vertCoords[nextFrameVertIdx], scale * lerpFrac, cageTriIndices,
+									 vertexMoveDirections, limitsAtDirections, offsetsFromLim[nextFrameVertIdx],
+									 nextPositionContrib );
 			VectorAdd( destPositions[vertNum], nextPositionContrib, destPositions[vertNum] );
 			VectorAdd( destPositions[vertNum], origin, destPositions[vertNum] );
 
@@ -4899,10 +5170,12 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                 unsigned nextFrameVertIdx = nextFrameStartVertIdx + gridVertNum;
                 vec3_t nextPositionContrib;
 
-                vertexPosFromStaticCage( currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
-                                         vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, gridVertexPosition[gridVertNum] );
-                vertexPosFromStaticCage( nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
-                                         vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin, nextPositionContrib );
+                vertexPosFromStaticCage( vertCoords[currFrameVertIdx], scale * complementFrac, cageTriIndices,
+                                         vertexMoveDirections, limitsAtDirections, offsetsFromLim[currFrameVertIdx],
+										 gridVertexPosition[gridVertNum] );
+                vertexPosFromStaticCage( vertCoords[nextFrameVertIdx], scale * lerpFrac, cageTriIndices,
+                                         vertexMoveDirections, limitsAtDirections, offsetsFromLim[nextFrameVertIdx],
+										 nextPositionContrib );
                 VectorAdd( gridVertexPosition[gridVertNum], nextPositionContrib, gridVertexPosition[gridVertNum] );
                 VectorAdd( gridVertexPosition[gridVertNum], origin, gridVertexPosition[gridVertNum] );
             } while ( ++gridVertNum < numGridVerts );
@@ -5030,12 +5303,12 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
                 unsigned nextFrameVertIdx = nextFrameStartVertIdx + vertToRenderIdx;
                 vec3_t nextPositionContrib;
 
-                vertexPosFromStaticCage(currFrameVertIdx, vertCoords, scale * complementFrac, cageTriIndices,
-                                        vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin,
-                                        gridVertPosition);
-                vertexPosFromStaticCage(nextFrameVertIdx, vertCoords, scale * lerpFrac, cageTriIndices,
-                                        vertexMoveDirections, limitsAtDirections, offsetsFromLim, origin,
-                                        nextPositionContrib);
+                vertexPosFromStaticCage( vertCoords[currFrameVertIdx], scale * complementFrac, cageTriIndices,
+                                        vertexMoveDirections, limitsAtDirections, offsetsFromLim[currFrameVertIdx],
+										gridVertPosition );
+                vertexPosFromStaticCage( vertCoords[nextFrameVertIdx], scale * lerpFrac, cageTriIndices,
+                                        vertexMoveDirections, limitsAtDirections, offsetsFromLim[nextFrameVertIdx],
+										nextPositionContrib );
                 VectorAdd(gridVertPosition, nextPositionContrib, gridVertPosition);
                 VectorAdd(gridVertPosition, origin, gridVertPosition);
 

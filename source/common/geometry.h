@@ -36,13 +36,17 @@ struct TexturedGeometry {
     std::span<vec2_t[3]> triUVcoords;
 };
 
-void inline getTriCoords( const uint16_t *triIndices, const Geometry *geometry, vec3_t *outCoords ){
-    VectorCopy( geometry->vertexPositions[triIndices[0]], outCoords[0] );
-    VectorCopy( geometry->vertexPositions[triIndices[1]], outCoords[1] );
-    VectorCopy( geometry->vertexPositions[triIndices[2]], outCoords[2] );
-}
+void inline getTriCoords( const uint16_t *triIndices, const Geometry *geometry, vec3_t *outCoords );
+
+void inline getTriCoords( const uint16_t *triIndices, vec3_t *vertexPositions, vec3_t *outCoords );
+
+void getTriNormals( const uint16_t *triIndices, vec3_t *vertexNormals, vec3_t *outNormals );
 
 void unitizeGeometry( Geometry *geometry );
+
+void calculateNormals( std::span<tri> triIndices, const Geometry *geometry, vec3_t *outNormals );
+
+void calculateNormals( std::span<tri> triIndices, unsigned numVerts, vec3_t *vertexPositions, vec3_t *outNormals );
 
 bool collisionCheck( Geometry *collisionGeometry, vec3_t origin, vec3_t dir, float maxDist, unsigned *outTriIdx, float *outDist, vec2_t coordsOnTri );
 

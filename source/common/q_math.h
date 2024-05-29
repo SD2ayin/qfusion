@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "q_arch.h"
 #include "wswbasicmath.h"
+#include <functional>
 
 //==============================================================
 //
@@ -840,11 +841,19 @@ void Matrix3_Rotate( const mat3_t in, vec_t angle, vec_t x, vec_t y, vec_t z, ma
 void Matrix3_ForRotationOfDirs( const float *fromDir, const float *toDir, mat3_t out );
 void Matrix3_FromPoints( const vec3_t v1, const vec3_t v2, const vec3_t v3, mat3_t m );
 void Matrix3_Normalize( mat3_t m );
-bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution );
 
 inline void Matrix3_Rotate( const mat3_t in, float angle, const vec3_t axisDir, mat3_t out ) {
 	Matrix3_Rotate( in, angle, axisDir[0], axisDir[1], axisDir[2], out );
 }
+
+bool testNewThing( vec3_t initialGuess, float maxError, float thresholdError, unsigned maxIterations,
+				   std::function<void(vec3_t, vec3_t)> function,
+				   std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution );
+
+bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution );
+bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresholdError,
+						 unsigned maxIterations, std::function<void(vec3_t, vec3_t)> function,
+						 std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution );
 
 void Quat_Identity( quat_t q );
 void Quat_Copy( const quat_t q1, quat_t q2 );
