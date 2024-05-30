@@ -398,7 +398,6 @@ static bool CG_WeaponModelUpdateRegistration( weaponinfo_t *weaponinfo, char *fi
 		// md3
 		if( !weaponinfo->model[p] ) {
 			Q_snprintfz( scratch, sizeof( scratch ), "models/weapons/%s%s.md3", filename, wmPartSufix[p] );
-            Com_Printf("%s, %s\n", filename, wmPartSufix[p]);
 			weaponinfo->model[p] = CG_RegisterModel( scratch );
 		}
 	}

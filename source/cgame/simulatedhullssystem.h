@@ -231,7 +231,7 @@ public:
     struct DynamicCagedMesh {
         unsigned loadedCageKey;
         unsigned numVertices;
-        StaticCageCoordinate *vertexCoordinates;
+        DynamicCageCoordinate *vertexCoordinates;
         float *offsetFromLim;
         unsigned numFrames;
         std::span<tri> triIndices;

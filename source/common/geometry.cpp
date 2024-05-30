@@ -115,7 +115,9 @@ bool collisionCheck( Geometry *collisionGeometry, vec3_t origin, vec3_t dir, flo
 		VectorSubtract( triCoords[0], origin, result );
 
 		vec3_t solution;
-		Solve3by3( coefficientsMatrix, result, solution );
+		if( !Solve3by3( coefficientsMatrix, result, solution ) ){
+			continue;
+		}
 
 		vec2_t coordinates = { -solution[1], -solution[2] };
 		float distanceToCollision = solution[0];

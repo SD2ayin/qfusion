@@ -910,7 +910,7 @@ bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresh
 	bool solutionFound = false;
 	for( int i = 0; i < maxIterations; i++ ) {
 		function( guess, functionResult );
-		//Com_Printf("iteration:%i error:%f\n", i, VectorLengthSquared( functionResult ));
+		//Com_Printf("%siteration:%i error:%f\n", S_COLOR_GREEN, i, VectorLengthSquared( functionResult ));
 
 		if( VectorLengthSquared( functionResult ) < thresholdErrorSquared ){
 			break;
