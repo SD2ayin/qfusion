@@ -14,7 +14,7 @@ bool GetGeometryFromFileAliasMD3( const char *fileName, Geometry *outGeometry, c
 struct Geometry { // should probably have a destructor and constructor methods from alias.cpp
     std::span<vec3_t> vertexPositions;
     std::span<tri> triIndices;
-    vec2_t *UVCoords; //texture coords, equal to verts
+    vec2_t *UVCoords; //texture coords, equal amount as verts
 
     Geometry(){
         UVCoords = nullptr;
@@ -29,6 +29,35 @@ struct Geometry { // should probably have a destructor and constructor methods f
             delete[] UVCoords;
         }
     }
+
+	[[nodiscard]] std::span<vec3_t> copyVertexPositions() const;
+	[[nodiscard]] std::span<tri> copyTriIndices() const;
+	[[nodiscard]] std::span<vec2_t> copyUVCoords() const;
+
+	Geometry( Geometry const &otherGeometry ){
+		if( otherGeometry.vertexPositions.data() ){
+			vertexPositions = otherGeometry.copyVertexPositions();
+			triIndices      = otherGeometry.copyTriIndices();
+			UVCoords        = otherGeometry.copyUVCoords().data();
+		}
+	}
+
+	Geometry& operator=( Geometry otherGeometry ){
+		Geometry tmp( otherGeometry );
+
+		std::swap( otherGeometry.vertexPositions, vertexPositions );
+		std::swap( otherGeometry.triIndices, triIndices );
+		std::swap( otherGeometry.UVCoords, UVCoords );
+
+		return *this;
+
+//		otherGeometry.vertexPositions = vertexPositions;
+
+//		vertexPositions = otherGeometry.vertexPositions;
+//		triIndices      = otherGeometry.triIndices;
+//		UVCoords        = otherGeometry.UVCoords;
+	}
+
 };
 
 struct TexturedGeometry {

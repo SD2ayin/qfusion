@@ -2,6 +2,27 @@
 #include "geometry.h"
 #include "../cgame/cg_local.h"
 
+std::span<vec2_t> Geometry::copyUVCoords() const {
+	const unsigned numVerts = vertexPositions.size();
+	auto UVCoordsCopy = new vec2_t[numVerts];
+	std::memcpy( UVCoordsCopy, UVCoords, numVerts * sizeof(vec2_t) );
+	return { UVCoordsCopy, numVerts };
+}
+
+std::span<vec3_t> Geometry::copyVertexPositions() const {
+	const unsigned numVerts = vertexPositions.size();
+	auto vertexPositionsCopy = new vec3_t[numVerts];
+	std::memcpy( vertexPositionsCopy, vertexPositions.data(), numVerts * sizeof(vec3_t) );
+	return { vertexPositionsCopy, numVerts };
+}
+
+std::span<tri> Geometry::copyTriIndices() const {
+	const unsigned numTris = triIndices.size();
+	auto triIndicesCopy = new tri[numTris];
+	std::memcpy( triIndicesCopy, triIndices.data(), numTris * sizeof(tri) );
+	return { triIndicesCopy, numTris };
+}
+
 void inline getTriCoords( const uint16_t *triIndices, const Geometry *geometry, vec3_t *outCoords ){
 //	VectorCopy( geometry->vertexPositions[triIndices[0]], outCoords[0] );
 //	VectorCopy( geometry->vertexPositions[triIndices[1]], outCoords[1] );

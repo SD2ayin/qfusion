@@ -497,12 +497,14 @@ bool SimulatedHullsSystem::StaticCagedMesh::transformToCageSpace( Geometry *cage
     this->numVertices = meshVerts;
 
     // i find this so ugly.. isn't there something like copy()
-    auto triIndicesCopy = new tri[mesh.triIndices.size()];
-    auto UVCoordsCopy  = new vec2_t[meshVerts];
-    std::memcpy( triIndicesCopy, mesh.triIndices.data(), mesh.triIndices.size() * sizeof(tri) );
-    std::memcpy( UVCoordsCopy, mesh.UVCoords, meshVerts * sizeof(vec2_t) );
-    this->triIndices = std::span( triIndicesCopy, mesh.triIndices.size() );
-    this->UVCoords   = UVCoordsCopy;
+//    auto triIndicesCopy = new tri[mesh.triIndices.size()];
+//    auto UVCoordsCopy  = new vec2_t[meshVerts];
+//    std::memcpy( triIndicesCopy, mesh.triIndices.data(), mesh.triIndices.size() * sizeof(tri) );
+//    std::memcpy( UVCoordsCopy, mesh.UVCoords, meshVerts * sizeof(vec2_t) );
+//    this->triIndices = std::span( triIndicesCopy, mesh.triIndices.size() );
+//    this->UVCoords   = UVCoordsCopy;
+    this->triIndices = mesh.copyTriIndices();
+    this->UVCoords   = mesh.copyUVCoords().data();
 
     this->vertexCoordinates = new SimulatedHullsSystem::StaticCageCoordinate[meshVerts * numFrames];
 	this->offsetFromLim = new float[meshVerts * numFrames];
@@ -794,18 +796,19 @@ void SimulatedHullsSystem::RegisterDynamicCage( const wsw::String &identifier ) 
 
     Geometry prevGeom, nextGeom;
     for( unsigned frameNum = 0; frameNum < ( numFrames - 1 ); frameNum++ ){
-		vec3_t *prevVertexPositions;
+//vec3_t *prevVertexPositions;
 		if( frameNum == 0 ) {
 			GetGeometryFromFileAliasMD3( filepathToCage.data(), &prevGeom, nullptr, frameNum );
-			prevVertexPositions = prevGeom.vertexPositions.data();
+			//prevVertexPositions = prevGeom.vertexPositions.data();
 		} else {
-			prevVertexPositions = nextGeom.vertexPositions.data();
+			prevGeom = nextGeom;
+			//prevVertexPositions = nextGeom.vertexPositions.data();
 		}
 
 		//GetGeometryFromFileAliasMD3( filepathToCage.data(), &prevGeom, nullptr, frameNum );
         GetGeometryFromFileAliasMD3( filepathToCage.data(), &nextGeom, nullptr, ( frameNum + 1 ) );
 
-        //vec3_t *prevVertexPositions = prevGeom.vertexPositions.data();
+        vec3_t *prevVertexPositions = prevGeom.vertexPositions.data();
         vec3_t *nextVertexPositions = nextGeom.vertexPositions.data();
 
         unsigned startVertIdxForFrame = frameNum * numCageVertices;
@@ -847,12 +850,10 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 
 	vec3_t origin = { 0.0f, 0.0f, 0.0f };
 
-	unsigned numFrames = GetNumFramesInMD3( pathToMesh.data() );
-	if( numFrames == cage->numFrames ) {
-		cgNotice() << "number of frames in caged mesh:" << numFrames;
-		this->numFrames = numFrames;
-	} else {
+	numFrames = GetNumFramesInMD3( pathToMesh.data() );
+	if( numFrames != cage->numFrames ) {
 		cgNotice() << S_COLOR_RED << "number of frames in dynamic caged mesh doesnt match number of frames in cage";
+		return false;
 	}
 
 	Geometry mesh;
@@ -972,7 +973,7 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 				vec2_t coordsOnTri = { outCoords[0], outCoords[1] };
 
 				constexpr float margin = 5e-3f; // to account for floating point error and solver error
-				const float compareValue = offset > 0.0f ? offset : std::numeric_limits<float>::infinity();//2 * abs( offset ); // prefer positive offset
+				const float compareValue = offset > 0.0f ? offset : 2 * abs( offset ); // prefer positive offset
 				const bool isOnTri = ((coordsOnTri[0] + coordsOnTri[1]) < 1.0f + margin) &&
 						              (coordsOnTri[0] > 0.0f - margin) && (coordsOnTri[1] > 0.0f - margin);
 				if( isOnTri && ( compareValue < cageCoord->offsetOnTri ) ){
@@ -992,6 +993,7 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 
 			if( cageCoord->offsetOnTri == std::numeric_limits<float>::infinity() ){
 				cgNotice() << S_COLOR_RED << "no coords found for vert:" << vertNum << "in frame:" << frameNum;
+				cgNotice() << S_COLOR_RED << "position:" << S_COLOR_WHITE << meshVertPosition[0] << meshVertPosition[1] << meshVertPosition[2];
 				return false;
 			} else {
 				cgNotice() << S_COLOR_ORANGE << "frame:" << frameNum << "vert:" << vertNum <<
