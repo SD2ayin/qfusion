@@ -5659,8 +5659,10 @@ static void CG_RegisterModels( void ) {
 	}
 
 	cgs.media.registerModels();
-    cgs.media.registerStaticCagedMeshes( &cg.simulatedHullsSystem );
-    cgs.media.registerDynamicCagedMeshes( &cg.simulatedHullsSystem );
+
+	cgs.media.registerStaticCagedMeshes( &cg.simulatedHullsSystem );
+	cgs.media.registerDynamicCagedMeshes( &cg.simulatedHullsSystem );
+
 //    SimulatedHullsSystem::StaticCagedMesh *cagedMesh = cgs.media.anotherExample2;
 //	SimulatedHullsSystem::StaticCage *cage = std::addressof( cg.simulatedHullsSystem.m_loadedStaticCages[cagedMesh->loadedCageKey] );
 //    cgNotice() << "cage identifier of another example:" << cage->identifier;

@@ -910,9 +910,11 @@ bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresh
 	bool solutionFound = false;
 	for( int i = 0; i < maxIterations; i++ ) {
 		function( guess, functionResult );
-		//Com_Printf("%siteration:%i error:%f\n", S_COLOR_GREEN, i, VectorLengthSquared( functionResult ));
+		Com_Printf("%siteration:%i error:%f, %s coords:%s %f %f %f\n", S_COLOR_GREEN, i, VectorLengthFast( functionResult ),
+				   S_COLOR_MAGENTA, S_COLOR_WHITE, guess[0], guess[1], guess[2] );
 
 		if( VectorLengthSquared( functionResult ) < thresholdErrorSquared ){
+			Com_Printf( "threshold error reached" );
 			break;
 		}
 
@@ -920,6 +922,7 @@ bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresh
 
 		vec3_t offset;
 		if( !Solve3by3( Jacobian, functionResult, offset ) ){
+			Com_Printf( "%s singular matrix\n", S_COLOR_RED );
 			break;
 		}
 

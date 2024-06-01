@@ -897,21 +897,27 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 		GetGeometryFromFileAliasMD3( "gfx/hulls/dynamicExample.md3", &cageMesh, nullptr, frameNum );
 
 		///
-		// TODO: this could be more accurate with getVolume( cageVertPositions, etc ) and avgCageExtent = (volume)^(1/3)
+		// TODO: this could be more accurate with getSurfaceArea( cageVertPositions, etc ) and avgCageExtent = (volume)^(1/3)
 		BoundsBuilder cageBoundsBuilder;
 		vec3_t cageMins, cageMaxs;
 		for( unsigned vertNum = 0; vertNum < cageVerts; vertNum++ ) {
 			cageBoundsBuilder.addPoint( cageVertPositions[vertNum] );
-			vec3_t error;
-			VectorSubtract( cageVertPositions[vertNum], cageMesh.vertexPositions[vertNum], error );
-			cgNotice() << "diff between loaded from md3 and simulated:" << VectorLengthFast( error );
+//			vec3_t error;
+//			VectorSubtract( cageVertPositions[vertNum], cageMesh.vertexPositions[vertNum], error );
+//			cgNotice() << "diff between loaded from md3 and simulated:" << VectorLengthFast( error );
 		}
 		cageBoundsBuilder.storeTo( cageMins, cageMaxs );
 		const float avgCageExtent = 0.333f * ( cageMaxs[0] - cageMins[0] + cageMaxs[1] - cageMins[1] + cageMaxs[2] - cageMins[2] );
 		///
-		constexpr float avgVertexSeparation = 3.0f/100; // percentage of average extent based on a cube
-		const float maxAllowableError = 0.2f * avgVertexSeparation;
-		const float thresholdError    = 0.005f * avgVertexSeparation;
+
+		// average extent based on a cube with sides of avgCageExtent:
+		// ~1/6 of total vertices on a face, ~sqrt() of that on an edge
+		constexpr float oneSixth = 1.0f/6;
+		const float numVertsOnCubeFace    = (float)meshVerts * oneSixth;
+		const float rcpNumVertsOnCubeEdge = Q_RSqrt( numVertsOnCubeFace );
+		const float avgVertexSeparation = avgCageExtent * rcpNumVertsOnCubeEdge;
+		const float maxAllowableError = 0.1f * avgVertexSeparation;
+		const float thresholdError    = 1e-3f * avgVertexSeparation;
 
 		vec3_t initialCoordsGuess = { 0.33333f, 0.33333f, 0.2f * avgCageExtent };
 
@@ -928,11 +934,15 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 			VectorCopy( meshVertPositions[vertNum], meshVertPosition );
 			bool foundCoords = false;
 
+            float kMin = std::numeric_limits<float>::infinity();
+
 			SimulatedHullsSystem::DynamicCageCoordinate *cageCoord = &cageCoordinates[vertNum];
 			cageCoord->offsetOnTri = std::numeric_limits<float>::infinity();
 
+            DynamicCageCoordinate tmpCoord;
+
 			for( unsigned faceNum = 0; faceNum < cageFaces; faceNum++ ){
-				//cgNotice() << S_COLOR_BLUE << "face" << faceNum << "/" << cageFaces;
+				cgNotice() << S_COLOR_BLUE << "face" << faceNum+1 << "/" << cageFaces;
 
 				const uint16_t *faceIndices = cageTriIndices[faceNum];
 				vec3_t triPositions[3];
@@ -948,15 +958,15 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 					JacobianForDynamicCageTransform( coords, triPositions, triNormals, outJacobian );
 				};
 
-//				vec3_t error;
-//				function( initialCoordsGuess, error );
-//				cgNotice() << "initial guess:" << initialCoordsGuess[0] << initialCoordsGuess[1] << initialCoordsGuess[2];
-//				cgNotice() << "initial error, length:" << VectorLengthFast(error) << "components:" << error[0] << error[1] << error[2];
+				vec3_t error;
+				function( initialCoordsGuess, error );
+				cgNotice() << "initial guess:" << initialCoordsGuess[0] << initialCoordsGuess[1] << initialCoordsGuess[2];
+				cgNotice() << "initial error, length:" << VectorLengthFast(error) << "components:" << error[0] << error[1] << error[2];
 
-				constexpr unsigned maxIterations = 24; // arbitrarily chosen, not sure if optimal
+				constexpr unsigned maxIterations = 8; // arbitrarily chosen, not sure if optimal
 				vec3_t outCoords;
 
-				float offset;
+				float offset = std::numeric_limits<float>::infinity();
 				if( findRootVec3Newton( initialCoordsGuess, maxAllowableError, thresholdError,
 										maxIterations, function, getFunctionJacobian,outCoords ) ) {
 					// convert the L coordinate to physical offset that we did not do inside the function:
@@ -966,18 +976,32 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 					VectorMA( linCombiOfNormals, outCoords[1], triNormals[2], linCombiOfNormals );
 					offset = outCoords[2] * Q_RSqrt( VectorLengthSquared(linCombiOfNormals) );
 
-					//cgNotice() << "offset:" << offset;
+					//cgNotice() << S_COLOR_MAGENTA << "final guess:" << S_COLOR_WHITE << outCoords[0] << outCoords[1] << offset;
 				} else {
 					continue;
 				}
 				vec2_t coordsOnTri = { outCoords[0], outCoords[1] };
 
-				constexpr float margin = 5e-3f; // to account for floating point error and solver error
-				const float compareValue = offset > 0.0f ? offset : 2 * abs( offset ); // prefer positive offset
+                const float oldOffset       = cageCoord->offsetOnTri;
+                const float oldCompareValue = oldOffset > 0.0f ? oldOffset : 2* abs( offset );
+                const float newCompareValue = offset > 0.0f ? offset : 2 * abs( offset );//2 * abs( offset ); // prefer positive offset
+
+                constexpr float margin = 1e-3f; // to account for floating point error and solver error
 				const bool isOnTri = ((coordsOnTri[0] + coordsOnTri[1]) < 1.0f + margin) &&
 						              (coordsOnTri[0] > 0.0f - margin) && (coordsOnTri[1] > 0.0f - margin);
-				if( isOnTri && ( compareValue < cageCoord->offsetOnTri ) ){
-					//return false;
+                const float k1 = ( coordsOnTri[0] + coordsOnTri[1] - 1.0f ) > 0.0f ? coordsOnTri[0] + coordsOnTri[1] - 1.0f : 0.0f;
+                const float k2 = coordsOnTri[0] < 0.0f ? abs( coordsOnTri[0] ) : 0.0f;
+                const float k3 = coordsOnTri[1] < 0.0f ? abs( coordsOnTri[1] ) : 0.0f;
+                const float k = wsw::max( k1, wsw::max( k2, k3 ) );
+                if( k < kMin ){
+                    kMin = k;
+                    tmpCoord.offsetOnTri = offset;
+                    tmpCoord.cageTriIdx = faceNum;
+                    tmpCoord.coordsOnCageTri[0] = coordsOnTri[0];
+                    tmpCoord.coordsOnCageTri[1] = coordsOnTri[1];
+                }
+
+				if( isOnTri && ( newCompareValue < oldCompareValue ) ){
 					cageCoord->offsetOnTri = offset;
 					cageCoord->cageTriIdx = faceNum;
 					cageCoord->coordsOnCageTri[0] = coordsOnTri[0];
@@ -994,11 +1018,36 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 			if( cageCoord->offsetOnTri == std::numeric_limits<float>::infinity() ){
 				cgNotice() << S_COLOR_RED << "no coords found for vert:" << vertNum << "in frame:" << frameNum;
 				cgNotice() << S_COLOR_RED << "position:" << S_COLOR_WHITE << meshVertPosition[0] << meshVertPosition[1] << meshVertPosition[2];
+                cgNotice() << S_COLOR_RED << "k_min:" << S_COLOR_WHITE << kMin;
+                const unsigned triIdxForKMin = tmpCoord.cageTriIdx;
+                const uint16_t *faceIndices = cageTriIndices[triIdxForKMin];
+                vec3_t triPositions[3];
+                vec3_t triNormals[3];
+                getTriCoords( faceIndices, cageVertPositions, triPositions );
+                getTriNormals( faceIndices, cageVertNormals, triNormals );
+
+                std::function<void( vec3_t, vec3_t )> function = [triPositions, triNormals, meshVertPosition]( vec3_t coords, vec3_t outError ) {
+                    getErrorForDynamicCageTransform( coords, triPositions, triNormals, meshVertPosition, outError );
+                };
+                vec3_t bestGuess = { tmpCoord.coordsOnCageTri[0], tmpCoord.coordsOnCageTri[1], tmpCoord.offsetOnTri };
+
+				vec3_t error;
+				function( bestGuess, error );
+				cgNotice() << "best guess:" << bestGuess[0] << bestGuess[1] << bestGuess[2];
+				cgNotice() << "best error, length:" << VectorLengthFast(error) << "components:" << error[0] << error[1] << error[2];
+				cgNotice() << "threshold error:" << thresholdError;
+				if( VectorLengthFast(error) < thresholdError ){
+					cgNotice() << S_COLOR_GREEN << "was reached";
+				} else {
+					cgNotice() << S_COLOR_RED << "was NOT reached";
+				}
 				return false;
 			} else {
-				cgNotice() << S_COLOR_ORANGE << "frame:" << frameNum << "vert:" << vertNum <<
-				"found fit with coords:" << cageCoord->coordsOnCageTri[0] << cageCoord->coordsOnCageTri[1] <<
-				"offset:" << cageCoord->offsetOnTri << "tri index:" << cageCoord->cageTriIdx;
+				cgNotice() << S_COLOR_ORANGE << "frame:" << S_COLOR_WHITE << frameNum
+                << S_COLOR_ORANGE << "vert:" << S_COLOR_WHITE << vertNum << S_COLOR_ORANGE <<
+				"found fit with coords:" << S_COLOR_WHITE << cageCoord->coordsOnCageTri[0] << cageCoord->coordsOnCageTri[1]
+				<< S_COLOR_ORANGE << "offset:" << S_COLOR_WHITE << cageCoord->offsetOnTri << S_COLOR_ORANGE <<
+                "tri index:" << cageCoord->cageTriIdx;
 			}
 //			if( VectorLengthFast( meshVertPosition ) < 1e-3f ) {
 //				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
@@ -3287,6 +3336,10 @@ void SimulatedHullsSystem::vertexPosFromDynamicCage( const DynamicCageCoordinate
 	VectorMA( position, offset, moveDir, outPos );
 }
 
+BoolConfigVar v_showSetCoords( wsw::StringView("showSetCoords"), { .byDefault = 1, .flags = CVAR_ARCHIVE });
+FloatConfigVar v_coordOnTri1( wsw::StringView("coordOnTri1"), { .byDefault = 0.33f, .flags = CVAR_ARCHIVE });
+FloatConfigVar v_coordOnTri2( wsw::StringView("coordOnTri2"), { .byDefault = 0.33f, .flags = CVAR_ARCHIVE });
+
 void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, float timeDeltaSeconds,
 														  PolyEffectsSystem *effectsSystem ) {
 	BoundsBuilder cageBoundsBuilder;
@@ -3461,60 +3514,57 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 						.timeout           = 10u
 				} );
 
-				effectsSystem->spawnTransientBeamEffect( firstOffsetPos, secondOffsetPos, {
-						.material          = cgs.media.shaderLaser,
-						.beamColorLifespan = {
-								.initial  = {colorC[0], colorC[1], colorC[2]},
-								.fadedIn  = {colorC[0], colorC[1], colorC[2]},
-								.fadedOut = {colorC[0], colorC[1], colorC[2]},
-						},
-						.width             = 4.0f,
-						.timeout           = 10u,
-				} );
+                if( v_showVectorsToLim.get() ) {
+                    effectsSystem->spawnTransientBeamEffect(firstOffsetPos, secondOffsetPos, {
+                            .material          = cgs.media.shaderLaser,
+                            .beamColorLifespan = {
+                                    .initial  = {colorC[0], colorC[1], colorC[2]},
+                                    .fadedIn  = {colorC[0], colorC[1], colorC[2]},
+                                    .fadedOut = {colorC[0], colorC[1], colorC[2]},
+                            },
+                            .width             = 4.0f,
+                            .timeout           = 10u,
+                    });
+                }
+			}
+		}
 
-				effectsSystem->spawnTransientBeamEffect( firstOffsetPos, secondOffsetPos, {
+		if( v_showSetCoords.get() ){
+			const float coord1 = v_coordOnTri1.get() > 0.0f ? v_coordOnTri1.get() : std::sinf( cg.time * 1e-3f * abs( v_coordOnTri1.get() ));
+			const float coord2 = v_coordOnTri2.get() > 0.0f ? v_coordOnTri2.get() : std::sinf( cg.time * 1e-3f * abs( v_coordOnTri2.get() ));
+
+			SimulatedHullsSystem::DynamicCageCoordinate posOnTriCoord = {
+					.cageTriIdx = triNum,
+					.coordsOnCageTri = { coord1, coord2 },
+					.offsetOnTri = 0.0f,
+			};
+			SimulatedHullsSystem::DynamicCageCoordinate offsetPosCoord = {
+					.cageTriIdx = triNum,
+					.coordsOnCageTri = { coord1, coord2 },
+					.offsetOnTri = maxOffsetFromCage,
+			};
+
+			vec3_t posOnTri;
+			vec3_t offsetPos;
+
+			vertexPosFromDynamicCage( posOnTriCoord, 0.0f, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
+									  posOnTri );
+			vertexPosFromDynamicCage( offsetPosCoord, 1.0f, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
+									  offsetPos );
+
+			if(((v_triIdx.get() < 0) && ((triNum + cg.time) % 4 == 1)) || triNum == v_triIdx.get()) {
+				effectsSystem->spawnTransientBeamEffect( posOnTri, offsetPos, {
 						.material          = cgs.media.shaderLaser,
 						.beamColorLifespan = {
-								.initial  = {colorC[0], colorC[1], colorC[2]},
-								.fadedIn  = {colorC[0], colorC[1], colorC[2]},
-								.fadedOut = {colorC[0], colorC[1], colorC[2]},
+								.initial  = {colorD[0], colorD[1], colorD[2]},
+								.fadedIn  = {colorD[0], colorD[1], colorD[2]},
+								.fadedOut = {colorD[0], colorD[1], colorD[2]},
 						},
-						.width             = 4.0f,
-						.timeout           = 10u,
+						.width             = 3.0f,
+						.timeout           = 10u
 				} );
 			}
 		}
-		SimulatedHullsSystem::DynamicCageCoordinate posOnTriCoord = {
-				.cageTriIdx = triNum,
-				.coordsOnCageTri = {0.33f, 0.33f},
-				.offsetOnTri = 0.0f,
-		};
-		SimulatedHullsSystem::DynamicCageCoordinate offsetPosCoord = {
-				.cageTriIdx = triNum,
-				.coordsOnCageTri = {0.33f, 0.33f},
-				.offsetOnTri = maxOffsetFromCage,
-		};
-
-		vec3_t posOnTri;
-		vec3_t offsetPos;
-
-		vertexPosFromDynamicCage( posOnTriCoord, 1.0f, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
-								  posOnTri );
-		vertexPosFromDynamicCage( offsetPosCoord, 1.0f, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
-								  offsetPos );
-
-//		if( ( ( v_triIdx.get() < 0 ) && ( ( triNum + cg.time ) % 4 == 1 ) ) || triNum == v_triIdx.get() ) {
-//			effectsSystem->spawnTransientBeamEffect( posOnTri, offsetPos, {
-//					.material          = cgs.media.shaderLaser,
-//					.beamColorLifespan = {
-//							.initial  = {colorD[0], colorD[1], colorD[2]},
-//							.fadedIn  = {colorD[0], colorD[1], colorD[2]},
-//							.fadedOut = {colorD[0], colorD[1], colorD[2]},
-//					},
-//					.width             = 3.0f,
-//					.timeout           = 10u
-//			} );
-//		}
 	}
 
 	const unsigned meshVerts = cagedMesh->numVertices;
@@ -3524,34 +3574,55 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 
 	unsigned startIdx = currFrame * meshVerts;
 
-	for ( unsigned triNum = 0; triNum < numMeshTris; triNum++ ) {
-		for ( int idxNum = 0; idxNum < 3; idxNum++ ) {
-			unsigned firstIdx = idxNum;
-			unsigned secondIdx = ( idxNum + 1 ) % 3;
+	if( v_showMeshToRender.get() ){
+		for( unsigned triNum = 0; triNum < numMeshTris; triNum++ ) {
+			for( int idxNum = 0; idxNum < 3; idxNum++ ) {
+				unsigned firstIdx = idxNum;
+				unsigned secondIdx = (idxNum + 1) % 3;
 
-			unsigned firstVertex = meshTris[triNum][firstIdx] + startIdx;
-			unsigned secondVertex = meshTris[triNum][secondIdx] + startIdx;
+				unsigned firstVertex = meshTris[triNum][firstIdx] + startIdx;
+				unsigned secondVertex = meshTris[triNum][secondIdx] + startIdx;
 
-			vec3_t firstPosition;
-			vec3_t secondPosition;
+				DynamicCageCoordinate baseCoord = meshVertCoords[firstVertex];
+				baseCoord.offsetOnTri = 0.0f;
 
-			vertexPosFromDynamicCage( meshVertCoords[firstVertex], scale, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
-									  firstPosition );
-			vertexPosFromDynamicCage( meshVertCoords[secondVertex], scale, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
-									  secondPosition );
+				vec3_t firstBasePosition;
+				vec3_t firstPosition;
+				vec3_t secondPosition;
 
-			if ((( v_triIdx.get() < 0 ) && (( triNum + cg.time ) % 4 == 1 )) || triNum == v_triIdx.get()) {
-				effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
-						.material          = cgs.media.shaderLaser,
-						.beamColorLifespan = {
-								.initial  = {colorD[0], colorD[1], colorD[2]},
-								.fadedIn  = {colorD[0], colorD[1], colorD[2]},
-								.fadedOut = {colorD[0], colorD[1], colorD[2]},
-						},
-						.width             = 4.0f,
-						.timeout           = 10u
-				} );
+				vertexPosFromDynamicCage( baseCoord, scale, cageTris, vertexPositions, vertexNormals,
+										  limitsAtDirections, 0.0f,
+										  firstBasePosition );
+				vertexPosFromDynamicCage( meshVertCoords[firstVertex], scale, cageTris, vertexPositions, vertexNormals,
+										  limitsAtDirections, 0.0f,
+										  firstPosition );
+				vertexPosFromDynamicCage( meshVertCoords[secondVertex], scale, cageTris, vertexPositions, vertexNormals,
+										  limitsAtDirections, 0.0f,
+										  secondPosition );
 
+				if(((v_triIdx.get() < 0) && ((triNum + cg.time) % 4 == 1)) || triNum == v_triIdx.get()) {
+					effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
+							.material          = cgs.media.shaderLaser,
+							.beamColorLifespan = {
+									.initial  = {colorD[0], colorD[1], colorD[2]},
+									.fadedIn  = {colorD[0], colorD[1], colorD[2]},
+									.fadedOut = {colorD[0], colorD[1], colorD[2]},
+							},
+							.width             = 4.0f,
+							.timeout           = 10u
+					} );
+
+					effectsSystem->spawnTransientBeamEffect( firstPosition, firstBasePosition, {
+							.material          = cgs.media.shaderLaser,
+							.beamColorLifespan = {
+									.initial  = {colorD[0], colorD[1], colorD[2]},
+									.fadedIn  = {colorD[0], colorD[1], colorD[2]},
+									.fadedOut = {colorD[0], colorD[1], colorD[2]},
+							},
+							.width             = 4.0f,
+							.timeout           = 10u
+					} );
+				}
 			}
 		}
 	}
