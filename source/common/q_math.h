@@ -846,10 +846,6 @@ inline void Matrix3_Rotate( const mat3_t in, float angle, const vec3_t axisDir, 
 	Matrix3_Rotate( in, angle, axisDir[0], axisDir[1], axisDir[2], out );
 }
 
-bool testNewThing( vec3_t initialGuess, float maxError, float thresholdError, unsigned maxIterations,
-				   std::function<void(vec3_t, vec3_t)> function,
-				   std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution );
-
 bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution );
 bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresholdError,
 						 unsigned maxIterations, std::function<void(vec3_t, vec3_t)> function,
