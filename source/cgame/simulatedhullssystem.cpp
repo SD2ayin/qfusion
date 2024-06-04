@@ -1073,7 +1073,7 @@ SimulatedHullsSystem::DynamicCagedMesh *SimulatedHullsSystem::RegisterDynamicCag
     DynamicCage *cage = std::addressof( m_loadedDynamicCages[cagedMesh->loadedCageKey] );
 
     cagedMesh->transformToCageSpace( cage, filepath );
-    //applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
+    applyShading( filepath, cagedMesh ); /// TODO: for applyShading, preserve volume methods, etc, these should be called ONCE for all meshes, not separately for main/LODs
     cagedMesh->offsetFromLim = new float[cagedMesh->numFrames * cagedMesh->numVertices];
     std::fill( cagedMesh->offsetFromLim, cagedMesh->offsetFromLim + cagedMesh->numFrames * cagedMesh->numVertices, 0.0f );
 
@@ -1137,9 +1137,6 @@ void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, StaticCaged
 	constexpr float fadeStartAtFrac = 0.1f;
 	constexpr float zFadeInfluence  = 0.3f;
 
-	const std::span<const vec4_t> verticesSpan = SimulatedHullsSystem::getUnitIcosphere( 4 );
-	assert( verticesSpan.size() == kNumVertices );
-
 	auto *fireVertexMaskStorage = new float[numFrames * numVertices];
 	auto *fadeVertexMaskStorage = new float[numFrames * numVertices];
 
@@ -1179,6 +1176,126 @@ void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, StaticCaged
 		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
 			const float *const vertex = vertexPositions[vertexNum];
 			const float vertexOffset  = VectorLengthFast( vertex );
+
+			frameFireVertexMask[vertexNum] = ( vertexOffset - minOffsetForFrame ) * rcpOffsetInterval; // Values between 1 and 0 where 1 has the highest offset
+
+			const float simplexNoise       = calcSimplexNoise3D( vertex[0], vertex[1], vertex[2] - scrolledDistance );
+			const float fadeFrac           = ( frameFrac - fadeStartAtFrac ) / ( 1.0f - fadeStartAtFrac );
+			const float zFade              = 0.5f * ( vertex[2] + 1.0f ) * zFadeInfluence;
+			frameFadeVertexMask[vertexNum] = fadeFrac - simplexNoise * ( 1.0f - zFadeInfluence ) - zFade + fadeRange;
+		}
+
+		SimulatedHullsSystem::MaskedShadingLayer fireMaskedShadingLayer;
+		fireMaskedShadingLayer.vertexMaskValues = frameFireVertexMask;
+		fireMaskedShadingLayer.colors           = kFireColors;
+
+		fireMaskedShadingLayer.colorRanges[0] = fireFrac * fireFrac;
+		fireMaskedShadingLayer.colorRanges[1] = fireFrac;
+		fireMaskedShadingLayer.colorRanges[2] = std::sqrt( fireFrac );
+		fireMaskedShadingLayer.blendMode      = SimulatedHullsSystem::BlendMode::AlphaBlend;
+		fireMaskedShadingLayer.alphaMode      = SimulatedHullsSystem::AlphaMode::Override;
+
+		// 0.1f to 0.2f produced a neat outline along the hull
+		SimulatedHullsSystem::DotShadingLayer highlightDotShadingLayer;
+		highlightDotShadingLayer.colors         = kHighlightColors;
+		highlightDotShadingLayer.colorRanges[0] = 0.4f;
+		highlightDotShadingLayer.colorRanges[1] = 0.48f;
+		highlightDotShadingLayer.blendMode      = SimulatedHullsSystem::BlendMode::Add;
+		highlightDotShadingLayer.alphaMode      = SimulatedHullsSystem::AlphaMode::Add;
+
+		SimulatedHullsSystem::MaskedShadingLayer fadeMaskedShadingLayer;
+		fadeMaskedShadingLayer.vertexMaskValues = frameFadeVertexMask;
+		fadeMaskedShadingLayer.colors           = kFadeColors;
+		fadeMaskedShadingLayer.colorRanges[0]   = 0.0f;
+		fadeMaskedShadingLayer.colorRanges[1]   = fadeRange;
+		fadeMaskedShadingLayer.blendMode        = SimulatedHullsSystem::BlendMode::Add;
+		fadeMaskedShadingLayer.alphaMode        = SimulatedHullsSystem::AlphaMode::Override;
+
+		static_assert( numShadingLayers == 3 );
+		cagedMesh->shadingLayers[frameNum * numShadingLayers + 0] = fireMaskedShadingLayer;
+		cagedMesh->shadingLayers[frameNum * numShadingLayers + 1] = highlightDotShadingLayer;
+		cagedMesh->shadingLayers[frameNum * numShadingLayers + 2] = fadeMaskedShadingLayer;
+
+//		delete[] mesh.vertexPositions.data();
+//		delete[] mesh.triIndices.data();
+//        delete[] mesh.UVCoords;
+	}
+}
+
+void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, DynamicCagedMesh *cagedMesh ){ // this is smoke/fire shading
+	static constexpr byte_vec4_t kFireColors[3] {
+			{ 25, 25, 25, 255 },   // Gray
+			{ 255, 70, 30, 255 },  // Orange
+			{ 255, 160, 45, 255 }, // Yellow
+	};
+
+	static constexpr byte_vec4_t kFadeColors[2] {
+			{ 0, 0, 0, 255 },
+			{ 100, 100, 100, 0 },
+	};
+
+	static constexpr byte_vec4_t kHighlightColors[2] {
+			{ 55, 55, 55, 0 },
+			{ 0, 0, 0, 0 },
+	};
+
+	const unsigned numShadingLayers = 3;
+	cagedMesh->numShadingLayers = numShadingLayers;
+
+	const unsigned numFrames = cagedMesh->numFrames;
+	const unsigned numVertices = cagedMesh->numVertices;
+	DynamicCageCoordinate *vertCoords = cagedMesh->vertexCoordinates;
+
+	constexpr unsigned kMinLifetime = 2000;
+
+	constexpr float scrollSpeed     = 1.43f;
+	constexpr float scrollDistance  = scrollSpeed * ( (float)kMinLifetime * 1e-3f );
+
+	constexpr float initialSize     = 0.1f;
+	constexpr float fadeRange       = 0.12f;
+	constexpr float fadeStartAtFrac = 0.1f;
+	constexpr float zFadeInfluence  = 0.3f;
+
+	auto *fireVertexMaskStorage = new float[numFrames * numVertices];
+	auto *fadeVertexMaskStorage = new float[numFrames * numVertices];
+
+	cagedMesh->shadingLayers = new ShadingLayer[numFrames * numShadingLayers];
+
+	Geometry mesh;
+
+	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ) {
+		GetGeometryFromFileAliasMD3( pathToMesh.data(), &mesh, nullptr, frameNum );
+
+		const float frameFrac     = (float)(frameNum) / (float)( numFrames - 1 ); // -1 so the final value is 1.0f
+		const float fireLifetime     = 0.54f; // 0.47
+		const float fireStartFrac    = 0.9f;
+		const float fireLifetimeFrac = wsw::min( 1.0f, frameFrac * ( 1.0f / fireLifetime ) );
+		const float fireFrac         = fireLifetimeFrac * fireStartFrac + ( 1.0f - fireStartFrac );
+
+		const float scrolledDistance = scrollDistance * frameFrac;
+
+		float *const frameFireVertexMask    = &fireVertexMaskStorage[frameNum * numVertices];
+		float *const frameFadeVertexMask    = &fadeVertexMaskStorage[frameNum * numVertices];
+
+		const float initialVelocity = 5.0f;
+		const float expansion       = ( 1.0f - initialSize ) * ( 1.0f - std::exp( -initialVelocity * frameFrac ) ) + initialSize;
+
+		vec3_t *vertexPositions = mesh.vertexPositions.data();
+		DynamicCageCoordinate *vertCoordsThisFrame = vertCoords + numVertices * frameNum;
+
+		float minOffsetForFrame = std::numeric_limits<float>::infinity();
+		float maxOffsetForFrame = 0.f;
+		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
+			const float vertexOffset  = vertCoordsThisFrame[vertexNum].offsetOnTri;
+			minOffsetForFrame = wsw::min( vertexOffset, minOffsetForFrame );
+			maxOffsetForFrame = wsw::max( vertexOffset, maxOffsetForFrame );
+		}
+		const float offsetInterval = wsw::max( 1e-3f, maxOffsetForFrame - minOffsetForFrame );
+		const float rcpOffsetInterval = Q_Rcp( offsetInterval );
+
+		for( unsigned vertexNum = 0; vertexNum < numVertices; vertexNum++ ) {
+			const float *const vertex = vertexPositions[vertexNum];
+			const float vertexOffset  = vertCoordsThisFrame[vertexNum].offsetOnTri;
 
 			frameFireVertexMask[vertexNum] = ( vertexOffset - minOffsetForFrame ) * rcpOffsetInterval; // Values between 1 and 0 where 1 has the highest offset
 
@@ -2167,8 +2284,8 @@ auto SimulatedHullsSystem::buildMatchingHullPairs( const BaseKeyframedHull **too
 	return numMatchedPairs;
 }
 
-void getBoundsForCagedMesh( float boundingRadius, const vec3_t origin, const vec3_t cageMins, const vec3_t cageMaxs,
-							vec3_t outMins, vec3_t outMaxs ){
+void getBoundsForStaticCagedMesh( float boundingRadius, const vec3_t origin, const vec3_t cageMins, const vec3_t cageMaxs,
+								  vec3_t outMins, vec3_t outMaxs ){
 	VectorCopy( cageMins, outMins );
 	VectorCopy( cageMaxs, outMaxs );
 
@@ -2418,7 +2535,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			sharedMeshData->lifetimeFrac = lifetimeFrac;
 
 			StaticCagedMesh *meshToRender = hull->sharedCageCagedMeshes[meshNum];
-			sharedMeshData->meshToRender  = meshToRender;
+			sharedMeshData->staticCagedMeshToRender  = meshToRender;
 
 			sharedMeshData->simulatedPositions  = nullptr;
 			sharedMeshData->cageVertexPositions = hull->vertexMoveDirections;
@@ -2445,6 +2562,7 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
 
 			sharedMeshData->isAKeyframedHull = true;
+			sharedMeshData->hullType = HullType::StaticHull;
 
             const unsigned numFrames = meshToRender->numFrames;
             const unsigned currFrame = wsw::min( numFrames - 1, (unsigned)( lifetimeFrac * numFrames ) );
@@ -2455,8 +2573,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 			vec4_t mins, maxs;
 			const float currBoundingRadius = meshToRender->boundingRadii[currFrame] * hull->scale;
-			getBoundsForCagedMesh( currBoundingRadius, hull->origin, hull->cageMins, hull->cageMaxs,
-								   mins, maxs );
+			getBoundsForStaticCagedMesh( currBoundingRadius, hull->origin, hull->cageMins, hull->cageMaxs,
+										 mins, maxs );
 
             maxBoundingRadius = wsw::max( maxBoundingRadius, currBoundingRadius );
             mins[3] = 0.0f, maxs[3] = 1.0f;
@@ -2534,8 +2652,8 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 			assert( numMeshesToSubmit <= kMaxMeshesPerHull );
 
 			vec4_t mins, maxs;
-			getBoundsForCagedMesh( maxBoundingRadius, hull->origin, hull->cageMins, hull->cageMaxs,
-								   mins, maxs );
+			getBoundsForStaticCagedMesh( maxBoundingRadius, hull->origin, hull->cageMins, hull->cageMaxs,
+										 mins, maxs );
 
 			mins[3] = 0.0f, maxs[3] = 1.0f;
 
@@ -2550,6 +2668,177 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 	}
 	/// MODIFY END
+
+	for( const BaseDynamicCageHull *__restrict hull: activeDynamicCageHulls ) {
+
+		assert( hull->numLayers );
+
+		const DynamicMesh **submittedMeshesBuffer = m_storageOfSubmittedMeshPtrs.get( 0 ) + offsetOfMultilayerMeshData;
+		float *const submittedOrderDesignators    = m_storageOfSubmittedMeshOrderDesignators.get( 0 ) + offsetOfMultilayerMeshData;
+
+		const unsigned numMeshesToRender = hull->numSharedCageCagedMeshes;
+		unsigned numMeshesToSubmit = 0;
+
+		const float rcpLifetime  = Q_Rcp( (float)hull->lifetime );
+		const float lifetimeFrac = (float)( currTime - hull->spawnTime ) * rcpLifetime;
+
+		const DynamicCagedMesh *firstCagedMesh = hull->sharedCageCagedMeshes[0];
+		const unsigned cageKey = firstCagedMesh->loadedCageKey;
+		const Geometry *cage = &m_loadedStaticCages[cageKey].cageGeometry;
+
+		float maxBoundingRadius = 0.0f;
+
+		for( unsigned meshNum = 0; meshNum < numMeshesToRender; ++meshNum ) {
+
+			assert( cageKey == hull->sharedCageCagedMeshes[meshNum]->loadedCageKey );
+
+			const AppearanceRules *appearanceRules = &hull->appearanceRules[meshNum];
+
+			const SolidAppearanceRules *solidAppearanceRules = nullptr;
+			const CloudAppearanceRules *cloudAppearanceRules = nullptr;
+			if( const auto *solidAndCloudRules = std::get_if<SolidAndCloudAppearanceRules>( appearanceRules ) ) {
+				solidAppearanceRules = &solidAndCloudRules->solidRules;
+				cloudAppearanceRules = &solidAndCloudRules->cloudRules;
+			} else {
+				solidAppearanceRules = std::get_if<SolidAppearanceRules>( appearanceRules );
+				cloudAppearanceRules = std::get_if<CloudAppearanceRules>( appearanceRules );
+			}
+
+			assert( solidAppearanceRules || cloudAppearanceRules );
+
+			assert( solidAppearanceRules || cloudAppearanceRules );
+			SharedMeshData *sharedMeshData = &hull->sharedMeshData[meshNum];
+
+			sharedMeshData->lifetimeFrac = lifetimeFrac;
+
+			DynamicCagedMesh *meshToRender = hull->sharedCageCagedMeshes[meshNum];
+			sharedMeshData->dynamicCagedMeshToRender  = meshToRender;
+
+			sharedMeshData->simulatedPositions  = nullptr;
+			sharedMeshData->cageVertexPositions = hull->vertexPositions;
+			sharedMeshData->cageVertexNormals   = hull->vertexNormals;
+
+			sharedMeshData->cageTriIndices = cage->triIndices.data();
+			sharedMeshData->limitsAtDirections = hull->limitsAtDirections;
+
+			sharedMeshData->scale  = hull->scale;
+			VectorCopy( hull->origin, sharedMeshData->origin );
+
+			sharedMeshData->simulatedNormals     = nullptr;
+
+			sharedMeshData->minZLastFrame        = 0.0f;
+			sharedMeshData->maxZLastFrame        = 0.0f;
+			sharedMeshData->zFade                = ZFade::NoFade;
+			sharedMeshData->simulatedSubdivLevel = 0;
+			sharedMeshData->tesselateClosestLod  = false;
+			sharedMeshData->lerpNextLevelColors  = true;
+			sharedMeshData->nextLodTangentRatio  = 0.30f;
+
+			sharedMeshData->cachedChosenSolidSubdivLevel     = std::nullopt;
+			sharedMeshData->cachedOverrideColorsSpanInBuffer = std::nullopt;
+			sharedMeshData->overrideColorsBuffer             = &m_frameSharedOverrideColorsBuffer;
+			sharedMeshData->hasSibling                       = solidAppearanceRules && cloudAppearanceRules;
+
+			sharedMeshData->isAKeyframedHull = true;
+			sharedMeshData->hullType = HullType::DynamicHull;
+
+			const unsigned numFrames = meshToRender->numFrames;
+			const unsigned currFrame = wsw::min( numFrames - 1, (unsigned)( lifetimeFrac * numFrames ) );
+
+			// we can assume the LODs have about the same bounding radius as the most detailed version, also:
+			// as other LODs are used at longer distances, even if the LOD was slightly larger, it will not be noticeable
+			// if the culling is premature.
+
+//			vec4_t mins, maxs;
+//			const float currBoundingRadius = meshToRender->boundingRadii[currFrame] * hull->scale;
+//			getBoundsForStaticCagedMesh( currBoundingRadius, hull->origin, hull->cageMins, hull->cageMaxs,
+//										 mins, maxs );
+//
+//			maxBoundingRadius = wsw::max( maxBoundingRadius, currBoundingRadius );
+//			mins[3] = 0.0f, maxs[3] = 1.0f;
+
+			if( solidAppearanceRules ) [[likely]] {
+				HullSolidDynamicMesh *mesh = &hull->submittedSolidMesh[meshNum];
+
+				Vector4Copy( hull->mins, mesh->cullMins );
+				Vector4Copy( hull->maxs, mesh->cullMaxs );
+
+				mesh->material = solidAppearanceRules->material;
+				mesh->m_shared = sharedMeshData;
+				// TODO: Restore this functionality if it could be useful
+				//mesh->applyVertexDynLight = hull->applyVertexDynLight;
+
+				const float drawOrderDesignator = 2.0f * (float)( numMeshesToRender - meshNum ) + solidLayerOrderBoost;
+
+				submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+				submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+
+
+				numMeshesToSubmit++;
+			}
+
+			if( cloudAppearanceRules ) [[unlikely]] {
+
+				assert( !cloudAppearanceRules->spanOfMeshProps.empty() );
+				assert( cloudAppearanceRules->spanOfMeshProps.size() <= std::size( layer->submittedCloudMeshes ) );
+
+				const float hullLifetimeFrac = (float)( currTime - hull->spawnTime ) * Q_Rcp( (float)hull->lifetime );
+
+				for( size_t meshPropNum = 0; meshPropNum < cloudAppearanceRules->spanOfMeshProps.size(); ++meshPropNum ) { // seems wrong, the hull struct only has one single slot per layer (before) for submitted cloud meshes..
+					const CloudMeshProps &__restrict meshProps  = cloudAppearanceRules->spanOfMeshProps[meshPropNum];
+					HullCloudDynamicMesh *const __restrict mesh = &hull->submittedCloudMesh[meshNum];
+
+					mesh->m_spriteRadius = meshProps.radiusLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+					if( mesh->m_spriteRadius > 1.0f ) [[likely]] {
+						mesh->m_alphaScale = meshProps.alphaScaleLifespan.getValueForLifetimeFrac( hullLifetimeFrac );
+						Vector4Copy( hull->mins, mesh->cullMins );
+						Vector4Copy( hull->maxs, mesh->cullMaxs );
+
+						Vector4Copy( meshProps.overlayColor, mesh->m_spriteColor );
+
+						mesh->material            = meshProps.material;
+						//mesh->applyVertexDynLight = hull->applyVertexDynLight; // TODO: restore this functionality if useful
+						mesh->m_shared            = sharedMeshData;
+						mesh->m_lifetimeSeconds   = 1e-3f * (float)( currTime - hull->spawnTime );
+						mesh->m_applyRotation     = meshProps.applyRotation;
+
+						mesh->m_tessLevelShiftForMinVertexIndex = meshProps.tessLevelShiftForMinVertexIndex;
+						mesh->m_tessLevelShiftForMaxVertexIndex = meshProps.tessLevelShiftForMaxVertexIndex;
+						mesh->m_fractionOfParticlesToRender     = meshProps.fractionOfParticlesToRender;
+						cgNotice() << "fraction" << mesh->m_fractionOfParticlesToRender << " " << meshProps.fractionOfParticlesToRender;
+						mesh->m_shiftFromDefaultLevelToHide     = meshProps.shiftFromDefaultLevelToHide;
+
+						if( !( mesh->m_speedIndexShiftInTable | mesh->m_phaseIndexShiftInTable ) ) [[unlikely]] {
+							const auto randomWord          = (uint16_t)m_rng.next();
+							mesh->m_speedIndexShiftInTable = ( randomWord >> 0 ) & 0xFF;
+							mesh->m_phaseIndexShiftInTable = ( randomWord >> 8 ) & 0xFF;
+						}
+
+						const float drawOrderDesignator = 2.0f * (float)( numMeshesToRender - meshNum ) + cloudLayerOrderBoost;
+
+						submittedMeshesBuffer[numMeshesToSubmit]     = mesh;
+						submittedOrderDesignators[numMeshesToSubmit] = drawOrderDesignator;
+
+						numMeshesToSubmit++;
+					}
+				}
+			}
+		}
+
+
+		if( numMeshesToSubmit ) [[likely]] {
+			assert( numMeshesToSubmit <= kMaxMeshesPerHull );
+
+			drawSceneRequest->addCompoundDynamicMesh( hull->mins, hull->maxs, submittedMeshesBuffer,
+													  numMeshesToSubmit, submittedOrderDesignators );
+		}
+
+
+		keyframedHullIndex++;
+
+		offsetOfMultilayerMeshData += numMeshesToSubmit;
+
+	}
 
 	assert( meshDataOffsetsForPairs.size() == numAddedMeshesForPairs.size() );
 	assert( meshDataOffsetsForPairs.size() == boundsForPairs.size() );
@@ -4211,7 +4500,7 @@ auto SimulatedHullsSystem::HullDynamicMesh::calcSolidSubdivLodLevel( const float
 
 
     unsigned chosenSubdivLevel;
-    if( !m_shared->isAKeyframedHull ) {
+    if(  m_shared->hullType == HullType::OldHull  ) {
         // Get a suitable subdiv level and store it for further use during this frame
         chosenSubdivLevel = m_shared->simulatedSubdivLevel;
         if (m_shared->tesselateClosestLod) {
@@ -4465,7 +4754,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
 	unsigned numVertices;
 	unsigned numIndices;
 
-	if( m_shared->isAKeyframedHull ){
+	if(  m_shared->hullType != HullType::OldHull  ){
 		unsigned LODnum = 0;
         unsigned LODtoRender;
         if( v_LODtoShow.get() >= 0 ){
@@ -4473,14 +4762,14 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
         } else {
             LODtoRender = m_chosenSubdivLevel;
         }
-		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
 
 		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 			meshToRender = currLOD;
 			nextLOD = currLOD->nextLOD;
 		}
-        // TODO: won't reassigning m_shared->meshToRender like this in this stage confuse others?
-        m_shared->meshToRender = meshToRender; // assign the appropriate LOD
+        // TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
+        m_shared->staticCagedMeshToRender = meshToRender; // assign the appropriate LOD
 
 		numVertices = meshToRender->numVertices;
 		numIndices  = meshToRender->triIndices.size() * 3;
@@ -4522,7 +4811,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 	assert( m_tessLevelShiftForMaxVertexIndex <= 0 );
 	assert( m_tessLevelShiftForMinVertexIndex <= m_tessLevelShiftForMaxVertexIndex );
 
-	if( !m_shared->isAKeyframedHull ){
+	if( m_shared->hullType == HullType::OldHull  ){
         if( m_chosenSubdivLevel > m_shared->simulatedSubdivLevel ) {
             m_chosenSubdivLevel = m_shared->simulatedSubdivLevel;
         } else {
@@ -4555,14 +4844,14 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 			LODtoRender = m_chosenSubdivLevel;
             cgNotice() << "lod to render in get storage" << LODtoRender;
 		}
-		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
 
 		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
 			meshToRender = currLOD;
 			nextLOD = currLOD->nextLOD;
 		}
-		// TODO: won't reassigning m_shared->meshToRender like this in this stage confuse others?
-		m_shared->meshToRender = meshToRender; // assign the appropriate LOD
+		// TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
+		m_shared->staticCagedMeshToRender = meshToRender; // assign the appropriate LOD
 
 		numGridVertices = meshToRender->numVertices * m_fractionOfParticlesToRender;
 		cgNotice() << "grid vertices:" << numGridVertices;
@@ -4686,7 +4975,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
 	unsigned numResultVertices, numResultIndices;
 
-	if( !m_shared->isAKeyframedHull ) {
+	if(  m_shared->hullType == HullType::OldHull  ) {
 		assert( m_shared->simulatedSubdivLevel <= BasicHullsHolder::kMaxSubdivLevel );
 		assert( m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1 );
 		assert( m_shared->minZLastFrame <= m_shared->maxZLastFrame );
@@ -4748,7 +5037,7 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         const auto before = Sys_Microseconds();
 
         // the correct LOD has already been assigned in getSotrageRequirements()
-		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
         const float lifetimeFrac = m_shared->lifetimeFrac;
 
 		// write positions to destPositions
@@ -5073,7 +5362,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
     unsigned numResultVertices = 0;
 	unsigned numResultIndices = 0;
 
-    if( !m_shared->isAKeyframedHull ){
+    if( m_shared->hullType == HullType::OldHull  ){
         assert(m_shared->simulatedSubdivLevel < BasicHullsHolder::kMaxSubdivLevel);
         assert(m_chosenSubdivLevel <= m_shared->simulatedSubdivLevel + 1);
         assert(m_shared->minZLastFrame <= m_shared->maxZLastFrame);
@@ -5190,7 +5479,7 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
         } while (++vertexNum < m_vertexNumLimitThisFrame);
     } else {
 		// the correct LOD has already been assigned in getSotrageRequirements()
-		StaticCagedMesh *meshToRender = m_shared->meshToRender;
+		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
 		const float lifetimeFrac = m_shared->lifetimeFrac;
 
 		const tri *cageTriIndices = m_shared->cageTriIndices;

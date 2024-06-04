@@ -297,6 +297,11 @@ public:
 private:
 	static constexpr unsigned kNumVerticesForSubdivLevel[5] { 12, 42, 162, 642, 2562 };
 
+	enum class HullType : uint8_t {
+		OldHull,
+		StaticHull,
+		DynamicHull
+	};
 	// We have to supply solid and cloud parts separately for a proper handling of surface sorting in the renderer.
 	// Still, they share many properties.
 	struct SharedMeshData {
@@ -321,15 +326,19 @@ private:
 		// currently for keyframed hull shading
 		bool isAKeyframedHull { false };
 
+		HullType hullType { HullType::OldHull };
+
         /// for caged hulls
         float lifetimeFrac { 0.0f };
-        StaticCagedMesh *meshToRender { nullptr };
+        StaticCagedMesh *staticCagedMeshToRender { nullptr };
+		DynamicCagedMesh *dynamicCagedMeshToRender { nullptr };
         StaticCage *cage { nullptr };
         //unsigned numMeshesToRender { 1u };
         float scale { 35.0f };
         vec3_t origin { 0.0f, 0.0f, 0.0f };
         //Geometry *cage { nullptr };
 		vec3_t *cageVertexPositions { nullptr };
+		vec3_t *cageVertexNormals { nullptr };
 		tri *cageTriIndices { nullptr };
         float *limitsAtDirections { nullptr };
         /// for caged hulls END
