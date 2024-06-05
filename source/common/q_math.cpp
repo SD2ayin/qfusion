@@ -873,12 +873,11 @@ bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
 	vec3_t m;
 	CrossProduct( &coefficients[0], result, m );
 	float coefficientsDeterminant = DotProduct( &coefficients[0], n );
-	float rcpDeterminant;
 	if( coefficientsDeterminant > 0.0f + 1e-3f || coefficientsDeterminant < 0.0f - 1e-3f ) {
 		outSolution[0] = DotProduct( result, n );
 		outSolution[1] = DotProduct( &coefficients[6], m );
 		outSolution[2] = -DotProduct( &coefficients[3], m );
-		rcpDeterminant = Q_Rcp( coefficientsDeterminant );
+		const float rcpDeterminant = Q_Rcp( coefficientsDeterminant );
 		VectorScale( outSolution, rcpDeterminant, outSolution );
 	} else {
 		/// tmp
@@ -892,12 +891,6 @@ bool Solve3by3( mat3_t coefficients, vec3_t result, vec3_t outSolution ){
 	return true;
 }
 
-bool testNewThing( vec3_t initialGuess, float maxError, float thresholdError, unsigned maxIterations,
-				   std::function<void(vec3_t, vec3_t)> function,
-				   std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution ){
-	return true;
-}
-
 bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresholdError,
 						 unsigned maxIterations, std::function<void(vec3_t, vec3_t)> function,
 						 std::function<void(vec3_t, mat3_t)> getJacobianForFunction, vec3_t outSolution ){
@@ -907,12 +900,14 @@ bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresh
 	mat3_t Jacobian;
 
 	const float thresholdErrorSquared = thresholdError * thresholdError;
+	float errorSquared;
+
 	bool solutionFound = false;
 	for( int i = 0; i < maxIterations; i++ ) {
 		function( guess, functionResult );
-		//Com_Printf("%siteration:%i error:%f\n", S_COLOR_GREEN, i, VectorLengthSquared( functionResult ));
 
-		if( VectorLengthSquared( functionResult ) < thresholdErrorSquared ){
+		errorSquared = VectorLengthSquared( functionResult );
+		if( errorSquared < thresholdErrorSquared ){
 			break;
 		}
 
@@ -927,11 +922,8 @@ bool findRootVec3Newton( const vec3_t initialGuess, float maxError, float thresh
 	}
 
 	const float maxErrorSquared = maxError * maxError;
-	if( VectorLengthSquared( functionResult ) < maxErrorSquared ){
+	if( errorSquared < maxErrorSquared ){
 		solutionFound = true;
-	}
-
-	if( solutionFound ){
 		VectorCopy( guess, outSolution );
 	}
 

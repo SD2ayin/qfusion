@@ -638,8 +638,6 @@ void JacobianForDynamicCageTransform( vec3_t coords, const vec3_t *triPositions,
 	const vec2_t coordsOnTri = { coords[0], coords[1] }; // 2: vertCoords
 	const float L = coords[2];
 
-	vec3_t position;
-
 	vec3_t firstToSecond;
 	vec3_t firstToThird;
 
@@ -884,7 +882,6 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 	std::span<tri> cageTriIndices = initialCageGeometry->triIndices;
 	const unsigned cageFaces = cageTriIndices.size();
 
-	Geometry cageMesh;
 	for( unsigned frameNum = 0; frameNum < numFrames; frameNum++ ){
 		const int lastFrame = (int)frameNum - 1;
 		if( lastFrame >= 0 ) {
@@ -894,24 +891,24 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 			}
 		}
 
-		GetGeometryFromFileAliasMD3( "gfx/hulls/dynamicExample.md3", &cageMesh, nullptr, frameNum );
-
 		///
 		// TODO: this could be more accurate with getVolume( cageVertPositions, etc ) and avgCageExtent = (volume)^(1/3)
 		BoundsBuilder cageBoundsBuilder;
 		vec3_t cageMins, cageMaxs;
 		for( unsigned vertNum = 0; vertNum < cageVerts; vertNum++ ) {
 			cageBoundsBuilder.addPoint( cageVertPositions[vertNum] );
-			vec3_t error;
-			VectorSubtract( cageVertPositions[vertNum], cageMesh.vertexPositions[vertNum], error );
-			cgNotice() << "diff between loaded from md3 and simulated:" << VectorLengthFast( error );
 		}
 		cageBoundsBuilder.storeTo( cageMins, cageMaxs );
 		const float avgCageExtent = 0.333f * ( cageMaxs[0] - cageMins[0] + cageMaxs[1] - cageMins[1] + cageMaxs[2] - cageMins[2] );
-		///
-		constexpr float avgVertexSeparation = 3.0f/100; // percentage of average extent based on a cube
-		const float maxAllowableError = 0.2f * avgVertexSeparation;
-		const float thresholdError    = 0.005f * avgVertexSeparation;
+
+		// average extent based on a cube with sides of avgCageExtent:
+		// ~1/6 of total vertices on a face, ~sqrt() of that on an edge
+		constexpr float oneSixth = 1.0f/6;
+		const float numVertsOnCubeFace    = (float)meshVerts * oneSixth;
+		const float rcpNumVertsOnCubeEdge = Q_RSqrt( numVertsOnCubeFace );
+		const float avgVertexSeparation   = avgCageExtent * rcpNumVertsOnCubeEdge;
+		const float maxAllowableError     = 0.1f * avgVertexSeparation;
+		const float thresholdError        = 1e-3f * avgVertexSeparation;
 
 		vec3_t initialCoordsGuess = { 0.33333f, 0.33333f, 0.2f * avgCageExtent };
 
@@ -932,7 +929,6 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 			cageCoord->offsetOnTri = std::numeric_limits<float>::infinity();
 
 			for( unsigned faceNum = 0; faceNum < cageFaces; faceNum++ ){
-				//cgNotice() << S_COLOR_BLUE << "face" << faceNum << "/" << cageFaces;
 
 				const uint16_t *faceIndices = cageTriIndices[faceNum];
 				vec3_t triPositions[3];
@@ -948,12 +944,7 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 					JacobianForDynamicCageTransform( coords, triPositions, triNormals, outJacobian );
 				};
 
-//				vec3_t error;
-//				function( initialCoordsGuess, error );
-//				cgNotice() << "initial guess:" << initialCoordsGuess[0] << initialCoordsGuess[1] << initialCoordsGuess[2];
-//				cgNotice() << "initial error, length:" << VectorLengthFast(error) << "components:" << error[0] << error[1] << error[2];
-
-				constexpr unsigned maxIterations = 24; // arbitrarily chosen, not sure if optimal
+				constexpr unsigned maxIterations = 8; // arbitrarily chosen, not sure if optimal
 				vec3_t outCoords;
 
 				float offset;
@@ -965,29 +956,23 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 					VectorMA( linCombiOfNormals, outCoords[0], triNormals[1], linCombiOfNormals );
 					VectorMA( linCombiOfNormals, outCoords[1], triNormals[2], linCombiOfNormals );
 					offset = outCoords[2] * Q_RSqrt( VectorLengthSquared(linCombiOfNormals) );
-
-					//cgNotice() << "offset:" << offset;
 				} else {
 					continue;
 				}
 				vec2_t coordsOnTri = { outCoords[0], outCoords[1] };
 
-				constexpr float margin = 5e-3f; // to account for floating point error and solver error
-				const float compareValue = offset > 0.0f ? offset : 2 * abs( offset ); // prefer positive offset
+				const float oldOffset       = cageCoord->offsetOnTri;
+				const float oldCompareValue = oldOffset > 0.0f ? oldOffset : 2 * abs( oldOffset );
+				const float newCompareValue = offset > 0.0f ? offset : 2 * abs( offset );//2 * abs( offset ); // prefer positive offset
+
+				constexpr float margin = 1e-3f; // to account for floating point error and solver error
 				const bool isOnTri = ((coordsOnTri[0] + coordsOnTri[1]) < 1.0f + margin) &&
-						              (coordsOnTri[0] > 0.0f - margin) && (coordsOnTri[1] > 0.0f - margin);
-				if( isOnTri && ( compareValue < cageCoord->offsetOnTri ) ){
-					//return false;
+									 (coordsOnTri[0] > 0.0f - margin) && (coordsOnTri[1] > 0.0f - margin);
+				if( isOnTri && ( newCompareValue < oldCompareValue ) ){
 					cageCoord->offsetOnTri = offset;
 					cageCoord->cageTriIdx = faceNum;
 					cageCoord->coordsOnCageTri[0] = coordsOnTri[0];
 					cageCoord->coordsOnCageTri[1] = coordsOnTri[1];
-
-//					cgNotice() << "offset:" << offset;
-//					vec3_t error;
-//					function( outCoords, error );
-//					cgNotice() << "error:" << VectorLengthFast( error );
-//					cgNotice() << "relative error:" << VectorLengthFast( error ) * Q_Rcp( avgCageExtent );
 				}
 			}
 
@@ -996,37 +981,12 @@ bool SimulatedHullsSystem::DynamicCagedMesh::transformToCageSpace( DynamicCage *
 				cgNotice() << S_COLOR_RED << "position:" << S_COLOR_WHITE << meshVertPosition[0] << meshVertPosition[1] << meshVertPosition[2];
 				return false;
 			} else {
-				cgNotice() << S_COLOR_ORANGE << "frame:" << frameNum << "vert:" << vertNum <<
-				"found fit with coords:" << cageCoord->coordsOnCageTri[0] << cageCoord->coordsOnCageTri[1] <<
-				"offset:" << cageCoord->offsetOnTri << "tri index:" << cageCoord->cageTriIdx;
+				maxOffsetFromCage = wsw::max( cageCoord->offsetOnTri, maxOffsetFromCage );
 			}
-//			if( VectorLengthFast( meshVertPosition ) < 1e-3f ) {
-//				// in this case, the vertex is practically at the origin. That means it doesn't matter which cage face it belongs to,
-//				// as it's going to stay at the origin either way. Otherwise, the following collision check to determine the cage face
-//				// that the vertex belongs to may not find any solutions.
-//
-//				cageCoord->cageTriIdx = 0;
-//				vec2_t coordinates = { 0.0f, 0.0f };
-//				Vector2Copy( coordinates, cageCoord->coordsOnCageTri );
-//
-//				foundCoords = true;
-//			} else {
-//				foundCoords = collisionCheck( cage, origin, meshVertPosition, std::numeric_limits<float>::infinity(),
-//											  &cageCoord->cageTriIdx, nullptr, cageCoord->coordsOnCageTri );
-//			}
-//
-//			if( foundCoords ) {
-//				cageCoord->offset = VectorLengthFast( meshVertPosition );
-//				maxRadius = wsw::max( maxRadius, cageCoord->offset );
-//			} else {
-//				cgNotice() << S_COLOR_RED << "no coords found for" << vertNum << "in frame: " << frameNum;
-//				return false;
-//			}//
 		}
 
-		this->maxOffsetFromCageForFrame[frameNum] = maxOffsetFromCage;
-		float *currFrameOffsetsFromLim = this->offsetFromLim + frameNum * meshVerts;
-		//std::fill( currFrameOffsetsFromLim, currFrameOffsetsFromLim + meshVerts,  maxRadius * 6e-2f );
+		maxOffsetFromCageForFrame[frameNum] = maxOffsetFromCage;
+		cgNotice() << S_COLOR_BLUE << "frame:" << S_COLOR_WHITE << frameNum << S_COLOR_BLUE << "offset:" << S_COLOR_WHITE << maxOffsetFromCage;
 
 	}
 
@@ -1246,15 +1206,12 @@ void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, DynamicCage
 	const unsigned numVertices = cagedMesh->numVertices;
 	DynamicCageCoordinate *vertCoords = cagedMesh->vertexCoordinates;
 
-	constexpr unsigned kMinLifetime = 2000;
-
-	constexpr float scrollSpeed     = 1.43f;
-	constexpr float scrollDistance  = scrollSpeed * ( (float)kMinLifetime * 1e-3f );
+	constexpr float scrollDistance  = 10.0f;
 
 	constexpr float initialSize     = 0.1f;
 	constexpr float fadeRange       = 0.12f;
-	constexpr float fadeStartAtFrac = 0.1f;
-	constexpr float zFadeInfluence  = 0.3f;
+	constexpr float fadeStartAtFrac = 0.5f;
+	constexpr float zFadeInfluence  = 0.1f;
 
 	auto *fireVertexMaskStorage = new float[numFrames * numVertices];
 	auto *fadeVertexMaskStorage = new float[numFrames * numVertices];
@@ -1299,9 +1256,9 @@ void SimulatedHullsSystem::applyShading( wsw::StringView pathToMesh, DynamicCage
 
 			frameFireVertexMask[vertexNum] = ( vertexOffset - minOffsetForFrame ) * rcpOffsetInterval; // Values between 1 and 0 where 1 has the highest offset
 
-			const float simplexNoise       = calcSimplexNoise3D( vertex[0], vertex[1], vertex[2] - scrolledDistance );
+			const float simplexNoise       = calcSimplexNoise3D( vertex[0] * 0.3f, vertex[1] * 0.3f, vertex[2] * 0.3f - scrolledDistance * 0.0f );
 			const float fadeFrac           = ( frameFrac - fadeStartAtFrac ) / ( 1.0f - fadeStartAtFrac );
-			const float zFade              = 0.5f * ( vertex[2] + 1.0f ) * zFadeInfluence;
+			const float zFade              = 0.5f * ( ( vertex[2] - scrolledDistance ) + 1.0f ) * zFadeInfluence;
 			frameFadeVertexMask[vertexNum] = fadeFrac - simplexNoise * ( 1.0f - zFadeInfluence ) - zFade + fadeRange;
 		}
 
@@ -1899,9 +1856,9 @@ void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const f
     vec3_t *vertexPositions = cageInitialGeometry->vertexPositions.data();
     unsigned numVerts = cageInitialGeometry->vertexPositions.size();
 
-    const float maxOffsetFromCage = hull->maxOffsetFromCage; // TODO: find the max offset among dynamic cage meshes for this value
+    const float maxOffsetFromCage = hull->maxOffsetFromCage;
 
-    cgNotice() << "set up hull vertices";
+    cgNotice() << "set up" << numVerts << "hull vertices";
     // Calculate move limits in each direction
 
     const float radius = scale * cage->initialBoundingRadius + maxOffsetFromCage;
@@ -1927,6 +1884,17 @@ void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const f
 
     vec3_t color { 0.99f, 0.4f, 0.1f };
 
+	effectsSystem->spawnTransientBeamEffect( growthMins, growthMaxs, {
+			.material          = cgs.media.shaderLaser,
+			.beamColorLifespan = {
+					.initial  = {color[0], color[1], color[2]},
+					.fadedIn  = {color[0], color[1], color[2]},
+					.fadedOut = {color[0], color[1], color[2]},
+			},
+			.width             = 8.0f,
+			.timeout           = v_trisLifetime.get(),
+	} );
+
     vec3_t *hullVertexPositions = hull->vertexPositions;
     vec3_t *hullVertexNormals   = hull->vertexNormals;
     float *limitsAtDirections   = hull->limitsAtDirections;
@@ -1946,7 +1914,7 @@ void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const f
 //        VectorAdd( hull->maxs, maxCageBoundsOffset, hull->maxs );
 //        VectorSubtract( hull->mins, maxCageBoundsOffset, hull->mins );
 
-        cgNotice() << "no shapes";
+        cgNotice() << S_COLOR_RED << "setuphullvertices cage vertices no shapes";
 
     } else {
         trace_t trace;
@@ -1964,10 +1932,8 @@ void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const f
                                 MASK_SOLID );
 
             const float moveDirLength = VectorLengthFast( hullVertexPositions[i] );
-            limitsAtDirections[i] = trace.fraction * moveDirLength;
 
             VectorMA( origin, scale * trace.fraction, hullVertexPositions[i], limitPoint );
-            //cageBoundsBuilder.addPoint( limitPoint );
             VectorCopy( limitPoint, hullVertexPositions[i] );
 
             if( trace.fraction < 0.99f ){
@@ -2008,10 +1974,13 @@ void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const f
 
     if( CM_GetNumShapesInShapeList( shapeList ) == 0 ) {
         // Limits at each direction just match the maximum offset from the cage in this cage
+		cgNotice() << S_COLOR_RED << "setuphullvertices limits no shapes";
         std::fill( limitsAtDirections, limitsAtDirections + numVerts, maxOffsetFromCage );
 		for( size_t i = 0; i < numVerts; i++ ) {
 			vec3_t offsetPos;
 			VectorMA( hullVertexPositions[i], maxOffsetFromCage, hullVertexNormals[i], offsetPos );
+			limitsAtDirections[i] = maxOffsetFromCage;
+			//cgNotice() << "limit" << i << ":" << limitsAtDirections[i];
 			cageBoundsBuilder.addPoint( offsetPos );
 		}
     } else {
@@ -2019,9 +1988,12 @@ void SimulatedHullsSystem::setupHullVertices( BaseDynamicCageHull *hull, const f
         for( size_t i = 0; i < numVerts; i++ ) {
             vec3_t limitPoint;
             VectorMA( hullVertexPositions[i], maxOffsetFromCage, hullVertexNormals[i], limitPoint );
-            CM_ClipToShapeList(cl.cms, shapeList, &trace, hullVertexPositions[i],
-                               limitPoint, vec3_origin, vec3_origin, MASK_SOLID);
+            CM_ClipToShapeList( cl.cms, shapeList, &trace, hullVertexPositions[i],
+                               limitPoint, vec3_origin, vec3_origin, MASK_SOLID );
             limitsAtDirections[i] = maxOffsetFromCage * trace.fraction;
+			cgNotice() << "trace frac" << i << ":" << trace.fraction;
+			cgNotice() << "max offset from cage:" << maxOffsetFromCage;
+			cgNotice() << "limit" << i << ":" << limitsAtDirections[i];
 
 			vec3_t offsetPos;
 			VectorMA( hullVertexPositions[i], limitsAtDirections[i], hullVertexNormals[i], offsetPos );
@@ -2114,9 +2086,6 @@ void SimulatedHullsSystem::addHull( AppearanceRules *appearanceRules, DynamicCag
     SimulatedHullsSystem::DynamicCage *cage = std::addressof( m_loadedDynamicCages[cagedMeshes->loadedCageKey] );
 
     cgNotice() << "identifier" << cage->identifier;
-    //cgNotice() << "size" << m_loadedDynamicCages.size();
-
-    //cgNotice() << "amk";
 
     if( auto *const hull = SimulatedHullsSystem::allocDynamicCageHull( cage, m_lastTime, hullParams.timeout ) ){
         const vec3_t hullOrigin {
@@ -2128,11 +2097,13 @@ void SimulatedHullsSystem::addHull( AppearanceRules *appearanceRules, DynamicCag
         const unsigned numMeshes = hullParams.numCagedMeshes;
         hull->numSharedCageCagedMeshes = numMeshes;
 
+		hull->maxOffsetFromCage = 0.0f;
         for( unsigned meshNum = 0; meshNum < numMeshes; meshNum++ ) {
             hull->sharedCageCagedMeshes[meshNum] = &cagedMeshes[meshNum];
-            hull->appearanceRules[meshNum]       = appearanceRules[meshNum];    
-            hull->maxOffsetFromCage              = hullParams.scale * cage->initialBoundingRadius * 1.2f;
-            //hull->maxOffsetFromCage              = wsw::max( hull->maxOffsetFromCage, cagedMeshes[meshNum].maxOffsetFromCage); // TODO: use this instead when mesh registration works
+            hull->appearanceRules[meshNum]       = appearanceRules[meshNum];
+			hull->appearanceRules[meshNum]       = appearanceRules[meshNum];
+			hull->maxOffsetFromCage              = wsw::max( hull->maxOffsetFromCage,
+															 cagedMeshes[meshNum].maxOffsetFromCageForFrame[0] * hullParams.scale );
         }
 
 		hull->maxOffsetSpeed = hullParams.maxOffsetSpeed;
@@ -2684,7 +2655,11 @@ void SimulatedHullsSystem::simulateFrameAndSubmit( int64_t currTime, DrawSceneRe
 
 		const DynamicCagedMesh *firstCagedMesh = hull->sharedCageCagedMeshes[0];
 		const unsigned cageKey = firstCagedMesh->loadedCageKey;
-		const Geometry *cage = &m_loadedStaticCages[cageKey].cageGeometry;
+		const Geometry *cage = &m_loadedDynamicCages[cageKey].cageInitialGeometry;
+
+		/// tmp
+		const unsigned numCageVerts = cage->vertexPositions.size();
+		/// tmp END
 
 		float maxBoundingRadius = 0.0f;
 
@@ -3557,6 +3532,10 @@ void SimulatedHullsSystem::vertexPosFromDynamicCage( const DynamicCageCoordinate
 	VectorScale( vertexPositions[cageVertIdx0], coeff0, position );
 	VectorMA( position, coeff1, vertexPositions[cageVertIdx1], position );
 	VectorMA( position, coeff2, vertexPositions[cageVertIdx2], position );
+//	cgNotice() << "vertex positions:";
+//	cgNotice() << "1:" << vertexPositions[cageVertIdx0][0] << vertexPositions[cageVertIdx0][1] << vertexPositions[cageVertIdx0][2];
+//	cgNotice() << "2:" << vertexPositions[cageVertIdx1][0] << vertexPositions[cageVertIdx1][1] << vertexPositions[cageVertIdx1][2];
+//	cgNotice() << "3:" << vertexPositions[cageVertIdx2][0] << vertexPositions[cageVertIdx2][1] << vertexPositions[cageVertIdx2][2];
 
 	vec3_t moveDir;
 	VectorScale( vertexNormals[cageVertIdx0], coeff0, moveDir );
@@ -3571,7 +3550,7 @@ void SimulatedHullsSystem::vertexPosFromDynamicCage( const DynamicCageCoordinate
 
 	const float maxOffset = wsw::max( 0.0f, limit - offsetFromLim );
 
-	const float offset = wsw::min( vertCoord.offsetOnTri, maxOffset ) * scale;
+	const float offset = wsw::min( vertCoord.offsetOnTri * scale, maxOffset );
 
 	VectorMA( position, offset, moveDir, outPos );
 }
@@ -3580,8 +3559,9 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 														  PolyEffectsSystem *effectsSystem ) {
 	BoundsBuilder cageBoundsBuilder;
 
-	const DynamicCagedMesh *cagedMesh = sharedCageCagedMeshes[0];
-	const unsigned cageKey = cagedMesh->loadedCageKey;
+	const DynamicCagedMesh *cagedMesh = sharedCageCagedMeshes[0]; // for testing
+	DynamicCagedMesh **cagedMeshes = sharedCageCagedMeshes;
+	const unsigned cageKey = cagedMeshes[0]->loadedCageKey;
 
 	const DynamicCage *cage = std::addressof( cg.simulatedHullsSystem.m_loadedDynamicCages[cageKey] );
 	const Geometry *initialGeometry = &cage->cageInitialGeometry;
@@ -3592,6 +3572,15 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 	const unsigned numFrames = cage->numFrames;
 	const unsigned currFrame = wsw::min((unsigned) ( numFrames * lifetimeFrac ), ( numFrames - 1 ) - 1 );
 
+	maxOffsetFromCage = 0.0f;
+	for( unsigned meshNum = 0; meshNum < numSharedCageCagedMeshes; meshNum++ ) {
+		// since interpolation occurs between the current and next frame,
+		// we need the maximum between the current and next frame
+		const float maxOffsetForMesh  = wsw::max( cagedMeshes[meshNum]->maxOffsetFromCageForFrame[currFrame],
+												  cagedMeshes[meshNum]->maxOffsetFromCageForFrame[currFrame + 1] );
+		maxOffsetFromCage = wsw::max( maxOffsetFromCage, maxOffsetForMesh * scale );
+	}
+
 	const float frameTime = lifetime * Q_Rcp((float) numFrames );
 	const float frameTimeSeconds = frameTime * 1e-3f;
 	const float deltaFrame = timeDeltaSeconds * Q_Rcp( frameTimeSeconds );
@@ -3599,8 +3588,7 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 	const float maxVelocity = cage->maxVelocityThisFrame[currFrame];
 	vec3_t *vertexVelocities = cage->vertexVelocities + currFrame * cageVerts;
 
-	const float rcpSqrtThree = 0.57735027;
-	const vec3_t boundingOffsetDir = {rcpSqrtThree, rcpSqrtThree, rcpSqrtThree};
+	const vec3_t boundingOffsetDir = { 1.0f, 1.0f, 1.0f };
 	const float maxOffsetFromPrevCage = maxOffsetFromCage + scale * maxVelocity * deltaFrame;
 	vec3_t collisionMins, collisionMaxs;
 	VectorMA( maxs, maxOffsetFromPrevCage, boundingOffsetDir,
@@ -3609,7 +3597,7 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 
 	vec3_t color{0.99f, 0.4f, 0.1f};
 
-	effectsSystem->spawnTransientBeamEffect( collisionMins, collisionMaxs, {
+	effectsSystem->spawnTransientBeamEffect( mins, maxs, {
 			.material          = cgs.media.shaderLaser,
 			.beamColorLifespan = {
 					.initial  = {color[0], color[1], color[2]},
@@ -3632,7 +3620,7 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 			VectorMA( vertexPositions[vertNum], deltaFrame * scale, vertexVelocity,
 					  vertexPositions[vertNum] );
 		}
-		cgNotice() << "no shapes";
+		cgNotice() << "simulate cage vertices no shapes";
 	} else {
 		trace_t trace;
 
@@ -3698,9 +3686,11 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 			vec3_t limitPoint;
 			VectorMA( vertexPositions[i], maxOffsetFromCage, vertexNormals[i], limitPoint );
 			CM_ClipToShapeList( cl.cms, shapeList, &trace, vertexPositions[i],
-								limitPoint, vec3_origin, vec3_origin, MASK_SOLID);
+								limitPoint, vec3_origin, vec3_origin, MASK_SOLID );
 			const float limitDiff = maxOffsetFromCage * trace.fraction - limitsAtDirections[i];
 			limitsAtDirections[i] += wsw::clamp( limitDiff, -maxOffsetDist, maxOffsetDist );
+//			limitsAtDirections[i] = maxOffsetFromCage * trace.fraction;
+//			limitsAtDirections[i] += limitDiff;
 
 			vec3_t offsetPos;
 			VectorMA( vertexPositions[i], limitsAtDirections[i], vertexNormals[i], offsetPos );
@@ -3750,27 +3740,18 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 						.timeout           = 10u
 				} );
 
-				effectsSystem->spawnTransientBeamEffect( firstOffsetPos, secondOffsetPos, {
-						.material          = cgs.media.shaderLaser,
-						.beamColorLifespan = {
-								.initial  = {colorC[0], colorC[1], colorC[2]},
-								.fadedIn  = {colorC[0], colorC[1], colorC[2]},
-								.fadedOut = {colorC[0], colorC[1], colorC[2]},
-						},
-						.width             = 4.0f,
-						.timeout           = 10u,
-				} );
-
-				effectsSystem->spawnTransientBeamEffect( firstOffsetPos, secondOffsetPos, {
-						.material          = cgs.media.shaderLaser,
-						.beamColorLifespan = {
-								.initial  = {colorC[0], colorC[1], colorC[2]},
-								.fadedIn  = {colorC[0], colorC[1], colorC[2]},
-								.fadedOut = {colorC[0], colorC[1], colorC[2]},
-						},
-						.width             = 4.0f,
-						.timeout           = 10u,
-				} );
+				if( v_showVectorsToLim.get() ) {
+					effectsSystem->spawnTransientBeamEffect( firstOffsetPos, secondOffsetPos, {
+							.material          = cgs.media.shaderLaser,
+							.beamColorLifespan = {
+									.initial  = {colorC[0], colorC[1], colorC[2]},
+									.fadedIn  = {colorC[0], colorC[1], colorC[2]},
+									.fadedOut = {colorC[0], colorC[1], colorC[2]},
+							},
+							.width             = 4.0f,
+							.timeout           = 10u,
+					} );
+				}
 			}
 		}
 		SimulatedHullsSystem::DynamicCageCoordinate posOnTriCoord = {
@@ -3829,18 +3810,19 @@ void SimulatedHullsSystem::BaseDynamicCageHull::simulate( int64_t currTime, floa
 			vertexPosFromDynamicCage( meshVertCoords[secondVertex], scale, cageTris, vertexPositions, vertexNormals, limitsAtDirections, 0.0f,
 									  secondPosition );
 
-			if ((( v_triIdx.get() < 0 ) && (( triNum + cg.time ) % 4 == 1 )) || triNum == v_triIdx.get()) {
-				effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
-						.material          = cgs.media.shaderLaser,
-						.beamColorLifespan = {
-								.initial  = {colorD[0], colorD[1], colorD[2]},
-								.fadedIn  = {colorD[0], colorD[1], colorD[2]},
-								.fadedOut = {colorD[0], colorD[1], colorD[2]},
-						},
-						.width             = 4.0f,
-						.timeout           = 10u
-				} );
-
+			if( v_showMeshToRender.get() ){
+				if ((( v_triIdx.get() < 0 ) && (( triNum + cg.time ) % 4 == 1 )) || triNum == v_triIdx.get()) {
+					effectsSystem->spawnTransientBeamEffect( firstPosition, secondPosition, {
+							.material          = cgs.media.shaderLaser,
+							.beamColorLifespan = {
+									.initial  = {colorD[0], colorD[1], colorD[2]},
+									.fadedIn  = {colorD[0], colorD[1], colorD[2]},
+									.fadedOut = {colorD[0], colorD[1], colorD[2]},
+							},
+							.width             = 4.0f,
+							.timeout           = 10u
+					} );
+				}
 			}
 		}
 	}
@@ -4762,17 +4744,34 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::getStorageRequirements( const f
         } else {
             LODtoRender = m_chosenSubdivLevel;
         }
-		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
 
-		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
-			meshToRender = currLOD;
-			nextLOD = currLOD->nextLOD;
+		if( m_shared->hullType == HullType::StaticHull ){ // should be a better way to do this, code is 1:1 identical only type differs, use separate templated function?
+			StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+
+			for ( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr;
+				  currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+				meshToRender = currLOD;
+				nextLOD = currLOD->nextLOD;
+			}
+			// TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
+			m_shared->staticCagedMeshToRender = meshToRender; // assign the appropriate LOD
+
+			numVertices = meshToRender->numVertices;
+			numIndices = meshToRender->triIndices.size() * 3;
+		} else {
+			DynamicCagedMesh *meshToRender = m_shared->dynamicCagedMeshToRender;
+
+			for ( DynamicCagedMesh *currLOD = meshToRender, *nextLOD = nullptr;
+				  currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+				meshToRender = currLOD;
+				nextLOD = currLOD->nextLOD;
+			}
+			// TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
+			m_shared->dynamicCagedMeshToRender = meshToRender; // assign the appropriate LOD
+
+			numVertices = meshToRender->numVertices;
+			numIndices = meshToRender->triIndices.size() * 3;
 		}
-        // TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
-        m_shared->staticCagedMeshToRender = meshToRender; // assign the appropriate LOD
-
-		numVertices = meshToRender->numVertices;
-		numIndices  = meshToRender->triIndices.size() * 3;
 	} else {
 		const IcosphereData &chosenLevelData = ::basicHullsHolder.getIcosphereForLevel( m_chosenSubdivLevel );
 		numVertices = chosenLevelData.vertices.size();
@@ -4844,16 +4843,31 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::getStorageRequirements( const f
 			LODtoRender = m_chosenSubdivLevel;
             cgNotice() << "lod to render in get storage" << LODtoRender;
 		}
-		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+		if( m_shared->hullType == HullType::StaticHull ){
+			StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
 
-		for( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr; currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
-			meshToRender = currLOD;
-			nextLOD = currLOD->nextLOD;
+			for ( StaticCagedMesh *currLOD = meshToRender, *nextLOD = nullptr;
+				  currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+				meshToRender = currLOD;
+				nextLOD = currLOD->nextLOD;
+			}
+			// TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
+			m_shared->staticCagedMeshToRender = meshToRender; // assign the appropriate LOD
+
+			numGridVertices = meshToRender->numVertices * m_fractionOfParticlesToRender;
+		} else {
+			DynamicCagedMesh *meshToRender = m_shared->dynamicCagedMeshToRender;
+
+			for ( DynamicCagedMesh *currLOD = meshToRender, *nextLOD = nullptr;
+				  currLOD && ( LODnum <= LODtoRender ); currLOD = nextLOD, LODnum++ ) {
+				meshToRender = currLOD;
+				nextLOD = currLOD->nextLOD;
+			}
+			// TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
+			m_shared->dynamicCagedMeshToRender = meshToRender; // assign the appropriate LOD
+
+			numGridVertices = meshToRender->numVertices * m_fractionOfParticlesToRender;
 		}
-		// TODO: won't reassigning m_shared->staticCagedMeshToRender like this in this stage confuse others?
-		m_shared->staticCagedMeshToRender = meshToRender; // assign the appropriate LOD
-
-		numGridVertices = meshToRender->numVertices * m_fractionOfParticlesToRender;
 		cgNotice() << "grid vertices:" << numGridVertices;
 	}
 
@@ -5036,31 +5050,54 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 	} else {
         const auto before = Sys_Microseconds();
 
-        // the correct LOD has already been assigned in getSotrageRequirements()
-		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+		const float *offsetsFromLim;
+		unsigned numFrames;
+		unsigned numTris;
+		unsigned numVerts;
+		const tri *meshTriIndices;
+		const vec2_t *UVCoords;
+		unsigned numShadingLayers;
+		const ShadingLayer *shadingLayers;
+		if( m_shared->hullType == HullType::StaticHull ) {
+			// the correct LOD has already been assigned in getSotrageRequirements()
+			StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+			offsetsFromLim   = meshToRender->offsetFromLim;
+			numFrames        = meshToRender->numFrames;
+			numTris          = meshToRender->triIndices.size();
+			numVerts         = meshToRender->numVertices;
+			meshTriIndices   = meshToRender->triIndices.data();
+			UVCoords         = meshToRender->UVCoords;
+			numShadingLayers = meshToRender->numShadingLayers;
+			shadingLayers    = meshToRender->shadingLayers;
+		} else {
+			// the correct LOD has already been assigned in getSotrageRequirements()
+			DynamicCagedMesh *meshToRender = m_shared->dynamicCagedMeshToRender;
+			//vertCoords       = meshToRender->vertexCoordinates;
+			offsetsFromLim   = meshToRender->offsetFromLim;
+			numFrames        = meshToRender->numFrames;
+			numTris          = meshToRender->triIndices.size();
+			numVerts         = meshToRender->numVertices;
+			meshTriIndices   = meshToRender->triIndices.data();
+			UVCoords         = meshToRender->UVCoords;
+			numShadingLayers = meshToRender->numShadingLayers;
+			shadingLayers    = meshToRender->shadingLayers;
+		}
+
         const float lifetimeFrac = m_shared->lifetimeFrac;
 
 		// write positions to destPositions
 		// memcpy indices from mesh to render
-        const unsigned numFrames  = meshToRender->numFrames;
-		const unsigned numTris    = meshToRender->triIndices.size();
 		const unsigned numIndices = numTris * 3;
-        const unsigned numVerts   = meshToRender->numVertices;
 
         numResultVertices = numVerts;
         numResultIndices  = numIndices;
 
-        const tri *meshTriIndices = meshToRender->triIndices.data();
-
 		std::memcpy( destIndices, meshTriIndices, sizeof( uint16_t ) * numIndices );
-        std::memcpy( destTexCoords, meshToRender->UVCoords, sizeof( vec2_t ) * numVerts );
+        std::memcpy( destTexCoords, UVCoords, sizeof( vec2_t ) * numVerts );
 
         const tri *cageTriIndices = m_shared->cageTriIndices;
-        const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
-		const float *offsetsFromLim = meshToRender->offsetFromLim;
 
         const float *limitsAtDirections    = m_shared->limitsAtDirections;
-        const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
         const float scale                  = m_shared->scale;
         const float *origin                = m_shared->origin;
 
@@ -5084,39 +5121,84 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
         VectorSet( color, 0.99f, 0.4f, 0.1f );
 
 		const auto beforeConstruct = Sys_Microseconds();
-        for( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
-            unsigned currFrameVertIdx = currFrameStartVertIdx + vertNum;
-			unsigned nextFrameVertIdx = nextFrameStartVertIdx + vertNum;
-			vec3_t nextPositionContrib;
+		if( m_shared->hullType == HullType::StaticHull ){
+			StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+			const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
 
-			vertexPosFromStaticCage( vertCoords[currFrameVertIdx], scale * complementFrac, cageTriIndices,
-									 vertexMoveDirections, limitsAtDirections, offsetsFromLim[currFrameVertIdx],
-									 destPositions[vertNum] );
-			vertexPosFromStaticCage( vertCoords[nextFrameVertIdx], scale * lerpFrac, cageTriIndices,
-									 vertexMoveDirections, limitsAtDirections, offsetsFromLim[nextFrameVertIdx],
-									 nextPositionContrib );
-			VectorAdd( destPositions[vertNum], nextPositionContrib, destPositions[vertNum] );
-			VectorAdd( destPositions[vertNum], origin, destPositions[vertNum] );
+			const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
+			for ( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
+				unsigned currFrameVertIdx = currFrameStartVertIdx + vertNum;
+				unsigned nextFrameVertIdx = nextFrameStartVertIdx + vertNum;
+				vec3_t nextPositionContrib;
 
-            if( vertCoords[currFrameVertIdx].cageTriIdx == v_triIdx.get() ){
-                vec3_t to;
-                VectorSubtract( destPositions[vertNum], origin, to );
-                VectorScale( to, 1.15f, to );
-                VectorAdd( to, origin, to );
-                cg.polyEffectsSystem.spawnTransientBeamEffect( destPositions[vertNum], to, {
-                        .material          = cgs.media.shaderLaser,
-                        .beamColorLifespan = {
-                                .initial  = {color[0], color[1], color[2]},
-                                .fadedIn  = {color[0], color[1], color[2]},
-                                .fadedOut = {color[0], color[1], color[2]},
-                        },
-                        .width             = 4.5f,
-                        .timeout           = v_trisLifetime.get(),
-                } );
-            }
+				vertexPosFromStaticCage( vertCoords[currFrameVertIdx], scale * complementFrac, cageTriIndices,
+										 vertexMoveDirections, limitsAtDirections, offsetsFromLim[currFrameVertIdx],
+										 destPositions[vertNum] );
+				vertexPosFromStaticCage( vertCoords[nextFrameVertIdx], scale * lerpFrac, cageTriIndices,
+										 vertexMoveDirections, limitsAtDirections, offsetsFromLim[nextFrameVertIdx],
+										 nextPositionContrib );
+				VectorAdd( destPositions[vertNum], nextPositionContrib, destPositions[vertNum] );
+				VectorAdd( destPositions[vertNum], origin, destPositions[vertNum] );
+				destPositions[vertNum][3] = 1.0f;
 
-            destPositions[vertNum][3] = 1.0f;
-        }
+//				if ( vertCoords[currFrameVertIdx].cageTriIdx == v_triIdx.get()) {
+//					vec3_t to;
+//					VectorSubtract( destPositions[vertNum], origin, to );
+//					VectorScale( to, 1.15f, to );
+//					VectorAdd( to, origin, to );
+//					cg.polyEffectsSystem.spawnTransientBeamEffect( destPositions[vertNum], to, {
+//							.material          = cgs.media.shaderLaser,
+//							.beamColorLifespan = {
+//									.initial  = {color[0], color[1], color[2]},
+//									.fadedIn  = {color[0], color[1], color[2]},
+//									.fadedOut = {color[0], color[1], color[2]},
+//							},
+//							.width             = 4.5f,
+//							.timeout           = v_trisLifetime.get(),
+//					} );
+//				}
+			}
+        } else {
+			DynamicCagedMesh *meshToRender = m_shared->dynamicCagedMeshToRender;
+			const DynamicCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
+
+			const vec3_t *cageVertexPositions = m_shared->cageVertexPositions;
+			const vec3_t *vertexNormals   = m_shared->cageVertexNormals;
+
+			for ( unsigned vertNum = 0; vertNum < numVerts; vertNum++ ) {
+				unsigned currFrameVertIdx = currFrameStartVertIdx + vertNum;
+				unsigned nextFrameVertIdx = nextFrameStartVertIdx + vertNum;
+
+				vec3_t prevPosition;
+				vec3_t nextPosition;
+
+				vertexPosFromDynamicCage( vertCoords[currFrameVertIdx], scale, cageTriIndices,
+										  cageVertexPositions, vertexNormals, limitsAtDirections,
+										  offsetsFromLim[currFrameVertIdx], prevPosition );
+				vertexPosFromDynamicCage( vertCoords[nextFrameVertIdx], scale, cageTriIndices,
+										  cageVertexPositions, vertexNormals, limitsAtDirections,
+										 offsetsFromLim[nextFrameVertIdx], nextPosition );
+				VectorLerp( prevPosition, lerpFrac, nextPosition, destPositions[vertNum] );
+				destPositions[vertNum][3] = 1.0f;
+
+//				if ( vertCoords[currFrameVertIdx].cageTriIdx == v_triIdx.get()) {
+//					vec3_t to;
+//					VectorSubtract( destPositions[vertNum], origin, to );
+//					VectorScale( to, 1.15f, to );
+//					VectorAdd( to, origin, to );
+//					cg.polyEffectsSystem.spawnTransientBeamEffect( destPositions[vertNum], to, {
+//							.material          = cgs.media.shaderLaser,
+//							.beamColorLifespan = {
+//									.initial  = {color[0], color[1], color[2]},
+//									.fadedIn  = {color[0], color[1], color[2]},
+//									.fadedOut = {color[0], color[1], color[2]},
+//							},
+//							.width             = 4.5f,
+//							.timeout           = v_trisLifetime.get(),
+//					} );
+//				}
+			}
+		}
 		if( v_showConstructPerf.get() ) {
 			Com_Printf( "Construction took %d micros for %d vertices and %d indices\n",
 						(int) (Sys_Microseconds() - beforeConstruct), (int) numResultVertices, (int) numResultIndices );
@@ -5125,10 +5207,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 		bool needsViewDotResults = false;
 		float *viewDotResults    = nullptr;
 
-		const unsigned numShadingLayers = meshToRender->numShadingLayers;
-
 		for(  unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
-			const ShadingLayer &layer = meshToRender->shadingLayers[layerNum];
+			const ShadingLayer &layer = shadingLayers[layerNum];
 			if( !std::holds_alternative<MaskedShadingLayer>( layer ) ) {
 				assert( std::holds_alternative<DotShadingLayer>( layer ) || std::holds_alternative<CombinedShadingLayer>( layer ) );
 				needsViewDotResults = true;
@@ -5200,8 +5280,8 @@ auto SimulatedHullsSystem::HullSolidDynamicMesh::fillMeshBuffers( const float *_
 
 
 		for( unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
-			const ShadingLayer &prevShadingLayer = meshToRender->shadingLayers[currFrame * numShadingLayers + layerNum];
-			const ShadingLayer &nextShadingLayer = meshToRender->shadingLayers[nextFrame * numShadingLayers + layerNum];
+			const ShadingLayer &prevShadingLayer = shadingLayers[currFrame * numShadingLayers + layerNum];
+			const ShadingLayer &nextShadingLayer = shadingLayers[nextFrame * numShadingLayers + layerNum];
 
 			const auto beforeLayer = Sys_Microseconds();
 			if( const auto *const prevMaskedLayer = std::get_if<MaskedShadingLayer>( &prevShadingLayer ) ) {
@@ -5478,13 +5558,41 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
             numResultIndices += 6;
         } while (++vertexNum < m_vertexNumLimitThisFrame);
     } else {
-		// the correct LOD has already been assigned in getSotrageRequirements()
-		StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+		const StaticCageCoordinate *vertCoords;
+		const float *offsetsFromLim;
+		unsigned numFrames;
+		unsigned numTris;
+		unsigned numGridVerts;
+		const tri *meshTriIndices;
+		unsigned numShadingLayers;
+		const ShadingLayer *shadingLayers;
+		if( m_shared->hullType == HullType::StaticHull ) {
+			// the correct LOD has already been assigned in getSotrageRequirements()
+			StaticCagedMesh *meshToRender = m_shared->staticCagedMeshToRender;
+			vertCoords       = meshToRender->vertexCoordinates;
+			offsetsFromLim   = meshToRender->offsetFromLim;
+			numFrames        = meshToRender->numFrames;
+			numTris          = meshToRender->triIndices.size();
+			numGridVerts     = meshToRender->numVertices;
+			meshTriIndices   = meshToRender->triIndices.data();
+			numShadingLayers = meshToRender->numShadingLayers;
+			shadingLayers    = meshToRender->shadingLayers;
+		} else {
+			// the correct LOD has already been assigned in getSotrageRequirements()
+			DynamicCagedMesh *meshToRender = m_shared->dynamicCagedMeshToRender;
+			//vertCoords       = meshToRender->vertexCoordinates;
+			offsetsFromLim   = meshToRender->offsetFromLim;
+			numFrames        = meshToRender->numFrames;
+			numTris          = meshToRender->triIndices.size();
+			numGridVerts     = meshToRender->numVertices;
+			meshTriIndices   = meshToRender->triIndices.data();
+			numShadingLayers = meshToRender->numShadingLayers;
+			shadingLayers    = meshToRender->shadingLayers;
+		}
+
 		const float lifetimeFrac = m_shared->lifetimeFrac;
 
 		const tri *cageTriIndices = m_shared->cageTriIndices;
-		const StaticCageCoordinate *vertCoords = meshToRender->vertexCoordinates;
-        const float *offsetsFromLim = meshToRender->offsetFromLim;
 
 		const float *limitsAtDirections    = m_shared->limitsAtDirections;
 		const vec3_t *vertexMoveDirections = m_shared->cageVertexPositions;
@@ -5493,15 +5601,11 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
 
 		// write positions to destPositions
 		// memcpy indices from mesh to render
-		const unsigned numFrames    = meshToRender->numFrames;
-        const unsigned numTris      = meshToRender->triIndices.size();
-		const unsigned numGridVerts = meshToRender->numVertices;
 
         const float fractionOfParticlesToRender = m_fractionOfParticlesToRender;
         const auto numParticlesToRender         = (unsigned)( fractionOfParticlesToRender * numGridVerts );
         const float rcpFractionToRender         = 1 / fractionOfParticlesToRender;
 
-        const tri *meshTriIndices = meshToRender->triIndices.data();
 
         unsigned currFrame;
         float lerpFrac;
@@ -5522,10 +5626,9 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
         float *viewDotResults      = nullptr;
         vec3_t *gridVertexPosition = nullptr;
 
-        const unsigned numShadingLayers = meshToRender->numShadingLayers;
 
         for(  unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
-            const ShadingLayer &layer = meshToRender->shadingLayers[layerNum];
+            const ShadingLayer &layer = shadingLayers[layerNum];
             if( !std::holds_alternative<MaskedShadingLayer>( layer ) ) {
                 assert( std::holds_alternative<DotShadingLayer>( layer ) || std::holds_alternative<CombinedShadingLayer>( layer ) );
                 needsViewDotResults = true;
@@ -5769,9 +5872,9 @@ auto SimulatedHullsSystem::HullCloudDynamicMesh::fillMeshBuffers( const float *_
         }
 
         for( unsigned layerNum = 0; layerNum < numShadingLayers; ++layerNum ) {
-            const ShadingLayer &prevShadingLayer = meshToRender->shadingLayers[currFrame * numShadingLayers +
+            const ShadingLayer &prevShadingLayer = shadingLayers[currFrame * numShadingLayers +
                                                                                layerNum];
-            const ShadingLayer &nextShadingLayer = meshToRender->shadingLayers[nextFrame * numShadingLayers +
+            const ShadingLayer &nextShadingLayer = shadingLayers[nextFrame * numShadingLayers +
                                                                                layerNum];
 
             const auto beforeLayer = Sys_Microseconds();
